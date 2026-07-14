@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gpx xmlns="http://www.topografix.com/GPX/1/1" xmlns:gpxx="http://www.garmin.com/xmlschemas/GpxExtensions/v3" version="1.1" creator="waypointer-tests">
+  <wpt lat="48.8600" lon="2.3600">
+    <name>Existing WPT</name>
+    <extensions>
+      <gpxx:WaypointExtension>
+        <gpxx:DisplayMode>SymbolAndName</gpxx:DisplayMode>
+      </gpxx:WaypointExtension>
+    </extensions>
+  </wpt>
+  <trk>
+    <name>Test Route</name>
+    <trkseg>
+      <trkpt lat="48.8566" lon="2.3522"><ele>35.0</ele></trkpt>
+      <trkpt lat="48.8570" lon="2.3530"><ele>36.0</ele></trkpt>
+      <trkpt lat="48.8575" lon="2.3540"><ele>37.0</ele></trkpt>
+    </trkseg>
+  </trk>
+</gpx>

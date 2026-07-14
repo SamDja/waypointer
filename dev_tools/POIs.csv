@@ -1,0 +1,55 @@
+Wahoo,Strava,RideWithGPS,komoot
+warning,Alert,Caution,
+first_aid,Aid Station,"Aid Station + First Aid",
+hospital,,Hospital,
+pharmacy,Pharmacy,,
+water,Water Source,Water,"Public Water Fountains"
+bar,Bars,Bar,
+bike_shop,Bike Shop,Bike Shop,Bike Repair
+coffee,Coffee,Coffee,
+food,Restaurant,Food,Food and Drink
+gas_station,,Gas Station,
+groceries,Grocery,"Convenience Store",
+shopping,,Shopping,Shops
+winery,,Winery,
+info,,Information,
+internet,,,"Internet Hot Spots"
+library,,Library,
+lodging,Lodging,Lodging,Accommodation
+shower,,Shower,
+toilet,Restroom,Restroom,Public Toilets
+bike_parking,,Bike Parking,
+bike_share,,Bike Share,
+chairlift,,,"Cable Cars & Chairlifts"
+e_bike_charging,,,"E-Bike Charging Points"
+ferry,,Ferry,
+parking,Parking,Parking,Parking
+transit,,Transit Center,"Train Stations and Bus Stops"
+campsite,Camp site,Camping,
+dog_park,,,For Dogs
+geocache,,Geocache,
+park,Park,Park,Parks
+rest_area,Rest area,Rest Stop,"Shelter + Benches and Picnic Areas"
+swimming,Beach,Swimming,Beaches and Swimming Pools
+trailhead,Trailhead,Trailhead,
+summit,Peak,Summit,Mountain Passes
+valley,,,
+checkpoint,Checkpoint,,Stamp Station
+climb_4th_cat,,Climb Cat 4,
+climb_3rd_cat,,Climb Cat 3,
+climb_2nd_cat,,Climb Cat 2,
+climb_1st_cat,,Climb Cat 1,
+climb_hors_cat,,Climb Cat HC,
+distance_marker,Distance marker,,
+meeting_spot,Meeting spot,,
+segment_start,Segment start,Segment Start,
+segment_end,Segment end,Segment End,
+sprint,,Sprint,
+transition,Transition zone,,
+atm,,ATM,ATMs
+art,Art,,
+attraction,Attraction,,
+for_kids,,,For the Kids
+monument,Monument,Monument,Points of Interest
+viewpoint,Viewpoint,Viewpoint,Natural Sights
+generic,Generic,,

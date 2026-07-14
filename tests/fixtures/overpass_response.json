@@ -1,0 +1,25 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API",
+  "elements": [
+    {
+      "type": "node",
+      "id": 1001,
+      "lat": 48.8567,
+      "lon": 2.3524,
+      "tags": {
+        "amenity": "drinking_water",
+        "name": "Fontaine Wallace"
+      }
+    },
+    {
+      "type": "node",
+      "id": 1002,
+      "lat": 48.8600,
+      "lon": 2.3600,
+      "tags": {
+        "amenity": "drinking_water"
+      }
+    }
+  ]
+}
