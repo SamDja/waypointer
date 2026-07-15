@@ -7,8 +7,8 @@ from dataclasses import dataclass
 
 import requests
 
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-# OVERPASS_URL = "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+# OVERPASS_URL = "https://overpass-api.de/api/interpreter"
+OVERPASS_URL = "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
 
 CACHE_TTL_S = 600.0
 # Overpass's server rejects requests carrying the default python-requests
@@ -32,7 +32,7 @@ class OsmNode:
 def build_overpass_query(
     coords: list[tuple[float, float]],
     tag_filter: str = 'node["amenity"="drinking_water"]',
-    radius_m: int = 50,
+    radius_m: int = 10,
     timeout_s: int = 90,
 ) -> str:
     """Builds an Overpass QL query matching tag_filter within radius_m of the

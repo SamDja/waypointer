@@ -17,8 +17,6 @@ import gpxpy.gpx
 
 from waypointer.osm import OsmNode
 
-DEFAULT_WAYPOINT_NAME = "Water Fountain"
-
 
 class OutputFormat(Enum):
     GPX = "gpx"
@@ -51,8 +49,10 @@ def build_waypoint(
     """Pure OSM node + profile -> populated GPXWaypoint. Does not attach the
     dedup marker extension - that's gpx_io's concern, keeping this module
     unaware of GPX extension/dedup mechanics. Only called for GPX profiles.
+    The caller (main.py) always resolves a non-empty name via the POI type
+    registry before constructing the node, so no fallback is needed here.
     """
-    name = node.tags.get("name") or DEFAULT_WAYPOINT_NAME
+    name = node.tags.get("name", "")
     return gpxpy.gpx.GPXWaypoint(
         latitude=node.lat,
         longitude=node.lon,

@@ -1,5 +1,4 @@
 from waypointer.device_profiles import (
-    DEFAULT_WAYPOINT_NAME,
     DEVICE_PROFILES,
     DeviceProfile,
     OutputFormat,
@@ -23,10 +22,13 @@ def test_build_waypoint_uses_osm_name():
     assert "10m" in wpt.description
 
 
-def test_build_waypoint_falls_back_to_default_name():
+def test_build_waypoint_has_no_fallback_name():
+    # Fallback-name resolution (POI_TYPES[...].default_name) is main.py's
+    # responsibility now, so build_waypoint just reflects whatever name tag
+    # it was given - including an absent one.
     node = OsmNode(id=2, lat=1.0, lon=2.0, tags={})
     wpt = build_waypoint(node, GENERIC_PROFILE, distance_m=5.0)
-    assert wpt.name == DEFAULT_WAYPOINT_NAME
+    assert wpt.name == ""
 
 
 def test_build_waypoint_uses_profile_symbol():

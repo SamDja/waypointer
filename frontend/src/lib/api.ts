@@ -1,4 +1,4 @@
-import type { Candidate, FindFountainsResponse } from "@/types/candidate"
+import type { Candidate, FindPoisResponse, PoiSearchConfig } from "@/types/candidate"
 
 export class ApiError extends Error {}
 
@@ -7,15 +7,16 @@ async function errorDetail(response: Response, fallback: string): Promise<string
   return data && typeof data.detail === "string" ? data.detail : fallback
 }
 
-export async function findFountains(gpxFile: File): Promise<FindFountainsResponse> {
+export async function findPois(gpxFile: File, poiConfig: PoiSearchConfig[]): Promise<FindPoisResponse> {
   const formData = new FormData()
   formData.append("gpx_file", gpxFile)
+  formData.append("poi_config", JSON.stringify(poiConfig))
 
-  const response = await fetch("/api/find-fountains", { method: "POST", body: formData })
+  const response = await fetch("/api/find-pois", { method: "POST", body: formData })
   if (!response.ok) {
     throw new ApiError(await errorDetail(response, "Request failed."))
   }
-  return (await response.json()) as FindFountainsResponse
+  return (await response.json()) as FindPoisResponse
 }
 
 export interface SaveParams {
@@ -23,6 +24,7 @@ export interface SaveParams {
   selectedCandidates: Candidate[]
   device: string
   waterSymbol: string
+  discardedWaypointIndices: number[]
 }
 
 export interface SaveResult {
@@ -35,12 +37,14 @@ export async function saveRoute({
   selectedCandidates,
   device,
   waterSymbol,
+  discardedWaypointIndices,
 }: SaveParams): Promise<SaveResult> {
   const formData = new FormData()
   formData.append("gpx_file", gpxFile)
   formData.append("selected_candidates", JSON.stringify(selectedCandidates))
   formData.append("device", device)
   formData.append("water_symbol", waterSymbol)
+  formData.append("discarded_waypoint_indices", JSON.stringify(discardedWaypointIndices))
 
   const response = await fetch("/api/save", { method: "POST", body: formData })
   if (!response.ok) {

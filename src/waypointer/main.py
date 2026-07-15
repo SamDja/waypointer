@@ -1,12 +1,13 @@
 """FastAPI app: two stateless endpoints plus the static frontend.
 
 No server-side session/user state is kept between requests - the frontend
-holds candidate data from /api/find-fountains and resubmits the selected
-ones (plus the original file) to /api/save, so one visitor's data never
-touches another's and a second Overpass query isn't needed on save.
+holds candidate data from /api/find-pois and resubmits the selected ones
+(plus the original file) to /api/save, so one visitor's data never touches
+another's and a second Overpass query isn't needed on save.
 """
 
 import dataclasses
+import math
 import os
 import re
 from pathlib import Path
@@ -22,6 +23,7 @@ from waypointer.fit_io import FitFountain, build_course_fit_bytes
 from waypointer.geometry import LatLon, point_to_polyline_distance_m, simplify_rdp
 from waypointer.gpx_io import (
     add_waypoints,
+    discard_waypoints,
     is_duplicate_candidate,
     make_waypoint,
     parse_gpx,
@@ -29,19 +31,24 @@ from waypointer.gpx_io import (
     to_xml_bytes,
 )
 from waypointer.osm import OsmNode, OverpassError, build_overpass_query, query_overpass
+from waypointer.poi_types import POI_TYPES, clamp_distance_m
 from waypointer.rate_limit import rate_limit
-from waypointer.schemas import Candidate, FindFountainsResponse
+from waypointer.schemas import Candidate, ExistingWaypoint, FindPoisResponse, PoiSearchConfig
 
 # Built by `npm run build` in frontend/ (or the Docker image's Node build
 # stage) - not present until that's run, so the frontend mount below is
 # guarded rather than assumed to exist for backend-only local dev.
 FRONTEND_DIST_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
+# How far simplify_rdp is allowed to let the simplified route wander from
+# the true route - see the Overpass radius padding in find_pois() below,
+# which depends on this bound to avoid missing genuinely-in-range nodes.
 SIMPLIFY_TOLERANCE_M = 8.0
-MATCH_RADIUS_M = 50.0
 
 app = FastAPI(title="Waypointer")
 
 _selected_candidates_adapter = TypeAdapter(list[Candidate])
+_poi_config_adapter = TypeAdapter(list[PoiSearchConfig])
+_discarded_indices_adapter = TypeAdapter(list[int])
 
 
 async def _read_gpx_upload(gpx_file: UploadFile) -> tuple[GPX, list[LatLon]]:
@@ -59,42 +66,82 @@ async def _read_gpx_upload(gpx_file: UploadFile) -> tuple[GPX, list[LatLon]]:
     return gpx, coords
 
 
-@app.post("/api/find-fountains", response_model=FindFountainsResponse, dependencies=[Depends(rate_limit)])
-async def find_fountains(gpx_file: UploadFile) -> FindFountainsResponse:
+def _default_poi_config() -> list[PoiSearchConfig]:
+    water = POI_TYPES["water"]
+    return [PoiSearchConfig(poi_type=water.key, max_distance_m=water.default_max_distance_m)]
+
+
+@app.post("/api/find-pois", response_model=FindPoisResponse, dependencies=[Depends(rate_limit)])
+async def find_pois(
+    gpx_file: UploadFile,
+    poi_config: str | None = Form(None),
+) -> FindPoisResponse:
     gpx, coords = await _read_gpx_upload(gpx_file)
 
+    if poi_config is None:
+        requested = _default_poi_config()
+    else:
+        try:
+            requested = _poi_config_adapter.validate_json(poi_config)
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid poi_config: {exc}") from exc
+
     simplified = simplify_rdp(coords, tolerance_m=SIMPLIFY_TOLERANCE_M)
-    query = build_overpass_query(simplified, radius_m=int(MATCH_RADIUS_M))
-    try:
-        nodes = query_overpass(query)
-    except OverpassError as exc:
-        raise HTTPException(
-            status_code=502, detail=f"Failed to query OpenStreetMap: {exc}"
-        ) from exc
 
     candidates: list[Candidate] = []
-    for node in nodes:
-        if is_duplicate_candidate(node, gpx):
-            continue
-        # Authoritative distance check against the full-resolution route,
-        # never the simplified one used only to build the Overpass query.
-        distance_m = point_to_polyline_distance_m((node.lat, node.lon), coords)
-        if distance_m <= MATCH_RADIUS_M:
-            candidates.append(
-                Candidate(
-                    osm_id=node.id,
-                    name=node.tags.get("name"),
-                    lat=node.lat,
-                    lon=node.lon,
-                    distance_m=distance_m,
+    for entry in requested:
+        cfg = POI_TYPES.get(entry.poi_type)
+        if cfg is None:
+            raise HTTPException(status_code=400, detail=f"Unknown poi_type: {entry.poi_type}")
+        radius_m = clamp_distance_m(entry.poi_type, entry.max_distance_m)
+
+        # The Overpass query runs against the simplified route, which can
+        # sit up to SIMPLIFY_TOLERANCE_M away from the true route at any
+        # given point (that's the RDP tolerance). Searching Overpass at the
+        # exact requested radius would miss nodes that are genuinely within
+        # radius_m of the true route but happen to be farther than that from
+        # the simplified line - so the Overpass-side radius is padded by the
+        # simplification tolerance. The authoritative check below still uses
+        # the exact radius_m against the full-resolution route, so this
+        # can't introduce false positives, only prevents false negatives.
+        overpass_radius_m = radius_m + SIMPLIFY_TOLERANCE_M
+        query = build_overpass_query(simplified, tag_filter=cfg.tag_filter, radius_m=math.ceil(overpass_radius_m))
+        try:
+            nodes = query_overpass(query)
+        except OverpassError as exc:
+            raise HTTPException(
+                status_code=502, detail=f"Failed to query OpenStreetMap: {exc}"
+            ) from exc
+
+        for node in nodes:
+            if is_duplicate_candidate(node, gpx):
+                continue
+            # Authoritative distance check against the full-resolution
+            # route, never the simplified one used only to build the
+            # Overpass query - and against this type's own clamped radius,
+            # not a global constant.
+            distance_m = point_to_polyline_distance_m((node.lat, node.lon), coords)
+            if distance_m <= radius_m:
+                candidates.append(
+                    Candidate(
+                        osm_id=node.id,
+                        poi_type=entry.poi_type,
+                        name=node.tags.get("name"),
+                        lat=node.lat,
+                        lon=node.lon,
+                        distance_m=distance_m,
+                    )
                 )
-            )
 
     candidates.sort(key=lambda c: c.distance_m)
-    return FindFountainsResponse(
+    existing_waypoints = [
+        ExistingWaypoint(index=i, name=w.name, lat=w.latitude, lon=w.longitude)
+        for i, w in enumerate(gpx.waypoints)
+    ]
+    return FindPoisResponse(
         candidates=candidates,
         point_count=len(coords),
-        existing_waypoint_count=len(gpx.waypoints),
+        existing_waypoints=existing_waypoints,
         route_coords=simplified,
     )
 
@@ -111,6 +158,7 @@ async def save(
     selected_candidates: str = Form(...),
     device: str = Form(DEFAULT_DEVICE_KEY),
     water_symbol: str = Form("Water"),
+    discarded_waypoint_indices: str = Form("[]"),
 ) -> Response:
     gpx, coords = await _read_gpx_upload(gpx_file)
 
@@ -119,15 +167,29 @@ async def save(
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid selection data: {exc}") from exc
 
+    try:
+        discarded_indices = set(_discarded_indices_adapter.validate_json(discarded_waypoint_indices))
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid discarded waypoint indices: {exc}"
+        ) from exc
+    # Indices refer to gpx.waypoints' original, pre-discard order, so this
+    # must run before add_waypoints appends any newly selected candidates.
+    discard_waypoints(gpx, discarded_indices)
+
     profile = DEVICE_PROFILES.get(device)
     if profile is None:
         raise HTTPException(status_code=400, detail=f"Unknown device: {device}")
+
+    def _resolved_name(c: Candidate) -> str:
+        cfg = POI_TYPES.get(c.poi_type, POI_TYPES["water"])
+        return c.name or cfg.default_name
 
     if profile.output_format is OutputFormat.GPX:
         effective_profile = dataclasses.replace(profile, water_symbol=water_symbol.strip() or "Water")
         waypoints = [
             make_waypoint(
-                OsmNode(id=c.osm_id, lat=c.lat, lon=c.lon, tags={"name": c.name} if c.name else {}),
+                OsmNode(id=c.osm_id, lat=c.lat, lon=c.lon, tags={"name": _resolved_name(c)}),
                 effective_profile,
                 c.distance_m,
             )
@@ -138,7 +200,7 @@ async def save(
         media_type = "application/gpx+xml"
         extension = "gpx"
     else:
-        fountains = [FitFountain(lat=c.lat, lon=c.lon, name=c.name) for c in selected]
+        fountains = [FitFountain(lat=c.lat, lon=c.lon, name=_resolved_name(c)) for c in selected]
         content = build_course_fit_bytes(
             coords, fountains, course_name=_safe_filename_stem(gpx_file.filename)
         )

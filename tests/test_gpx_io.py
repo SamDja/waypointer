@@ -2,6 +2,7 @@ from waypointer.device_profiles import DEVICE_PROFILES
 from waypointer.gpx_io import (
     OSM_ID_CLARK_TAG,
     add_waypoints,
+    discard_waypoints,
     existing_osm_ids,
     is_duplicate_candidate,
     make_waypoint,
@@ -66,6 +67,36 @@ def test_is_duplicate_candidate_by_marker(sample_route_bytes):
     # this from the separate proximity-fallback path.
     same_id_different_location = OsmNode(id=7, lat=48.2, lon=2.2, tags={})
     assert is_duplicate_candidate(same_id_different_location, reparsed) is True
+
+
+def test_discard_waypoints_removes_by_original_index(sample_route_bytes):
+    gpx = parse_gpx(sample_route_bytes)
+    assert len(gpx.waypoints) == 1
+
+    discard_waypoints(gpx, {0})
+
+    assert gpx.waypoints == []
+
+
+def test_discard_waypoints_no_op_for_empty_set(sample_route_bytes):
+    gpx = parse_gpx(sample_route_bytes)
+    original = list(gpx.waypoints)
+
+    discard_waypoints(gpx, set())
+
+    assert gpx.waypoints == original
+
+
+def test_discard_waypoints_runs_before_add_waypoints(sample_route_bytes):
+    # Indices refer to the pre-discard, original document order - discarding
+    # must happen before any new waypoints are appended, or a discard index
+    # could accidentally land on a freshly added waypoint instead.
+    gpx = parse_gpx(sample_route_bytes)
+    discard_waypoints(gpx, {0})
+    node = OsmNode(id=1, lat=48.0, lon=2.0, tags={"name": "New Fountain"})
+    add_waypoints(gpx, [make_waypoint(node, DEVICE_PROFILES["generic"], distance_m=1.0)])
+
+    assert [w.name for w in gpx.waypoints] == ["New Fountain"]
 
 
 def test_is_duplicate_candidate_by_proximity_fallback(sample_route_bytes):

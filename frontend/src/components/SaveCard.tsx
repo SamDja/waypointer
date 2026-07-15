@@ -12,12 +12,14 @@ import {
 } from "@/components/ui/select"
 import { ApiError, saveRoute } from "@/lib/api"
 import type { DeviceSettings } from "@/lib/settings"
-import type { Candidate } from "@/types/candidate"
+import type { Candidate, ExistingWaypoint } from "@/types/candidate"
 
 export interface SaveCardProps {
   file: File
   candidates: Candidate[]
   selectedIds: Set<number>
+  existingWaypoints: ExistingWaypoint[]
+  keptWaypointIndices: Set<number>
   settings: DeviceSettings
   onSettingsChange: (settings: DeviceSettings) => void
   onStatus: (message: string, isError: boolean) => void
@@ -27,6 +29,8 @@ export function SaveCard({
   file,
   candidates,
   selectedIds,
+  existingWaypoints,
+  keptWaypointIndices,
   settings,
   onSettingsChange,
   onStatus,
@@ -36,6 +40,9 @@ export function SaveCard({
 
   async function handleSave() {
     const selectedCandidates = candidates.filter((c) => selectedIds.has(c.osm_id))
+    const discardedWaypointIndices = existingWaypoints
+      .filter((w) => !keptWaypointIndices.has(w.index))
+      .map((w) => w.index)
 
     setIsSaving(true)
     onStatus("Saving...", false)
@@ -45,6 +52,7 @@ export function SaveCard({
         selectedCandidates,
         device: settings.device,
         waterSymbol: settings.waterSymbol,
+        discardedWaypointIndices,
       })
 
       const url = URL.createObjectURL(blob)
@@ -106,6 +114,8 @@ export function SaveCard({
           <p className="text-sm text-muted-foreground">
             Exports a ridable FIT course file with the water fountains encoded so the icon
             renders correctly while navigating.
+            {existingWaypoints.length > 0 &&
+              " FIT courses never include the original file's pre-existing waypoints, so the keep/discard choice above only affects GPX exports."}
           </p>
         )}
 

@@ -90,5 +90,14 @@ def add_waypoints(gpx: gpxpy.gpx.GPX, waypoints: list[gpxpy.gpx.GPXWaypoint]) ->
         gpx.nsmap[WAYPOINTER_PREFIX] = WAYPOINTER_NS
 
 
+def discard_waypoints(gpx: gpxpy.gpx.GPX, indices: set[int]) -> None:
+    """Removes gpx.waypoints entries by their position in the original,
+    pre-discard document order (see ExistingWaypoint.index) - in place.
+    Call before add_waypoints, since indices refer to the original list."""
+    if not indices:
+        return
+    gpx.waypoints = [w for i, w in enumerate(gpx.waypoints) if i not in indices]
+
+
 def to_xml_bytes(gpx: gpxpy.gpx.GPX) -> bytes:
     return gpx.to_xml().encode("utf-8")

@@ -1,10 +1,13 @@
 import { useEffect } from "react"
-import { CircleMarker, MapContainer, Polyline, Popup, TileLayer, useMap } from "react-leaflet"
+import { MapContainer, Marker, Polyline, Popup, TileLayer, Tooltip, useMap } from "react-leaflet"
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
-import { Droplet } from "lucide-react"
+import "leaflet-polylinedecorator"
+import { Play, Square } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { buildCircleDivIcon, ROUTE_END_COLOR, ROUTE_START_COLOR } from "@/lib/mapIcons"
+import { POI_TYPES } from "@/lib/poiTypes"
 import type { Candidate } from "@/types/candidate"
 
 export interface RouteMapProps {
@@ -32,6 +35,69 @@ function FitBounds({ routeCoords, candidates }: { routeCoords: [number, number][
   return null
 }
 
+function RouteEndpointMarkers({ routeCoords }: { routeCoords: [number, number][] }) {
+  if (routeCoords.length === 0) return null
+
+  const start = routeCoords[0]
+  const end = routeCoords[routeCoords.length - 1]
+  const isLoop = start[0] === end[0] && start[1] === end[1]
+
+  if (isLoop) {
+    return (
+      <Marker position={start} icon={buildCircleDivIcon({ icon: Play, color: ROUTE_START_COLOR })}>
+        <Tooltip>Start / End</Tooltip>
+      </Marker>
+    )
+  }
+
+  return (
+    <>
+      <Marker position={start} icon={buildCircleDivIcon({ icon: Play, color: ROUTE_START_COLOR })}>
+        <Tooltip>Start</Tooltip>
+      </Marker>
+      <Marker position={end} icon={buildCircleDivIcon({ icon: Square, color: ROUTE_END_COLOR })}>
+        <Tooltip>End</Tooltip>
+      </Marker>
+    </>
+  )
+}
+
+function RouteDirectionArrows({ routeCoords }: { routeCoords: [number, number][] }) {
+  const map = useMap()
+
+  useEffect(() => {
+    if (routeCoords.length < 2) return
+
+    const polyline = L.polyline(routeCoords)
+    const decorator = L.polylineDecorator(polyline, {
+      patterns: [
+        {
+          repeat: 120,
+          symbol: L.Symbol.arrowHead({
+            pixelSize: 10,
+            polygon: false,
+            pathOptions: { stroke: true, color: "#9f2d00", weight: 2},
+          }),
+        },
+      ],
+    })
+    decorator.addTo(map)
+
+    return () => {
+      decorator.remove()
+    }
+  }, [map, routeCoords])
+
+  return null
+}
+
+function PoiTypeLabel({ name, label }: { name: string | null; label: string | undefined }) {
+  if (name) {
+    return (<p className="text-muted-foreground">{label ?? "Point of interest"}</p>)
+  }
+  return null
+}
+
 export function RouteMap({ routeCoords, candidates, selectedIds, onToggle }: RouteMapProps) {
   const hasRoute = routeCoords.length > 0
   const center = hasRoute ? routeCoords[0] : DEFAULT_CENTER
@@ -44,29 +110,30 @@ export function RouteMap({ routeCoords, candidates, selectedIds, onToggle }: Rou
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         />
-        {hasRoute && <Polyline positions={routeCoords} pathOptions={{ color: "#2563eb", weight: 4 }} />}
+        {hasRoute && <Polyline positions={routeCoords} pathOptions={{ color: "#ff6900", weight: 2 }} />}
         {candidates.map((candidate) => {
           const isSelected = selectedIds.has(candidate.osm_id)
           const checkboxId = `map-candidate-${candidate.osm_id}`
+          const poiType = POI_TYPES.find((p) => p.key === candidate.poi_type)
+          const Icon = poiType?.icon ?? POI_TYPES[0].icon
+          const color = poiType?.color ?? POI_TYPES[0].color
           return (
-            <CircleMarker
+            <Marker
               key={candidate.osm_id}
-              center={[candidate.lat, candidate.lon]}
-              radius={8}
-              pathOptions={{
-                color: "#16a34a",
-                fillColor: "#16a34a",
-                fillOpacity: isSelected ? 0.9 : 0.25,
-                opacity: isSelected ? 1 : 0.35,
-              }}
+              position={[candidate.lat, candidate.lon]}
+              icon={buildCircleDivIcon({
+                icon: Icon,
+                color,
+                opacity: isSelected ? 0.9 : 0.35,
+              })}
             >
               <Popup>
                 <div className="flex flex-col gap-2 text-sm">
                   <div className="flex items-center gap-1 font-medium">
-                    <Droplet className="size-4 text-blue-600" />
-                    {candidate.name || "(unnamed)"}
+                    <Icon className="size-4" style={{ color }} />
+                    {candidate.name || (poiType?.label ?? "Point of interest")}
                   </div>
-                  <p className="text-muted-foreground">Drinking water fountain</p>
+                  <PoiTypeLabel name={candidate.name} label={poiType?.label}></PoiTypeLabel>
                   <p className="text-muted-foreground">{candidate.distance_m.toFixed(0)}m from route</p>
                   <div className="flex items-center gap-2">
                     <Checkbox
@@ -80,9 +147,11 @@ export function RouteMap({ routeCoords, candidates, selectedIds, onToggle }: Rou
                   </div>
                 </div>
               </Popup>
-            </CircleMarker>
+            </Marker>
           )
         })}
+        <RouteEndpointMarkers routeCoords={routeCoords} />
+        <RouteDirectionArrows routeCoords={routeCoords} />
         <FitBounds routeCoords={routeCoords} candidates={candidates} />
       </MapContainer>
     </div>
