@@ -159,6 +159,9 @@ export default function App() {
             candidates={findResult?.candidates ?? []}
             selectedIds={selectedIds}
             onToggle={handleToggle}
+            existingWaypoints={findResult?.existing_waypoints ?? []}
+            keptWaypointIndices={keptWaypointIndices}
+            onToggleExistingWaypoint={handleToggleExistingWaypoint}
           />
         </div>
 

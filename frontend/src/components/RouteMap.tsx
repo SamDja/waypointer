@@ -3,24 +3,36 @@ import { MapContainer, Marker, Polyline, Popup, TileLayer, Tooltip, useMap } fro
 import L from "leaflet"
 import "leaflet/dist/leaflet.css"
 import "leaflet-polylinedecorator"
-import { Play, Square } from "lucide-react"
+import { MapPin, Play, Square } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { buildCircleDivIcon, ROUTE_END_COLOR, ROUTE_START_COLOR } from "@/lib/mapIcons"
 import { POI_TYPES } from "@/lib/poiTypes"
-import type { Candidate } from "@/types/candidate"
+import type { Candidate, ExistingWaypoint } from "@/types/candidate"
 
 export interface RouteMapProps {
   routeCoords: [number, number][]
   candidates: Candidate[]
   selectedIds: Set<number>
   onToggle: (osmId: number) => void
+  existingWaypoints?: ExistingWaypoint[]
+  keptWaypointIndices?: Set<number>
+  onToggleExistingWaypoint?: (index: number) => void
 }
 
 const DEFAULT_CENTER: [number, number] = [46.06352, 11.12864]
 const DEFAULT_ZOOM = 14
+const EXISTING_WAYPOINT_COLOR = "oklch(65.6% 0.241 354.308)"
 
-function FitBounds({ routeCoords, candidates }: { routeCoords: [number, number][]; candidates: Candidate[] }) {
+function FitBounds({
+  routeCoords,
+  candidates,
+  existingWaypoints,
+}: {
+  routeCoords: [number, number][]
+  candidates: Candidate[]
+  existingWaypoints: ExistingWaypoint[]
+}) {
   const map = useMap()
 
   useEffect(() => {
@@ -29,8 +41,11 @@ function FitBounds({ routeCoords, candidates }: { routeCoords: [number, number][
     for (const candidate of candidates) {
       bounds.extend([candidate.lat, candidate.lon])
     }
+    for (const waypoint of existingWaypoints) {
+      bounds.extend([waypoint.lat, waypoint.lon])
+    }
     map.fitBounds(bounds, { padding: [20, 20] })
-  }, [map, routeCoords, candidates])
+  }, [map, routeCoords, candidates, existingWaypoints])
 
   return null
 }
@@ -104,7 +119,15 @@ function PoiTypeLabel({ name, label }: { name: string | null; label: string | un
   return null
 }
 
-export function RouteMap({ routeCoords, candidates, selectedIds, onToggle }: RouteMapProps) {
+export function RouteMap({
+  routeCoords,
+  candidates,
+  selectedIds,
+  onToggle,
+  existingWaypoints = [],
+  keptWaypointIndices = new Set(),
+  onToggleExistingWaypoint,
+}: RouteMapProps) {
   const hasRoute = routeCoords.length > 0
   const center = hasRoute ? routeCoords[0] : DEFAULT_CENTER
   const zoom = hasRoute ? 13 : DEFAULT_ZOOM
@@ -156,9 +179,46 @@ export function RouteMap({ routeCoords, candidates, selectedIds, onToggle }: Rou
             </Marker>
           )
         })}
+        {existingWaypoints.map((waypoint) => {
+          const isKept = keptWaypointIndices.has(waypoint.index)
+          const checkboxId = `map-existing-waypoint-${waypoint.index}`
+          return (
+            <Marker
+              key={waypoint.index}
+              position={[waypoint.lat, waypoint.lon]}
+              icon={buildCircleDivIcon({
+                icon: MapPin,
+                color: EXISTING_WAYPOINT_COLOR,
+                opacity: isKept ? 1 : 0.35,
+              })}
+            >
+              <Popup>
+                <div className="flex flex-col gap-2 text-sm">
+                  <div className="flex items-center gap-1 font-medium">
+                    <MapPin className="size-4" style={{ color: EXISTING_WAYPOINT_COLOR }} />
+                    {waypoint.name || "(unnamed)"}
+                  </div>
+                  <p className="text-muted-foreground">Already in this file</p>
+                  {onToggleExistingWaypoint && (
+                    <div className="flex items-center gap-2">
+                      <Checkbox
+                        id={checkboxId}
+                        checked={isKept}
+                        onCheckedChange={() => onToggleExistingWaypoint(waypoint.index)}
+                      />
+                      <Label htmlFor={checkboxId} className="font-normal">
+                        Keep
+                      </Label>
+                    </div>
+                  )}
+                </div>
+              </Popup>
+            </Marker>
+          )
+        })}
         <RouteEndpointMarkers routeCoords={routeCoords} />
         <RouteDirectionArrows routeCoords={routeCoords} />
-        <FitBounds routeCoords={routeCoords} candidates={candidates} />
+        <FitBounds routeCoords={routeCoords} candidates={candidates} existingWaypoints={existingWaypoints} />
       </MapContainer>
     </div>
   )

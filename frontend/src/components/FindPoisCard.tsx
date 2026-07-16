@@ -27,6 +27,7 @@ export function FindPoisCard({ entries, onChange, onFind, disabled, isFinding }:
           const maxDistanceM = entry?.maxDistanceM ?? cfg.defaultMaxDistanceM
           const checkboxId = `poi-enabled-${cfg.key}`
           const distanceId = `poi-distance-${cfg.key}`
+          const Icon = cfg.icon
           return (
             <li key={cfg.key} className="flex items-center gap-2">
               <Checkbox
@@ -34,6 +35,7 @@ export function FindPoisCard({ entries, onChange, onFind, disabled, isFinding }:
                 checked={enabled}
                 onCheckedChange={(checked) => updateEntry(cfg.key, { enabled: checked === true })}
               />
+              {Icon  && <Icon className="size-4" color={cfg.color}></Icon>}
               <Label htmlFor={checkboxId} className="text-sm font-bold">
                 {cfg.label}
               </Label>
