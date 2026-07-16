@@ -4,6 +4,12 @@ WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
+# Non-secret PKCE public-client id (see frontend/src/lib/wahooConfig.ts) -
+# Vite env vars are baked in at build time, so this must be a build ARG, not
+# a runtime CMD env var. Render forwards a dashboard-set env var of the same
+# name as an automatic build arg for Docker-runtime services.
+ARG VITE_WAHOO_CLIENT_ID
+ENV VITE_WAHOO_CLIENT_ID=$VITE_WAHOO_CLIENT_ID
 RUN npm run build
 
 # ---- python stage ----

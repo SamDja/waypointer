@@ -5,6 +5,7 @@ from waypointer.geometry import (
     point_to_polyline_distance_m,
     point_to_segment_distance_m,
     simplify_rdp,
+    total_distance_m,
 )
 
 
@@ -84,3 +85,14 @@ def test_simplify_rdp_respects_tolerance():
     simplified = simplify_rdp(points, tolerance_m=8.0)
     for p in points:
         assert point_to_polyline_distance_m(p, simplified) <= 8.0 + 1e-6
+
+
+def test_total_distance_sums_consecutive_segments():
+    points = [(48.0, 2.0), (48.001, 2.0), (48.001, 2.001)]
+    expected = haversine_m(*points[0], *points[1]) + haversine_m(*points[1], *points[2])
+    assert total_distance_m(points) == pytest.approx(expected)
+
+
+def test_total_distance_empty_or_single_point_is_zero():
+    assert total_distance_m([]) == 0.0
+    assert total_distance_m([(48.0, 2.0)]) == 0.0

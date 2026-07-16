@@ -72,11 +72,17 @@ function RouteDirectionArrows({ routeCoords }: { routeCoords: [number, number][]
     const decorator = L.polylineDecorator(polyline, {
       patterns: [
         {
-          repeat: 120,
-          symbol: L.Symbol.arrowHead({
-            pixelSize: 10,
-            polygon: false,
-            pathOptions: { stroke: true, color: "#9f2d00", weight: 2},
+          offset: "10%",
+          repeat: "10%",
+          symbol: L.Symbol.marker({
+            rotate: true,
+            markerOptions: {
+              interactive: false,
+              icon: L.icon({
+                iconUrl: '/square-arrow.svg',
+                iconAnchor: [10, 20]
+              }),
+            }
           }),
         },
       ],
@@ -110,7 +116,7 @@ export function RouteMap({ routeCoords, candidates, selectedIds, onToggle }: Rou
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
         />
-        {hasRoute && <Polyline positions={routeCoords} pathOptions={{ color: "#ff6900", weight: 2 }} />}
+        {hasRoute && <Polyline positions={routeCoords} pathOptions={{ color: "oklch(45.7% 0.24 277.023)", weight: 3 }} />}
         {candidates.map((candidate) => {
           const isSelected = selectedIds.has(candidate.osm_id)
           const checkboxId = `map-candidate-${candidate.osm_id}`

@@ -7,6 +7,7 @@ import { RouteMap } from "@/components/RouteMap"
 import { SaveCard } from "@/components/SaveCard"
 import { StatusMessage } from "@/components/StatusMessage"
 import { StepCard } from "@/components/StepCard"
+import { WahooProfileMenu } from "@/components/WahooProfileMenu"
 import { ApiError, findPois } from "@/lib/api"
 import { parseRouteCoordsFromGpx } from "@/lib/gpx"
 import {
@@ -17,6 +18,7 @@ import {
   type DeviceSettings,
   type PoiSearchEntry,
 } from "@/lib/settings"
+import { loadWahooTokens, type WahooTokens } from "@/lib/wahooSettings"
 import type { FindPoisResponse, PoiSearchConfig } from "@/types/candidate"
 
 type Step = "import" | "find" | "review"
@@ -33,6 +35,7 @@ export default function App() {
   const [status, setStatus] = useState({ message: "", isError: false })
   const [isFinding, setIsFinding] = useState(false)
   const [openStep, setOpenStep] = useState<Step | null>("import")
+  const [wahooTokens, setWahooTokens] = useState<WahooTokens | null>(() => loadWahooTokens())
 
   async function handleFileChange(newFile: File) {
     setFile(newFile)
@@ -115,9 +118,16 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col">
-      <header className="flex shrink-0 items-center gap-1.5 border-b px-4 py-2">
-        <MapPinSearch className="size-5 text-indigo-600" />
-        <h1 className="text-lg font-semibold">Waypointer</h1>
+      <header className="flex shrink-0 items-center justify-between gap-1.5 border-b px-4 py-2">
+        <div className="flex items-center gap-1.5">
+          <MapPinSearch className="size-5 text-indigo-600" />
+          <h1 className="text-lg font-semibold">Waypointer</h1>
+        </div>
+        <WahooProfileMenu
+          wahooTokens={wahooTokens}
+          onWahooTokensChange={setWahooTokens}
+          onStatus={(message, isError) => setStatus({ message, isError })}
+        />
       </header>
 
       <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
@@ -133,11 +143,17 @@ export default function App() {
         <aside className="flex w-full min-h-0 flex-1 flex-col border-t md:w-[380px] md:flex-none md:border-t-0 md:border-l">
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0">
             <StepCard
-              title="1. Import GPX file"
+              title="1. Import route"
               open={openStep === "import"}
               onOpenChange={(open) => setOpenStep(open ? "import" : null)}
             >
-              <ImportCard file={file} onFileChange={handleFileChange} />
+              <ImportCard
+                file={file}
+                onFileChange={handleFileChange}
+                wahooTokens={wahooTokens}
+                onWahooTokensChange={setWahooTokens}
+                onStatus={(message, isError) => setStatus({ message, isError })}
+              />
             </StepCard>
 
             <StepCard
@@ -187,6 +203,8 @@ export default function App() {
                   keptWaypointIndices={keptWaypointIndices}
                   settings={deviceSettings}
                   onSettingsChange={handleDeviceSettingsChange}
+                  wahooTokens={wahooTokens}
+                  onWahooTokensChange={setWahooTokens}
                   onStatus={(message, isError) => setStatus({ message, isError })}
                 />
               )}

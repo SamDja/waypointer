@@ -47,6 +47,14 @@ def point_to_segment_distance_m(p: LatLon, a: LatLon, b: LatLon) -> float:
     return math.hypot(px - closest_x, py - closest_y)
 
 
+def total_distance_m(coords: list[LatLon]) -> float:
+    """Cumulative great-circle length of a polyline, in meters."""
+    return sum(
+        haversine_m(coords[i][0], coords[i][1], coords[i + 1][0], coords[i + 1][1])
+        for i in range(len(coords) - 1)
+    )
+
+
 def point_to_polyline_distance_m(p: LatLon, polyline: list[LatLon]) -> float:
     """Minimum distance from p to any segment of polyline, in meters."""
     if not polyline:

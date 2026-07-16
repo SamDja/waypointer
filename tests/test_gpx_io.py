@@ -1,3 +1,6 @@
+import gpxpy
+import pytest
+
 from waypointer.device_profiles import DEVICE_PROFILES
 from waypointer.gpx_io import (
     OSM_ID_CLARK_TAG,
@@ -8,7 +11,9 @@ from waypointer.gpx_io import (
     make_waypoint,
     parse_gpx,
     route_coordinates,
+    route_elevations,
     to_xml_bytes,
+    total_ascent_m,
 )
 from waypointer.osm import OsmNode
 
@@ -97,6 +102,61 @@ def test_discard_waypoints_runs_before_add_waypoints(sample_route_bytes):
     add_waypoints(gpx, [make_waypoint(node, DEVICE_PROFILES["generic"], distance_m=1.0)])
 
     assert [w.name for w in gpx.waypoints] == ["New Fountain"]
+
+
+def test_route_elevations_parallels_route_coordinates(sample_route_bytes):
+    gpx = parse_gpx(sample_route_bytes)
+    assert route_elevations(gpx) == [35.0, 36.0, 37.0]
+    assert len(route_elevations(gpx)) == len(route_coordinates(gpx))
+
+
+def test_total_ascent_sums_positive_deltas(sample_route_bytes):
+    # sample_route.gpx's three trkpts have ele 35.0 -> 36.0 -> 37.0.
+    gpx = parse_gpx(sample_route_bytes)
+    assert total_ascent_m(gpx) == pytest.approx(2.0)
+
+
+def test_total_ascent_ignores_descents():
+    gpx = gpxpy.parse(
+        """<?xml version="1.0"?>
+        <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><trkseg>
+            <trkpt lat="48.0" lon="2.0"><ele>100.0</ele></trkpt>
+            <trkpt lat="48.001" lon="2.0"><ele>90.0</ele></trkpt>
+            <trkpt lat="48.002" lon="2.0"><ele>105.0</ele></trkpt>
+          </trkseg></trk>
+        </gpx>"""
+    )
+    assert total_ascent_m(gpx) == pytest.approx(15.0)
+
+
+def test_total_ascent_zero_when_no_elevation_data():
+    gpx = gpxpy.parse(
+        """<?xml version="1.0"?>
+        <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><trkseg>
+            <trkpt lat="48.0" lon="2.0"></trkpt>
+            <trkpt lat="48.001" lon="2.0"></trkpt>
+          </trkseg></trk>
+        </gpx>"""
+    )
+    assert total_ascent_m(gpx) == 0.0
+
+
+def test_total_ascent_skips_gap_around_missing_elevation():
+    # A point with no elevation shouldn't be bridged over - the delta across
+    # it must be skipped rather than treated as adjacent to its neighbors.
+    gpx = gpxpy.parse(
+        """<?xml version="1.0"?>
+        <gpx version="1.1" xmlns="http://www.topografix.com/GPX/1/1">
+          <trk><trkseg>
+            <trkpt lat="48.0" lon="2.0"><ele>10.0</ele></trkpt>
+            <trkpt lat="48.001" lon="2.0"></trkpt>
+            <trkpt lat="48.002" lon="2.0"><ele>500.0</ele></trkpt>
+          </trkseg></trk>
+        </gpx>"""
+    )
+    assert total_ascent_m(gpx) == 0.0
 
 
 def test_is_duplicate_candidate_by_proximity_fallback(sample_route_bytes):

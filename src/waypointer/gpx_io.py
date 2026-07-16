@@ -41,6 +41,32 @@ def route_coordinates(gpx: gpxpy.gpx.GPX) -> list[LatLon]:
     return coords
 
 
+def route_elevations(gpx: gpxpy.gpx.GPX) -> list[float | None]:
+    """Elevation in meters for each point, in the same track/route document
+    order as route_coordinates() - the two lists are meant to be zipped
+    index-for-index. None where a point carries no <ele>."""
+    elevations: list[float | None] = []
+    for track in gpx.tracks:
+        for segment in track.segments:
+            elevations.extend(p.elevation for p in segment.points)
+    for route in gpx.routes:
+        elevations.extend(p.elevation for p in route.points)
+    return elevations
+
+
+def total_ascent_m(gpx: gpxpy.gpx.GPX) -> float:
+    """Sum of positive elevation deltas between consecutive points that both
+    carry elevation - a gap where one side lacks elevation is skipped rather
+    than bridged. Files with no elevation data anywhere return 0.0 rather
+    than raising - Wahoo's route push accepts an ascent of 0."""
+    elevations = route_elevations(gpx)
+    return sum(
+        max(0.0, b - a)
+        for a, b in zip(elevations, elevations[1:])
+        if a is not None and b is not None
+    )
+
+
 def existing_osm_ids(gpx: gpxpy.gpx.GPX) -> set[int]:
     """OSM node ids already stamped onto waypoints by a previous run."""
     ids: set[int] = set()

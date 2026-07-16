@@ -57,3 +57,56 @@ export async function saveRoute({
   const blob = await response.blob()
   return { blob, filename }
 }
+
+export interface ImportedRoute {
+  blob: Blob
+  filename: string
+}
+
+export async function importWahooRoute(fileUrl: string): Promise<ImportedRoute> {
+  const formData = new FormData()
+  formData.append("file_url", fileUrl)
+
+  const response = await fetch("/api/wahoo/import-route", { method: "POST", body: formData })
+  if (!response.ok) {
+    throw new ApiError(await errorDetail(response, "Failed to import the Wahoo route."))
+  }
+
+  const disposition = response.headers.get("Content-Disposition") ?? ""
+  const match = disposition.match(/filename="([^"]+)"/)
+  const filename = match ? match[1] : "wahoo_route.gpx"
+  const blob = await response.blob()
+  return { blob, filename }
+}
+
+export interface WahooRoutePayloadResult {
+  fitBase64: string
+  filename: string
+  distanceM: number
+  ascentM: number
+  startLat: number
+  startLng: number
+}
+
+export async function fetchWahooRoutePayload(
+  gpxFile: File,
+  selectedCandidates: Candidate[],
+): Promise<WahooRoutePayloadResult> {
+  const formData = new FormData()
+  formData.append("gpx_file", gpxFile)
+  formData.append("selected_candidates", JSON.stringify(selectedCandidates))
+
+  const response = await fetch("/api/wahoo/route-payload", { method: "POST", body: formData })
+  if (!response.ok) {
+    throw new ApiError(await errorDetail(response, "Failed to build the Wahoo route."))
+  }
+  const data = await response.json()
+  return {
+    fitBase64: data.fit_base64,
+    filename: data.filename,
+    distanceM: data.distance_m,
+    ascentM: data.ascent_m,
+    startLat: data.start_lat,
+    startLng: data.start_lng,
+  }
+}

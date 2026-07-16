@@ -1,17 +1,21 @@
-"""FastAPI app: two stateless endpoints plus the static frontend.
+"""FastAPI app: stateless endpoints plus the static frontend.
 
 No server-side session/user state is kept between requests - the frontend
 holds candidate data from /api/find-pois and resubmits the selected ones
-(plus the original file) to /api/save, so one visitor's data never touches
-another's and a second Overpass query isn't needed on save.
+(plus the original file) to /api/save or /api/wahoo/route-payload, so one
+visitor's data never touches another's and a second Overpass query isn't
+needed afterwards.
 """
 
+import base64
 import dataclasses
 import math
 import os
 import re
 from pathlib import Path
+from urllib.parse import urlparse
 
+import requests
 from fastapi import Depends, FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
@@ -20,7 +24,8 @@ from pydantic import TypeAdapter, ValidationError
 
 from waypointer.device_profiles import DEFAULT_DEVICE_KEY, DEVICE_PROFILES, OutputFormat
 from waypointer.fit_io import FitFountain, build_course_fit_bytes
-from waypointer.geometry import LatLon, point_to_polyline_distance_m, simplify_rdp
+from waypointer.fit_read import fit_route_to_gpx_bytes
+from waypointer.geometry import LatLon, point_to_polyline_distance_m, simplify_rdp, total_distance_m
 from waypointer.gpx_io import (
     add_waypoints,
     discard_waypoints,
@@ -28,12 +33,20 @@ from waypointer.gpx_io import (
     make_waypoint,
     parse_gpx,
     route_coordinates,
+    route_elevations,
     to_xml_bytes,
+    total_ascent_m,
 )
-from waypointer.osm import OsmNode, OverpassError, build_overpass_query, query_overpass
+from waypointer.osm import USER_AGENT, OsmNode, OverpassError, build_overpass_query, query_overpass
 from waypointer.poi_types import POI_TYPES, clamp_distance_m
 from waypointer.rate_limit import rate_limit
-from waypointer.schemas import Candidate, ExistingWaypoint, FindPoisResponse, PoiSearchConfig
+from waypointer.schemas import (
+    Candidate,
+    ExistingWaypoint,
+    FindPoisResponse,
+    PoiSearchConfig,
+    WahooRoutePayload,
+)
 
 # Built by `npm run build` in frontend/ (or the Docker image's Node build
 # stage) - not present until that's run, so the frontend mount below is
@@ -43,6 +56,10 @@ FRONTEND_DIST_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
 # the true route - see the Overpass radius padding in find_pois() below,
 # which depends on this bound to avoid missing genuinely-in-range nodes.
 SIMPLIFY_TOLERANCE_M = 8.0
+# The Wahoo route FIT file lives on their CDN; /api/wahoo/import-route only
+# ever fetches from Wahoo, so it restricts the caller-supplied URL to this
+# host suffix rather than fetching arbitrary URLs (SSRF guard).
+WAHOO_FILE_HOST_SUFFIX = ".wahooligan.com"
 
 app = FastAPI(title="Waypointer")
 
@@ -152,6 +169,11 @@ def _safe_filename_stem(filename: str | None) -> str:
     return stem or "route"
 
 
+def _resolved_name(c: Candidate) -> str:
+    cfg = POI_TYPES.get(c.poi_type, POI_TYPES["water"])
+    return c.name or cfg.default_name
+
+
 @app.post("/api/save")
 async def save(
     gpx_file: UploadFile,
@@ -181,10 +203,6 @@ async def save(
     if profile is None:
         raise HTTPException(status_code=400, detail=f"Unknown device: {device}")
 
-    def _resolved_name(c: Candidate) -> str:
-        cfg = POI_TYPES.get(c.poi_type, POI_TYPES["water"])
-        return c.name or cfg.default_name
-
     if profile.output_format is OutputFormat.GPX:
         effective_profile = dataclasses.replace(profile, water_symbol=water_symbol.strip() or "Water")
         waypoints = [
@@ -202,7 +220,10 @@ async def save(
     else:
         fountains = [FitFountain(lat=c.lat, lon=c.lon, name=_resolved_name(c)) for c in selected]
         content = build_course_fit_bytes(
-            coords, fountains, course_name=_safe_filename_stem(gpx_file.filename)
+            coords,
+            fountains,
+            course_name=_safe_filename_stem(gpx_file.filename),
+            elevations_m=route_elevations(gpx),
         )
         media_type = "application/octet-stream"
         extension = "fit"
@@ -212,6 +233,82 @@ async def save(
         content=content,
         media_type=media_type,
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@app.post("/api/wahoo/route-payload", response_model=WahooRoutePayload)
+async def wahoo_route_payload(
+    gpx_file: UploadFile,
+    selected_candidates: str = Form(...),
+) -> WahooRoutePayload:
+    """Builds the FIT bytes + metadata needed for a browser-side push to
+    Wahoo's POST /v1/routes. Distance and ascent are computed here rather
+    than client-side because only the backend ever sees the full-resolution,
+    elevation-carrying route - /api/find-pois only ever sends the frontend a
+    simplified, elevation-stripped polyline for map rendering. Always
+    produces FIT regardless of the visitor's local-download device
+    selection, since Wahoo's route push has no GPX equivalent - and, like
+    /api/save's FIT branch, never carries pre-existing GPX <wpt> entries
+    into the course (see fit_io.py's documented scope)."""
+    gpx, coords = await _read_gpx_upload(gpx_file)
+
+    try:
+        selected = _selected_candidates_adapter.validate_json(selected_candidates)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid selection data: {exc}") from exc
+
+    fountains = [FitFountain(lat=c.lat, lon=c.lon, name=_resolved_name(c)) for c in selected]
+    course_name = _safe_filename_stem(gpx_file.filename)
+    fit_bytes = build_course_fit_bytes(
+        coords, fountains, course_name=course_name, elevations_m=route_elevations(gpx)
+    )
+
+    return WahooRoutePayload(
+        fit_base64=base64.b64encode(fit_bytes).decode("ascii"),
+        filename=f"{course_name}.fit",
+        distance_m=total_distance_m(coords),
+        ascent_m=total_ascent_m(gpx),
+        start_lat=coords[0][0],
+        start_lng=coords[0][1],
+    )
+
+
+@app.post("/api/wahoo/import-route")
+def wahoo_import_route(file_url: str = Form(...)) -> Response:
+    """Downloads a Wahoo route's FIT file (server-side, avoiding the CDN's
+    lack of CORS headers) and converts it to GPX so it can be imported into
+    the same GPX-only pipeline a user upload flows through. The FIT file URL
+    comes from GET /v1/routes' `file.url`; the host is restricted to Wahoo's
+    to avoid turning this into an open proxy (SSRF). No Wahoo access token is
+    sent - the CDN URL is expected to be publicly fetchable, keeping the
+    backend free of any Wahoo credentials as elsewhere."""
+    host = urlparse(file_url).hostname or ""
+    if host != WAHOO_FILE_HOST_SUFFIX.lstrip(".") and not host.endswith(WAHOO_FILE_HOST_SUFFIX):
+        raise HTTPException(status_code=400, detail="file_url must be a Wahoo-hosted URL.")
+
+    try:
+        response = requests.get(file_url, headers={"User-Agent": USER_AGENT}, timeout=30)
+    except requests.RequestException as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Failed to download route from Wahoo: {exc}"
+        ) from exc
+    if response.status_code != 200:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Wahoo returned status {response.status_code} for the route file.",
+        )
+
+    try:
+        gpx_bytes = fit_route_to_gpx_bytes(response.content)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Could not read the Wahoo route: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001 - fit-tool raises bare exceptions on malformed input
+        raise HTTPException(status_code=400, detail=f"Invalid Wahoo route file: {exc}") from exc
+
+    return Response(
+        content=gpx_bytes,
+        media_type="application/gpx+xml",
+        headers={"Content-Disposition": 'attachment; filename="wahoo_route.gpx"'},
     )
 
 

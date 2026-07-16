@@ -8,3 +8,8 @@ services:
     envVars:
       - key: PORT
         value: 8000
+      # Non-secret PKCE public-client id, forwarded by Render as a Docker
+      # build arg (see Dockerfile) since Vite bakes it in at build time, not
+      # runtime. Set the value in the Render dashboard, not here.
+      - key: VITE_WAHOO_CLIENT_ID
+        sync: false

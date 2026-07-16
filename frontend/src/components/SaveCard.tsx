@@ -10,8 +10,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { ApiError, saveRoute } from "@/lib/api"
+import { ApiError, fetchWahooRoutePayload, saveRoute } from "@/lib/api"
 import type { DeviceSettings } from "@/lib/settings"
+import { pushRouteToWahoo } from "@/lib/wahooApi"
+import { missingWahooScopeWarning } from "@/lib/wahooAuth"
+import { connectWahoo } from "@/lib/wahooConnect"
+import { getValidWahooAccessToken, type WahooTokens } from "@/lib/wahooSettings"
 import type { Candidate, ExistingWaypoint } from "@/types/candidate"
 
 export interface SaveCardProps {
@@ -22,6 +26,8 @@ export interface SaveCardProps {
   keptWaypointIndices: Set<number>
   settings: DeviceSettings
   onSettingsChange: (settings: DeviceSettings) => void
+  wahooTokens: WahooTokens | null
+  onWahooTokensChange: (tokens: WahooTokens | null) => void
   onStatus: (message: string, isError: boolean) => void
 }
 
@@ -33,9 +39,13 @@ export function SaveCard({
   keptWaypointIndices,
   settings,
   onSettingsChange,
+  wahooTokens,
+  onWahooTokensChange,
   onStatus,
 }: SaveCardProps) {
   const [isSaving, setIsSaving] = useState(false)
+  const [isConnectingWahoo, setIsConnectingWahoo] = useState(false)
+  const [isSendingToWahoo, setIsSendingToWahoo] = useState(false)
   const isFit = settings.device === "wahoo_elemnt_roam_v3"
 
   async function handleSave() {
@@ -70,6 +80,39 @@ export function SaveCard({
       onStatus(message, true)
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  async function handleConnectWahoo() {
+    setIsConnectingWahoo(true)
+    onStatus("Connecting to Wahoo...", false)
+    try {
+      const tokens = await connectWahoo()
+      onWahooTokensChange(tokens)
+      const scopeWarning = missingWahooScopeWarning(tokens)
+      onStatus(scopeWarning ?? "Connected to Wahoo.", scopeWarning !== null)
+    } catch (err) {
+      onStatus(err instanceof Error ? err.message : "Failed to connect to Wahoo.", true)
+    } finally {
+      setIsConnectingWahoo(false)
+    }
+  }
+
+  async function handleSendToWahoo() {
+    const selectedCandidates = candidates.filter((c) => selectedIds.has(c.osm_id))
+
+    setIsSendingToWahoo(true)
+    onStatus("Sending to Wahoo...", false)
+    try {
+      const payload = await fetchWahooRoutePayload(file, selectedCandidates)
+      const accessToken = await getValidWahooAccessToken()
+      await pushRouteToWahoo(payload, accessToken)
+      onStatus("Sent to Wahoo - it will sync to your app and head unit shortly.", false)
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to send to Wahoo."
+      onStatus(message, true)
+    } finally {
+      setIsSendingToWahoo(false)
     }
   }
 
@@ -122,6 +165,24 @@ export function SaveCard({
         <Button onClick={handleSave} loading={isSaving} className="w-fit">
           {isSaving ? "Saving…" : "Save with selected fountains"}
         </Button>
+
+        <div className="flex flex-col gap-2 border-t pt-4">
+          {wahooTokens ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Connected to Wahoo{wahooTokens.athleteLabel ? ` as ${wahooTokens.athleteLabel}` : ""}. Sending
+                syncs the route to your Wahoo app and head unit automatically.
+              </p>
+              <Button onClick={handleSendToWahoo} loading={isSendingToWahoo} variant="secondary" className="w-fit">
+                {isSendingToWahoo ? "Sending…" : "Send to Wahoo"}
+              </Button>
+            </>
+          ) : (
+            <Button onClick={handleConnectWahoo} loading={isConnectingWahoo} variant="secondary" className="w-fit">
+              {isConnectingWahoo ? "Connecting…" : "Connect Wahoo"}
+            </Button>
+          )}
+        </div>
       </CardContent>
     </Card>
   )
