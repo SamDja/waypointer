@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { RouteNameDialog } from "@/components/RouteNameDialog"
 import { ApiError, fetchWahooRoutePayload, saveRoute } from "@/lib/api"
 import type { DeviceSettings } from "@/lib/settings"
 import { toast, updateToast } from "@/lib/toast"
@@ -45,9 +46,12 @@ export function SaveCard({
   const [isSaving, setIsSaving] = useState(false)
   const [isConnectingWahoo, setIsConnectingWahoo] = useState(false)
   const [isSendingToWahoo, setIsSendingToWahoo] = useState(false)
+  const [showSaveNameDialog, setShowSaveNameDialog] = useState(false)
+  const [showWahooNameDialog, setShowWahooNameDialog] = useState(false)
   const isFit = settings.device === "wahoo_elemnt_roam_v3"
+  const defaultRouteName = file.name.replace(/\.gpx$/i, "")
 
-  async function handleSave() {
+  async function handleSave(routeName: string) {
     const selectedCandidates = candidates.filter((c) => selectedIds.has(c.osm_id))
     const discardedWaypointIndices = existingWaypoints
       .filter((w) => !keptWaypointIndices.has(w.index))
@@ -62,6 +66,7 @@ export function SaveCard({
         device: settings.device,
         waterSymbol: settings.waterSymbol,
         discardedWaypointIndices,
+        routeName,
       })
 
       const url = URL.createObjectURL(blob)
@@ -97,13 +102,13 @@ export function SaveCard({
     }
   }
 
-  async function handleSendToWahoo() {
+  async function handleSendToWahoo(routeName: string) {
     const selectedCandidates = candidates.filter((c) => selectedIds.has(c.osm_id))
 
     setIsSendingToWahoo(true)
     const toastId = toast("Sending to Wahoo...", "loading")
     try {
-      const payload = await fetchWahooRoutePayload(file, selectedCandidates)
+      const payload = await fetchWahooRoutePayload(file, selectedCandidates, routeName)
       const accessToken = await getValidWahooAccessToken()
       await pushRouteToWahoo(payload, accessToken)
       updateToast(toastId, "Sent to Wahoo - it will sync to your app and head unit shortly.", "success")
@@ -161,8 +166,8 @@ export function SaveCard({
           </p>
         )}
 
-        <Button onClick={handleSave} loading={isSaving} className="w-fit">
-          {isSaving ? "Saving…" : "Save with selected fountains"}
+        <Button onClick={() => setShowSaveNameDialog(true)} loading={isSaving} className="w-fit">
+          {isSaving ? "Saving…" : "Download route"}
         </Button>
 
         <div className="flex flex-col gap-2 border-t pt-4">
@@ -172,7 +177,12 @@ export function SaveCard({
                 Connected to Wahoo{wahooTokens.athleteLabel ? ` as ${wahooTokens.athleteLabel}` : ""}. Sending
                 syncs the route to your Wahoo app and head unit automatically.
               </p>
-              <Button onClick={handleSendToWahoo} loading={isSendingToWahoo} variant="secondary" className="w-fit">
+              <Button
+                onClick={() => setShowWahooNameDialog(true)}
+                loading={isSendingToWahoo}
+                variant="secondary"
+                className="w-fit"
+              >
                 {isSendingToWahoo ? "Sending…" : "Send to Wahoo"}
               </Button>
             </>
@@ -182,6 +192,21 @@ export function SaveCard({
             </Button>
           )}
         </div>
+
+        <RouteNameDialog
+          open={showSaveNameDialog}
+          onOpenChange={setShowSaveNameDialog}
+          defaultName={defaultRouteName}
+          confirmLabel="Download"
+          onConfirm={handleSave}
+        />
+        <RouteNameDialog
+          open={showWahooNameDialog}
+          onOpenChange={setShowWahooNameDialog}
+          defaultName={defaultRouteName}
+          confirmLabel="Send to Wahoo"
+          onConfirm={handleSendToWahoo}
+        />
       </CardContent>
     </Card>
   )

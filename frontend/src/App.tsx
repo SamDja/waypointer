@@ -183,10 +183,8 @@ export default function App() {
                 />
               </StepCard>
             )}
-          </div>
 
-          {findResult && file && (
-            <div className="flex shrink-0 flex-col gap-4 border-t p-4">
+            {findResult && file && (
               <SaveCard
                 file={file}
                 candidates={findResult.candidates}
@@ -198,8 +196,8 @@ export default function App() {
                 wahooTokens={wahooTokens}
                 onWahooTokensChange={setWahooTokens}
               />
-            </div>
           )}
+          </div>
         </aside>
       </div>
     </div>

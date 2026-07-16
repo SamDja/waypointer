@@ -25,6 +25,7 @@ export interface SaveParams {
   device: string
   waterSymbol: string
   discardedWaypointIndices: number[]
+  routeName?: string
 }
 
 export interface SaveResult {
@@ -38,6 +39,7 @@ export async function saveRoute({
   device,
   waterSymbol,
   discardedWaypointIndices,
+  routeName,
 }: SaveParams): Promise<SaveResult> {
   const formData = new FormData()
   formData.append("gpx_file", gpxFile)
@@ -45,6 +47,7 @@ export async function saveRoute({
   formData.append("device", device)
   formData.append("water_symbol", waterSymbol)
   formData.append("discarded_waypoint_indices", JSON.stringify(discardedWaypointIndices))
+  if (routeName) formData.append("route_name", routeName)
 
   const response = await fetch("/api/save", { method: "POST", body: formData })
   if (!response.ok) {
@@ -82,6 +85,7 @@ export async function importWahooRoute(fileUrl: string): Promise<ImportedRoute> 
 export interface WahooRoutePayloadResult {
   fitBase64: string
   filename: string
+  routeName: string
   distanceM: number
   ascentM: number
   startLat: number
@@ -91,10 +95,12 @@ export interface WahooRoutePayloadResult {
 export async function fetchWahooRoutePayload(
   gpxFile: File,
   selectedCandidates: Candidate[],
+  routeName?: string,
 ): Promise<WahooRoutePayloadResult> {
   const formData = new FormData()
   formData.append("gpx_file", gpxFile)
   formData.append("selected_candidates", JSON.stringify(selectedCandidates))
+  if (routeName) formData.append("route_name", routeName)
 
   const response = await fetch("/api/wahoo/route-payload", { method: "POST", body: formData })
   if (!response.ok) {
@@ -104,6 +110,7 @@ export async function fetchWahooRoutePayload(
   return {
     fitBase64: data.fit_base64,
     filename: data.filename,
+    routeName: data.route_name,
     distanceM: data.distance_m,
     ascentM: data.ascent_m,
     startLat: data.start_lat,

@@ -6,6 +6,7 @@ import pytest
 import responses
 from fastapi.testclient import TestClient
 from fit_tool.fit_file import FitFile
+from fit_tool.profile.messages.course_message import CourseMessage
 from fit_tool.profile.messages.course_point_message import CoursePointMessage
 
 from waypointer import poi_types
@@ -260,6 +261,39 @@ def test_save_wahoo_returns_fit_file(sample_route_bytes):
     assert course_point.developer_fields[0].get_value(0) == 16
 
 
+def test_save_honors_custom_route_name(sample_route_bytes):
+    response = client.post(
+        "/api/save",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"selected_candidates": "[]", "device": "generic", "route_name": "My Weekend Ride!"},
+    )
+    assert response.status_code == 200
+    # The download filename is sanitized for filesystem safety - non-
+    # alphanumeric runs become a single underscore.
+    assert "My_Weekend_Ride_waypoints.gpx" in response.headers["content-disposition"]
+
+
+def test_save_wahoo_course_name_preserves_custom_route_name(sample_route_bytes):
+    # Unlike the download filename above, the FIT course_name (shown
+    # on-device) must keep the name as typed - spaces included.
+    response = client.post(
+        "/api/save",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={
+            "selected_candidates": "[]",
+            "device": "wahoo_elemnt_roam_v3",
+            "route_name": "My Weekend Ride!",
+        },
+    )
+    assert response.status_code == 200
+    assert "My_Weekend_Ride_waypoints.fit" in response.headers["content-disposition"]
+
+    fit_file = FitFile.from_bytes(response.content)
+    messages = [r.message for r in fit_file.records if not r.is_definition]
+    course = next(m for m in messages if isinstance(m, CourseMessage))
+    assert course.course_name == "My Weekend Ride!"
+
+
 def test_save_rejects_unknown_device(sample_route_bytes):
     response = client.post(
         "/api/save",
@@ -302,6 +336,27 @@ def test_wahoo_route_payload_returns_fit_and_metadata(sample_route_bytes):
     messages = [r.message for r in fit_file.records if not r.is_definition]
     course_point = next(m for m in messages if isinstance(m, CoursePointMessage))
     assert course_point.developer_fields[0].get_value(0) == 16
+
+
+def test_wahoo_route_payload_honors_custom_route_name(sample_route_bytes):
+    response = client.post(
+        "/api/wahoo/route-payload",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"selected_candidates": "[]", "route_name": "My Weekend Ride!"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    # filename is sanitized for filesystem safety...
+    assert data["filename"] == "My_Weekend_Ride.fit"
+    # ...but route_name (Wahoo's display title) preserves the typed name as-is.
+    assert data["route_name"] == "My Weekend Ride!"
+
+    fit_bytes = base64.b64decode(data["fit_base64"])
+    fit_file = FitFile.from_bytes(fit_bytes)
+    messages = [r.message for r in fit_file.records if not r.is_definition]
+    course = next(m for m in messages if isinstance(m, CourseMessage))
+    # The FIT course_name (shown on-device) is likewise unsanitized.
+    assert course.course_name == "My Weekend Ride!"
 
 
 def test_wahoo_route_payload_rejects_invalid_selection_json(sample_route_bytes):

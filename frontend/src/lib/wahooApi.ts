@@ -13,6 +13,7 @@ const WORKOUT_TYPE_FAMILY_ID_BIKING = 0
 export interface WahooRoutePayload {
   fitBase64: string
   filename: string
+  routeName: string
   distanceM: number
   ascentM: number
   startLat: number
@@ -50,7 +51,7 @@ export async function pushRouteToWahoo(payload: WahooRoutePayload, accessToken: 
   // against (this app is stateless end to end).
   formData.append("route[external_id]", crypto.randomUUID())
   formData.append("route[provider_updated_at]", new Date().toISOString())
-  formData.append("route[name]", payload.filename.replace(/\.fit$/, ""))
+  formData.append("route[name]", payload.routeName)
   formData.append("route[workout_type_family_id]", String(WORKOUT_TYPE_FAMILY_ID_BIKING))
   formData.append("route[start_lat]", String(payload.startLat))
   formData.append("route[start_lng]", String(payload.startLng))

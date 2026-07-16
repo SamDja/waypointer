@@ -40,6 +40,11 @@ class WahooRoutePayload(BaseModel):
     # elevation-carrying GPX in hand (see main.py's wahoo_route_payload()).
     fit_base64: str
     filename: str
+    # Human-readable name for Wahoo's route[name] field - deliberately kept
+    # separate from `filename`, which is sanitized for filesystem safety
+    # (spaces etc. become underscores) and would otherwise mangle a
+    # user-typed route name when reused as the display title.
+    route_name: str
     distance_m: float
     ascent_m: float
     start_lat: float

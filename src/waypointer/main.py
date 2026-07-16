@@ -169,6 +169,17 @@ def _safe_filename_stem(filename: str | None) -> str:
     return stem or "route"
 
 
+def _display_name(route_name: str | None, fallback_filename: str | None) -> str:
+    """Human-readable name for FIT course_name / Wahoo route[name] - kept
+    separate from _safe_filename_stem, which sanitizes for filesystem safety
+    (spaces -> underscores) and would otherwise mangle a user-typed name
+    when reused as a display title."""
+    if route_name and route_name.strip():
+        return route_name.strip()
+    stem = Path(os.path.basename(fallback_filename or "route")).stem
+    return stem or "route"
+
+
 def _resolved_name(c: Candidate) -> str:
     cfg = POI_TYPES.get(c.poi_type, POI_TYPES["water"])
     return c.name or cfg.default_name
@@ -181,6 +192,7 @@ async def save(
     device: str = Form(DEFAULT_DEVICE_KEY),
     water_symbol: str = Form("Water"),
     discarded_waypoint_indices: str = Form("[]"),
+    route_name: str | None = Form(None),
 ) -> Response:
     gpx, coords = await _read_gpx_upload(gpx_file)
 
@@ -203,6 +215,8 @@ async def save(
     if profile is None:
         raise HTTPException(status_code=400, detail=f"Unknown device: {device}")
 
+    name_stem = _safe_filename_stem(route_name or gpx_file.filename)
+
     if profile.output_format is OutputFormat.GPX:
         effective_profile = dataclasses.replace(profile, water_symbol=water_symbol.strip() or "Water")
         waypoints = [
@@ -222,13 +236,13 @@ async def save(
         content = build_course_fit_bytes(
             coords,
             fountains,
-            course_name=_safe_filename_stem(gpx_file.filename),
+            course_name=_display_name(route_name, gpx_file.filename),
             elevations_m=route_elevations(gpx),
         )
         media_type = "application/octet-stream"
         extension = "fit"
 
-    filename = f"{_safe_filename_stem(gpx_file.filename)}_waypoints.{extension}"
+    filename = f"{name_stem}_waypoints.{extension}"
     return Response(
         content=content,
         media_type=media_type,
@@ -240,6 +254,7 @@ async def save(
 async def wahoo_route_payload(
     gpx_file: UploadFile,
     selected_candidates: str = Form(...),
+    route_name: str | None = Form(None),
 ) -> WahooRoutePayload:
     """Builds the FIT bytes + metadata needed for a browser-side push to
     Wahoo's POST /v1/routes. Distance and ascent are computed here rather
@@ -258,14 +273,16 @@ async def wahoo_route_payload(
         raise HTTPException(status_code=400, detail=f"Invalid selection data: {exc}") from exc
 
     fountains = [FitFountain(lat=c.lat, lon=c.lon, name=_resolved_name(c)) for c in selected]
-    course_name = _safe_filename_stem(gpx_file.filename)
+    name_stem = _safe_filename_stem(route_name or gpx_file.filename)
+    display_name = _display_name(route_name, gpx_file.filename)
     fit_bytes = build_course_fit_bytes(
-        coords, fountains, course_name=course_name, elevations_m=route_elevations(gpx)
+        coords, fountains, course_name=display_name, elevations_m=route_elevations(gpx)
     )
 
     return WahooRoutePayload(
         fit_base64=base64.b64encode(fit_bytes).decode("ascii"),
-        filename=f"{course_name}.fit",
+        filename=f"{name_stem}.fit",
+        route_name=display_name,
         distance_m=total_distance_m(coords),
         ascent_m=total_ascent_m(gpx),
         start_lat=coords[0][0],
