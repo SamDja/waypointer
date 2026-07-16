@@ -22,3 +22,26 @@ export function parseRouteCoordsFromGpx(xmlText: string): [number, number][] {
     return []
   }
 }
+
+// Same trkpt/rtept traversal as parseRouteCoordsFromGpx (index-parallel to
+// its result), reading each point's <ele> child instead of lat/lon -
+// mirrors the backend's gpx_io.route_elevations(). null where a point has
+// no <ele>, matching the backend's None so downstream gain/loss math can
+// apply the same skip-gap rule (see lib/geometry.ts's elevationGainLossM).
+export function parseRouteElevationsFromGpx(xmlText: string): (number | null)[] {
+  try {
+    const doc = new DOMParser().parseFromString(xmlText, "application/xml")
+    if (doc.getElementsByTagName("parsererror").length > 0) return []
+
+    const elevations: (number | null)[] = []
+    const pointEls = [...doc.getElementsByTagName("trkpt"), ...doc.getElementsByTagName("rtept")]
+    for (const el of pointEls) {
+      const eleText = el.getElementsByTagName("ele")[0]?.textContent
+      const ele = eleText ? parseFloat(eleText) : NaN
+      elevations.push(Number.isFinite(ele) ? ele : null)
+    }
+    return elevations
+  } catch {
+    return []
+  }
+}

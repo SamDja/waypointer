@@ -2,6 +2,7 @@ import { POI_TYPES } from "@/lib/poiTypes"
 
 const SETTINGS_KEY = "waypointer.settings"
 const POI_SEARCH_KEY = "waypointer.poiSearch"
+const AVG_SPEED_KEY = "waypointer.avgSpeedKmh"
 
 export interface DeviceSettings {
   device: string
@@ -67,4 +68,22 @@ export function loadPoiSearchConfig(): PoiSearchEntry[] {
 
 export function savePoiSearchConfig(entries: PoiSearchEntry[]): void {
   localStorage.setItem(POI_SEARCH_KEY, JSON.stringify(entries))
+}
+
+export const DEFAULT_AVG_SPEED_KMH = 20
+
+// Distinct from both settings above: this is a display/estimate-time
+// concern (the Import step's duration estimate), not export- or find-time.
+export function loadAvgSpeedKmh(): number {
+  try {
+    const raw = localStorage.getItem(AVG_SPEED_KEY)
+    const parsed = raw ? Number(raw) : NaN
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_AVG_SPEED_KMH
+  } catch {
+    return DEFAULT_AVG_SPEED_KMH
+  }
+}
+
+export function saveAvgSpeedKmh(speedKmh: number): void {
+  localStorage.setItem(AVG_SPEED_KEY, String(speedKmh))
 }

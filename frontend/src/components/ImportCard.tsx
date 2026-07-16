@@ -1,25 +1,60 @@
 import { useRef, useState, type DragEvent } from "react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { WahooRoutesDialog } from "@/components/WahooRoutesDialog"
+import { formatDurationHours } from "@/lib/geometry"
 import { toast, updateToast } from "@/lib/toast"
 import { missingWahooScopeWarning } from "@/lib/wahooAuth"
 import { connectWahoo } from "@/lib/wahooConnect"
 import { type WahooTokens } from "@/lib/wahooSettings"
 import { cn } from "@/lib/utils"
-import { FileUp } from "lucide-react"
+import { ArrowRightIcon, FileUp, FileText, Trash2Icon } from "lucide-react"
 
 export interface ImportCardProps {
   file: File | null
   onFileChange: (file: File) => void
+  onRemove: () => void
+  onNext: () => void
+  pointCount: number | null
+  distanceM: number
+  elevationGainM: number
+  elevationLossM: number
+  avgSpeedKmh: number
+  onAvgSpeedChange: (speedKmh: number) => void
   wahooTokens: WahooTokens | null
   onWahooTokensChange: (tokens: WahooTokens | null) => void
 }
 
-export function ImportCard({ file, onFileChange, wahooTokens, onWahooTokensChange }: ImportCardProps) {
+export function ImportCard({
+  file,
+  onFileChange,
+  onRemove,
+  onNext,
+  pointCount,
+  distanceM,
+  elevationGainM,
+  elevationLossM,
+  avgSpeedKmh,
+  onAvgSpeedChange,
+  wahooTokens,
+  onWahooTokensChange,
+}: ImportCardProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [isDragActive, setIsDragActive] = useState(false)
   const [isConnectingWahoo, setIsConnectingWahoo] = useState(false)
   const [showWahooImport, setShowWahooImport] = useState(false)
+  const [showRemoveConfirm, setShowRemoveConfirm] = useState(false)
 
   function handleDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault()
@@ -43,6 +78,88 @@ export function ImportCard({ file, onFileChange, wahooTokens, onWahooTokensChang
     }
   }
 
+  if (file) {
+    const durationHours = distanceM > 0 ? distanceM / 1000 / avgSpeedKmh : 0
+
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="flex items-center gap-3 rounded-md border p-4">
+          <FileText className="size-8 shrink-0 text-muted-foreground" />
+          <div className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-sm font-medium">{file.name}</span>
+            {pointCount !== null && (
+              <span className="text-xs text-muted-foreground">{pointCount} route points</span>
+            )}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border p-4 text-sm">
+          <div className="flex flex-col">
+            <span className="text-xs text-muted-foreground">Distance</span>
+            <span className="font-medium">{(distanceM / 1000).toFixed(1)}km</span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-xs text-muted-foreground">Est. duration</span>
+            <span className="font-medium">{formatDurationHours(durationHours)}</span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-xs text-muted-foreground">Elevation gain</span>
+            <span className="font-medium">{Math.round(elevationGainM)}m</span>
+          </div>
+          <div className="flex flex-col">
+            <span className="text-xs text-muted-foreground">Elevation loss</span>
+            <span className="font-medium">{Math.round(elevationLossM)}m</span>
+          </div>
+
+          <div className="col-span-2 flex items-center gap-2 border-t pt-2">
+            <Label htmlFor="avg-speed" className="text-xs text-muted-foreground">
+              Estimate at
+            </Label>
+            <Input
+              id="avg-speed"
+              type="number"
+              min={1}
+              step={1}
+              value={avgSpeedKmh}
+              onChange={(e) => {
+                const next = Number(e.target.value)
+                if (Number.isFinite(next) && next > 0) onAvgSpeedChange(next)
+              }}
+              className="h-7 w-16"
+            />
+            <span className="text-xs text-muted-foreground">km/h</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Button variant="destructive" className="w-fit flex-grow-1" onClick={() => setShowRemoveConfirm(true)}>
+            <Trash2Icon className="size-4" />
+            Remove route
+          </Button>
+          <Button className="w-fit flex-grow-1" onClick={onNext}>
+            Next
+            <ArrowRightIcon className="size-4" />
+          </Button>
+        </div>
+
+        <AlertDialog open={showRemoveConfirm} onOpenChange={setShowRemoveConfirm}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Remove this route?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Your POI selections and search results will be cleared too.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={onRemove}>Remove</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </div>
+    )
+  }
+
   return (
     <div className="flex flex-col gap-3">
       <div
@@ -58,9 +175,7 @@ export function ImportCard({ file, onFileChange, wahooTokens, onWahooTokensChang
         )}
       >
         <FileUp size={48} strokeWidth={1}></FileUp>
-        <p className="text-sm text-muted-foreground">
-          {file ? file.name : "Drag and drop a GPX file here"}
-        </p>
+        <p className="text-sm text-muted-foreground">Drag and drop a GPX file here</p>
         <Button type="button" onClick={() => inputRef.current?.click()}>
           Choose File
         </Button>

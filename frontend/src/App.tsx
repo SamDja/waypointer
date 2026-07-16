@@ -1,5 +1,4 @@
 import { useState } from "react"
-import { MapPinSearch } from "lucide-react"
 import { CandidateChecklist } from "@/components/CandidateChecklist"
 import { FindPoisCard } from "@/components/FindPoisCard"
 import { ImportCard } from "@/components/ImportCard"
@@ -9,10 +8,13 @@ import { StepCard } from "@/components/StepCard"
 import { Toaster } from "@/components/Toaster"
 import { WahooProfileMenu } from "@/components/WahooProfileMenu"
 import { ApiError, findPois } from "@/lib/api"
-import { parseRouteCoordsFromGpx } from "@/lib/gpx"
+import { elevationGainLossM, totalDistanceM } from "@/lib/geometry"
+import { parseRouteCoordsFromGpx, parseRouteElevationsFromGpx } from "@/lib/gpx"
 import {
+  loadAvgSpeedKmh,
   loadPoiSearchConfig,
   loadSettings,
+  saveAvgSpeedKmh,
   savePoiSearchConfig,
   saveSettings,
   type DeviceSettings,
@@ -27,6 +29,7 @@ type Step = "import" | "find" | "review"
 export default function App() {
   const [file, setFile] = useState<File | null>(null)
   const [previewRouteCoords, setPreviewRouteCoords] = useState<[number, number][]>([])
+  const [previewElevations, setPreviewElevations] = useState<(number | null)[]>([])
   const [findResult, setFindResult] = useState<FindPoisResponse | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [searchedPoiTypes, setSearchedPoiTypes] = useState<PoiSearchConfig[]>([])
@@ -36,6 +39,7 @@ export default function App() {
   const [isFinding, setIsFinding] = useState(false)
   const [openStep, setOpenStep] = useState<Step | null>("import")
   const [wahooTokens, setWahooTokens] = useState<WahooTokens | null>(() => loadWahooTokens())
+  const [avgSpeedKmh, setAvgSpeedKmh] = useState<number>(() => loadAvgSpeedKmh())
 
   async function handleFileChange(newFile: File) {
     setFile(newFile)
@@ -43,10 +47,26 @@ export default function App() {
     setSelectedIds(new Set())
     setSearchedPoiTypes([])
     setKeptWaypointIndices(new Set())
-    setOpenStep("find")
 
     const text = await newFile.text()
     setPreviewRouteCoords(parseRouteCoordsFromGpx(text))
+    setPreviewElevations(parseRouteElevationsFromGpx(text))
+  }
+
+  function handleRemoveRoute() {
+    setFile(null)
+    setPreviewRouteCoords([])
+    setPreviewElevations([])
+    setFindResult(null)
+    setSelectedIds(new Set())
+    setSearchedPoiTypes([])
+    setKeptWaypointIndices(new Set())
+    setOpenStep("import")
+  }
+
+  function handleAvgSpeedChange(speedKmh: number) {
+    setAvgSpeedKmh(speedKmh)
+    saveAvgSpeedKmh(speedKmh)
   }
 
   function handleDeviceSettingsChange(settings: DeviceSettings) {
@@ -111,12 +131,22 @@ export default function App() {
     }
   }
 
+  // No authoritative point count/distance exists client-side until
+  // /api/find-pois responds - previewRouteCoords (client-parsed GPX) is a
+  // rough stand-in until findResult.point_count is available.
+  const pointCount = findResult?.point_count ?? (previewRouteCoords.length || null)
+  // Unlike pointCount, distance/elevation have no backend-authoritative
+  // source at all (FindPoisResponse never carries them) - always computed
+  // client-side from the same preview data.
+  const distanceM = totalDistanceM(previewRouteCoords)
+  const { gainM: elevationGainM, lossM: elevationLossM } = elevationGainLossM(previewElevations)
+
   return (
     <div className="flex h-screen flex-col">
       <Toaster />
       <header className="flex shrink-0 items-center justify-between gap-1.5 border-b px-4 py-2">
         <div className="flex items-center gap-1.5">
-          <MapPinSearch className="size-5 text-indigo-600" />
+          <img src="favicon.svg" className="w-6" />
           <h1 className="text-lg font-semibold">Waypointer</h1>
         </div>
         <WahooProfileMenu wahooTokens={wahooTokens} onWahooTokensChange={setWahooTokens} />
@@ -135,31 +165,41 @@ export default function App() {
         <aside className="flex w-full min-h-0 flex-1 flex-col border-t md:w-[380px] md:flex-none md:border-t-0 md:border-l">
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0">
             <StepCard
-              title="1. Import route"
+              title={"1. Import route" + (file ? " ✅": "")}
               open={openStep === "import"}
               onOpenChange={(open) => setOpenStep(open ? "import" : null)}
             >
               <ImportCard
                 file={file}
                 onFileChange={handleFileChange}
+                onRemove={handleRemoveRoute}
+                onNext={() => setOpenStep("find")}
+                pointCount={pointCount}
+                distanceM={distanceM}
+                elevationGainM={elevationGainM}
+                elevationLossM={elevationLossM}
+                avgSpeedKmh={avgSpeedKmh}
+                onAvgSpeedChange={handleAvgSpeedChange}
                 wahooTokens={wahooTokens}
                 onWahooTokensChange={setWahooTokens}
               />
             </StepCard>
 
-            <StepCard
-              title="2. Find POIs"
-              open={openStep === "find"}
-              onOpenChange={(open) => setOpenStep(open ? "find" : null)}
-            >
-              <FindPoisCard
-                entries={poiSearchEntries}
-                onChange={handlePoiSearchChange}
-                onFind={handleFind}
-                disabled={!file || !poiSearchEntries.some((entry) => entry.enabled)}
-                isFinding={isFinding}
-              />
-            </StepCard>
+            {file && (
+              <StepCard
+                title={"2. Find POIs" + (findResult ? " ✅": "")}
+                open={openStep === "find"}
+                onOpenChange={(open) => setOpenStep(open ? "find" : null)}
+              >
+                <FindPoisCard
+                  entries={poiSearchEntries}
+                  onChange={handlePoiSearchChange}
+                  onFind={handleFind}
+                  disabled={!file || !poiSearchEntries.some((entry) => entry.enabled)}
+                  isFinding={isFinding}
+                />
+              </StepCard>
+            )}
 
             {findResult && (
               <StepCard
@@ -191,7 +231,7 @@ export default function App() {
                 wahooTokens={wahooTokens}
                 onWahooTokensChange={setWahooTokens}
               />
-          )}
+            )}
           </div>
         </aside>
       </div>
