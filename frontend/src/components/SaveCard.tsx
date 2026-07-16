@@ -10,8 +10,14 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { ApiError, saveRoute } from "@/lib/api"
+import { RouteNameDialog } from "@/components/RouteNameDialog"
+import { ApiError, fetchWahooRoutePayload, saveRoute } from "@/lib/api"
 import type { DeviceSettings } from "@/lib/settings"
+import { toast, updateToast } from "@/lib/toast"
+import { pushRouteToWahoo } from "@/lib/wahooApi"
+import { missingWahooScopeWarning } from "@/lib/wahooAuth"
+import { connectWahoo } from "@/lib/wahooConnect"
+import { getValidWahooAccessToken, type WahooTokens } from "@/lib/wahooSettings"
 import type { Candidate, ExistingWaypoint } from "@/types/candidate"
 
 export interface SaveCardProps {
@@ -22,7 +28,8 @@ export interface SaveCardProps {
   keptWaypointIndices: Set<number>
   settings: DeviceSettings
   onSettingsChange: (settings: DeviceSettings) => void
-  onStatus: (message: string, isError: boolean) => void
+  wahooTokens: WahooTokens | null
+  onWahooTokensChange: (tokens: WahooTokens | null) => void
 }
 
 export function SaveCard({
@@ -33,19 +40,25 @@ export function SaveCard({
   keptWaypointIndices,
   settings,
   onSettingsChange,
-  onStatus,
+  wahooTokens,
+  onWahooTokensChange,
 }: SaveCardProps) {
   const [isSaving, setIsSaving] = useState(false)
+  const [isConnectingWahoo, setIsConnectingWahoo] = useState(false)
+  const [isSendingToWahoo, setIsSendingToWahoo] = useState(false)
+  const [showSaveNameDialog, setShowSaveNameDialog] = useState(false)
+  const [showWahooNameDialog, setShowWahooNameDialog] = useState(false)
   const isFit = settings.device === "wahoo_elemnt_roam_v3"
+  const defaultRouteName = file.name.replace(/\.gpx$/i, "")
 
-  async function handleSave() {
+  async function handleSave(routeName: string) {
     const selectedCandidates = candidates.filter((c) => selectedIds.has(c.osm_id))
     const discardedWaypointIndices = existingWaypoints
       .filter((w) => !keptWaypointIndices.has(w.index))
       .map((w) => w.index)
 
     setIsSaving(true)
-    onStatus("Saving...", false)
+    const toastId = toast("Saving...", "loading")
     try {
       const { blob, filename } = await saveRoute({
         gpxFile: file,
@@ -53,6 +66,7 @@ export function SaveCard({
         device: settings.device,
         waterSymbol: settings.waterSymbol,
         discardedWaypointIndices,
+        routeName,
       })
 
       const url = URL.createObjectURL(blob)
@@ -64,12 +78,45 @@ export function SaveCard({
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
 
-      onStatus(`Saved ${filename}.`, false)
+      updateToast(toastId, `Saved ${filename}.`, "success")
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Network error while contacting the server."
-      onStatus(message, true)
+      updateToast(toastId, message, "error")
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  async function handleConnectWahoo() {
+    setIsConnectingWahoo(true)
+    const toastId = toast("Connecting to Wahoo...", "loading")
+    try {
+      const tokens = await connectWahoo()
+      onWahooTokensChange(tokens)
+      const scopeWarning = missingWahooScopeWarning(tokens)
+      updateToast(toastId, scopeWarning ?? "Connected to Wahoo.", scopeWarning !== null ? "error" : "success")
+    } catch (err) {
+      updateToast(toastId, err instanceof Error ? err.message : "Failed to connect to Wahoo.", "error")
+    } finally {
+      setIsConnectingWahoo(false)
+    }
+  }
+
+  async function handleSendToWahoo(routeName: string) {
+    const selectedCandidates = candidates.filter((c) => selectedIds.has(c.osm_id))
+
+    setIsSendingToWahoo(true)
+    const toastId = toast("Sending to Wahoo...", "loading")
+    try {
+      const payload = await fetchWahooRoutePayload(file, selectedCandidates, routeName)
+      const accessToken = await getValidWahooAccessToken()
+      await pushRouteToWahoo(payload, accessToken)
+      updateToast(toastId, "Sent to Wahoo - it will sync to your app and head unit shortly.", "success")
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Failed to send to Wahoo."
+      updateToast(toastId, message, "error")
+    } finally {
+      setIsSendingToWahoo(false)
     }
   }
 
@@ -119,9 +166,47 @@ export function SaveCard({
           </p>
         )}
 
-        <Button onClick={handleSave} loading={isSaving} className="w-fit">
-          {isSaving ? "Saving…" : "Save with selected fountains"}
+        <Button onClick={() => setShowSaveNameDialog(true)} loading={isSaving} className="w-fit">
+          {isSaving ? "Saving…" : "Download route"}
         </Button>
+
+        <div className="flex flex-col gap-2 border-t pt-4">
+          {wahooTokens ? (
+            <>
+              <p className="text-sm text-muted-foreground">
+                Connected to Wahoo{wahooTokens.athleteLabel ? ` as ${wahooTokens.athleteLabel}` : ""}. Sending
+                syncs the route to your Wahoo app and head unit automatically.
+              </p>
+              <Button
+                onClick={() => setShowWahooNameDialog(true)}
+                loading={isSendingToWahoo}
+                variant="secondary"
+                className="w-fit"
+              >
+                {isSendingToWahoo ? "Sending…" : "Send to Wahoo"}
+              </Button>
+            </>
+          ) : (
+            <Button onClick={handleConnectWahoo} loading={isConnectingWahoo} variant="secondary" className="w-fit">
+              {isConnectingWahoo ? "Connecting…" : "Connect Wahoo"}
+            </Button>
+          )}
+        </div>
+
+        <RouteNameDialog
+          open={showSaveNameDialog}
+          onOpenChange={setShowSaveNameDialog}
+          defaultName={defaultRouteName}
+          confirmLabel="Download"
+          onConfirm={handleSave}
+        />
+        <RouteNameDialog
+          open={showWahooNameDialog}
+          onOpenChange={setShowWahooNameDialog}
+          defaultName={defaultRouteName}
+          confirmLabel="Send to Wahoo"
+          onConfirm={handleSendToWahoo}
+        />
       </CardContent>
     </Card>
   )

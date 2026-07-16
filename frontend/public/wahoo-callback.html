@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Connecting Wahoo…</title>
+</head>
+<body>
+  <p>Connecting your Wahoo account…</p>
+  <script>
+    var params = new URLSearchParams(window.location.search)
+    if (window.opener) {
+      window.opener.postMessage(
+        {
+          type: "wahoo-oauth",
+          code: params.get("code"),
+          state: params.get("state"),
+          error: params.get("error"),
+        },
+        window.location.origin
+      )
+    }
+    window.close()
+  </script>
+</body>
+</html>

@@ -86,7 +86,9 @@ def _course_point_type_field(value: int) -> DeveloperField:
     return field
 
 
-def _record_messages(route_coords: list[LatLon], start_ts_ms: int) -> tuple[list[RecordMessage], list[float]]:
+def _record_messages(
+    route_coords: list[LatLon], elevations_m: list[float | None], start_ts_ms: int
+) -> tuple[list[RecordMessage], list[float]]:
     records = []
     distances = [0.0]
     distance = 0.0
@@ -103,6 +105,13 @@ def _record_messages(route_coords: list[LatLon], start_ts_ms: int) -> tuple[list
         record.position_long = lon
         record.distance = distance
         record.timestamp = start_ts_ms + i * TIMESTAMP_STEP_MS
+        # Left unset (rather than defaulted to 0) when the source GPX point
+        # has no <ele> - an explicit 0m would otherwise look like sea-level
+        # elevation instead of "unknown" (see main.py's callers, which
+        # source this from gpx_io.route_elevations()).
+        elevation = elevations_m[i] if i < len(elevations_m) else None
+        if elevation is not None:
+            record.altitude = elevation
         records.append(record)
 
     return records, distances[1:]
@@ -140,15 +149,24 @@ def build_course_fit_bytes(
     route_coords: list[LatLon],
     fountains: list[FitFountain],
     course_name: str,
+    elevations_m: list[float | None] | None = None,
 ) -> bytes:
     """Builds a full ridable FIT course: file_id, course, timer start
     event, one record per route point, developer field declarations, one
     course_point per fountain (native type=GENERIC, course_point_type
     developer field=16), timer stop event, and a lap. Returns encoded
     bytes - stateless, no filesystem I/O.
+
+    elevations_m, if given, must be index-parallel to route_coords (see
+    gpx_io.route_elevations()) and is used to set each record's altitude -
+    without it, Wahoo has no elevation data to show for the course at all.
+    Defaults to all-None (no altitude data) so callers that only have a
+    plain polyline (no source GPX) still work.
     """
     if not route_coords:
         raise ValueError("route_coords must contain at least one point")
+    if elevations_m is None:
+        elevations_m = [None] * len(route_coords)
 
     builder = FitFileBuilder(auto_define=True, min_string_size=50)
     start_ts_ms = _now_ms()
@@ -172,7 +190,7 @@ def build_course_fit_bytes(
     start_event.timestamp = start_ts_ms
     builder.add(start_event)
 
-    records, distances = _record_messages(route_coords, start_ts_ms)
+    records, distances = _record_messages(route_coords, elevations_m, start_ts_ms)
     builder.add_all(records)
 
     builder.add_all(_developer_field_declaration_messages())

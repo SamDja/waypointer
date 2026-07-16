@@ -1,11 +1,16 @@
+import base64
 import json
 
+import gpxpy
+import pytest
 import responses
 from fastapi.testclient import TestClient
 from fit_tool.fit_file import FitFile
+from fit_tool.profile.messages.course_message import CourseMessage
 from fit_tool.profile.messages.course_point_message import CoursePointMessage
 
 from waypointer import poi_types
+from waypointer.fit_io import build_course_fit_bytes
 from waypointer.main import app
 from waypointer.osm import OVERPASS_URL
 from waypointer.rate_limit import REQUESTS_PER_WINDOW
@@ -256,11 +261,155 @@ def test_save_wahoo_returns_fit_file(sample_route_bytes):
     assert course_point.developer_fields[0].get_value(0) == 16
 
 
+def test_save_honors_custom_route_name(sample_route_bytes):
+    response = client.post(
+        "/api/save",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"selected_candidates": "[]", "device": "generic", "route_name": "My Weekend Ride!"},
+    )
+    assert response.status_code == 200
+    # The download filename is sanitized for filesystem safety - non-
+    # alphanumeric runs become a single underscore.
+    assert "My_Weekend_Ride_waypoints.gpx" in response.headers["content-disposition"]
+
+
+def test_save_wahoo_course_name_preserves_custom_route_name(sample_route_bytes):
+    # Unlike the download filename above, the FIT course_name (shown
+    # on-device) must keep the name as typed - spaces included.
+    response = client.post(
+        "/api/save",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={
+            "selected_candidates": "[]",
+            "device": "wahoo_elemnt_roam_v3",
+            "route_name": "My Weekend Ride!",
+        },
+    )
+    assert response.status_code == 200
+    assert "My_Weekend_Ride_waypoints.fit" in response.headers["content-disposition"]
+
+    fit_file = FitFile.from_bytes(response.content)
+    messages = [r.message for r in fit_file.records if not r.is_definition]
+    course = next(m for m in messages if isinstance(m, CourseMessage))
+    assert course.course_name == "My Weekend Ride!"
+
+
 def test_save_rejects_unknown_device(sample_route_bytes):
     response = client.post(
         "/api/save",
         files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
         data={"selected_candidates": "[]", "device": "nonexistent"},
+    )
+    assert response.status_code == 400
+
+
+def test_wahoo_route_payload_returns_fit_and_metadata(sample_route_bytes):
+    selected = json.dumps(
+        [
+            {
+                "osm_id": 1001,
+                "poi_type": "water",
+                "name": "Fontaine Wallace",
+                "lat": 48.8567,
+                "lon": 2.3524,
+                "distance_m": 12.0,
+            }
+        ]
+    )
+    response = client.post(
+        "/api/wahoo/route-payload",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"selected_candidates": selected},
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["filename"] == "route.fit"
+    # sample_route.gpx's three trkpts have ele 35.0 -> 36.0 -> 37.0.
+    assert data["ascent_m"] == pytest.approx(2.0)
+    assert data["distance_m"] > 0
+    assert data["start_lat"] == pytest.approx(48.8566)
+    assert data["start_lng"] == pytest.approx(2.3522)
+
+    fit_bytes = base64.b64decode(data["fit_base64"])
+    fit_file = FitFile.from_bytes(fit_bytes)
+    messages = [r.message for r in fit_file.records if not r.is_definition]
+    course_point = next(m for m in messages if isinstance(m, CoursePointMessage))
+    assert course_point.developer_fields[0].get_value(0) == 16
+
+
+def test_wahoo_route_payload_honors_custom_route_name(sample_route_bytes):
+    response = client.post(
+        "/api/wahoo/route-payload",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"selected_candidates": "[]", "route_name": "My Weekend Ride!"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    # filename is sanitized for filesystem safety...
+    assert data["filename"] == "My_Weekend_Ride.fit"
+    # ...but route_name (Wahoo's display title) preserves the typed name as-is.
+    assert data["route_name"] == "My Weekend Ride!"
+
+    fit_bytes = base64.b64decode(data["fit_base64"])
+    fit_file = FitFile.from_bytes(fit_bytes)
+    messages = [r.message for r in fit_file.records if not r.is_definition]
+    course = next(m for m in messages if isinstance(m, CourseMessage))
+    # The FIT course_name (shown on-device) is likewise unsanitized.
+    assert course.course_name == "My Weekend Ride!"
+
+
+def test_wahoo_route_payload_rejects_invalid_selection_json(sample_route_bytes):
+    response = client.post(
+        "/api/wahoo/route-payload",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"selected_candidates": "not json"},
+    )
+    assert response.status_code == 400
+
+
+def test_wahoo_route_payload_rejects_invalid_gpx():
+    response = client.post(
+        "/api/wahoo/route-payload",
+        files={"gpx_file": ("bad.gpx", b"not xml", "application/gpx+xml")},
+        data={"selected_candidates": "[]"},
+    )
+    assert response.status_code == 400
+
+
+WAHOO_FILE_URL = "https://cdn.wahooligan.com/uploads/route/file/abc/route.fit"
+
+
+@responses.activate
+def test_wahoo_import_route_converts_fit_to_gpx():
+    coords = [(48.8566, 2.3522), (48.857, 2.353), (48.8575, 2.354)]
+    fit_bytes = build_course_fit_bytes(coords, [], course_name="Imported", elevations_m=[35.0, 36.0, 37.0])
+    responses.add(responses.GET, WAHOO_FILE_URL, body=fit_bytes, status=200)
+
+    response = client.post("/api/wahoo/import-route", data={"file_url": WAHOO_FILE_URL})
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("application/gpx+xml")
+    gpx = gpxpy.parse(response.content.decode("utf-8"))
+    points = [p for t in gpx.tracks for s in t.segments for p in s.points]
+    assert len(points) == 3
+    assert points[0].latitude == pytest.approx(48.8566, abs=1e-4)
+
+
+def test_wahoo_import_route_rejects_non_wahoo_host():
+    response = client.post(
+        "/api/wahoo/import-route",
+        data={"file_url": "https://evil.example.com/route.fit"},
+    )
+    assert response.status_code == 400
+
+
+def test_wahoo_import_route_rejects_lookalike_host():
+    # A host that merely contains the suffix as a substring (not a real
+    # subdomain) must not slip past the endswith guard.
+    response = client.post(
+        "/api/wahoo/import-route",
+        data={"file_url": "https://wahooligan.com.evil.example.com/route.fit"},
     )
     assert response.status_code == 400
 
