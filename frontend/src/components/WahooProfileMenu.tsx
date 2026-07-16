@@ -9,6 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { toast, updateToast } from "@/lib/toast"
 import { revokeWahooAccess } from "@/lib/wahooApi"
 import { missingWahooScopeWarning } from "@/lib/wahooAuth"
 import { connectWahoo } from "@/lib/wahooConnect"
@@ -17,23 +18,22 @@ import { clearWahooTokens, getValidWahooAccessToken, type WahooTokens } from "@/
 export interface WahooProfileMenuProps {
   wahooTokens: WahooTokens | null
   onWahooTokensChange: (tokens: WahooTokens | null) => void
-  onStatus: (message: string, isError: boolean) => void
 }
 
-export function WahooProfileMenu({ wahooTokens, onWahooTokensChange, onStatus }: WahooProfileMenuProps) {
+export function WahooProfileMenu({ wahooTokens, onWahooTokensChange }: WahooProfileMenuProps) {
   const [isConnecting, setIsConnecting] = useState(false)
   const [isDisconnecting, setIsDisconnecting] = useState(false)
 
   async function handleConnect() {
     setIsConnecting(true)
-    onStatus("Connecting to Wahoo...", false)
+    const toastId = toast("Connecting to Wahoo...", "loading")
     try {
       const tokens = await connectWahoo()
       onWahooTokensChange(tokens)
       const scopeWarning = missingWahooScopeWarning(tokens)
-      onStatus(scopeWarning ?? "Connected to Wahoo.", scopeWarning !== null)
+      updateToast(toastId, scopeWarning ?? "Connected to Wahoo.", scopeWarning !== null ? "error" : "success")
     } catch (err) {
-      onStatus(err instanceof Error ? err.message : "Failed to connect to Wahoo.", true)
+      updateToast(toastId, err instanceof Error ? err.message : "Failed to connect to Wahoo.", "error")
     } finally {
       setIsConnecting(false)
     }
@@ -41,6 +41,7 @@ export function WahooProfileMenu({ wahooTokens, onWahooTokensChange, onStatus }:
 
   async function handleDisconnect() {
     setIsDisconnecting(true)
+    const toastId = toast("Disconnecting from Wahoo...", "loading")
     try {
       // Revoke server-side before forgetting the token locally - Wahoo caps
       // unrevoked tokens per app+user, so merely dropping it from
@@ -56,7 +57,7 @@ export function WahooProfileMenu({ wahooTokens, onWahooTokensChange, onStatus }:
       }
       clearWahooTokens()
       onWahooTokensChange(null)
-      onStatus("Disconnected from Wahoo.", false)
+      updateToast(toastId, "Disconnected from Wahoo.", "success")
     } finally {
       setIsDisconnecting(false)
     }
@@ -67,14 +68,20 @@ export function WahooProfileMenu({ wahooTokens, onWahooTokensChange, onStatus }:
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" className="w-fit" loading={isConnecting || isDisconnecting}>
           <CircleUser className="size-4" />
-          {wahooTokens?.athleteLabel ?? "Wahoo"}
+          {wahooTokens?.athleteLabel ?? "Connect Wahoo"}
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {wahooTokens ? (
           <>
-            <DropdownMenuLabel>
-              Connected {wahooTokens.athleteLabel ? `as ${wahooTokens.athleteLabel}` : "to Wahoo"}
+            <DropdownMenuLabel className="flex flex-col">
+              {wahooTokens.athleteLabel ? (
+                <>
+                <span className="text-black">{wahooTokens.athleteLabel}</span>
+                </>
+              ): (<></>)
+              }
+              <span className="text-xs font-normal text-muted-foreground">Connected to Wahoo</span>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={handleDisconnect}>Disconnect</DropdownMenuItem>

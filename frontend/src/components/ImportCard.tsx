@@ -1,26 +1,21 @@
 import { useRef, useState, type DragEvent } from "react"
 import { Button } from "@/components/ui/button"
 import { WahooImportDialog } from "@/components/WahooImportDialog"
+import { toast, updateToast } from "@/lib/toast"
 import { missingWahooScopeWarning } from "@/lib/wahooAuth"
 import { connectWahoo } from "@/lib/wahooConnect"
 import { type WahooTokens } from "@/lib/wahooSettings"
 import { cn } from "@/lib/utils"
+import { FileUp } from "lucide-react"
 
 export interface ImportCardProps {
   file: File | null
   onFileChange: (file: File) => void
   wahooTokens: WahooTokens | null
   onWahooTokensChange: (tokens: WahooTokens | null) => void
-  onStatus: (message: string, isError: boolean) => void
 }
 
-export function ImportCard({
-  file,
-  onFileChange,
-  wahooTokens,
-  onWahooTokensChange,
-  onStatus,
-}: ImportCardProps) {
+export function ImportCard({ file, onFileChange, wahooTokens, onWahooTokensChange }: ImportCardProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [isDragActive, setIsDragActive] = useState(false)
   const [isConnectingWahoo, setIsConnectingWahoo] = useState(false)
@@ -35,14 +30,14 @@ export function ImportCard({
 
   async function handleConnectWahoo() {
     setIsConnectingWahoo(true)
-    onStatus("Connecting to Wahoo...", false)
+    const toastId = toast("Connecting to Wahoo...", "loading")
     try {
       const tokens = await connectWahoo()
       onWahooTokensChange(tokens)
       const scopeWarning = missingWahooScopeWarning(tokens)
-      onStatus(scopeWarning ?? "Connected to Wahoo.", scopeWarning !== null)
+      updateToast(toastId, scopeWarning ?? "Connected to Wahoo.", scopeWarning !== null ? "error" : "success")
     } catch (err) {
-      onStatus(err instanceof Error ? err.message : "Failed to connect to Wahoo.", true)
+      updateToast(toastId, err instanceof Error ? err.message : "Failed to connect to Wahoo.", "error")
     } finally {
       setIsConnectingWahoo(false)
     }
@@ -62,6 +57,7 @@ export function ImportCard({
           isDragActive ? "border-primary bg-accent" : "border-input"
         )}
       >
+        <FileUp size={48} strokeWidth={1}></FileUp>
         <p className="text-sm text-muted-foreground">
           {file ? file.name : "Drag and drop a GPX file here"}
         </p>
@@ -87,13 +83,13 @@ export function ImportCard({
       </div>
 
       {wahooTokens ? (
-        <Button variant="secondary" className="w-fit" onClick={() => setShowWahooImport(true)}>
+        <Button variant="secondary" className="w-full" onClick={() => setShowWahooImport(true)}>
           Import from Wahoo
         </Button>
       ) : (
         <Button
           variant="secondary"
-          className="w-fit"
+          className="w-full"
           loading={isConnectingWahoo}
           onClick={handleConnectWahoo}
         >
@@ -101,12 +97,7 @@ export function ImportCard({
         </Button>
       )}
 
-      <WahooImportDialog
-        open={showWahooImport}
-        onOpenChange={setShowWahooImport}
-        onImport={onFileChange}
-        onError={(message) => onStatus(message, true)}
-      />
+      <WahooImportDialog open={showWahooImport} onOpenChange={setShowWahooImport} onImport={onFileChange} />
     </div>
   )
 }

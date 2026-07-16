@@ -72,15 +72,15 @@ function RouteDirectionArrows({ routeCoords }: { routeCoords: [number, number][]
     const decorator = L.polylineDecorator(polyline, {
       patterns: [
         {
-          offset: "10%",
-          repeat: "10%",
+          offset: 100,
+          repeat: 200,
           symbol: L.Symbol.marker({
             rotate: true,
             markerOptions: {
               interactive: false,
               icon: L.icon({
-                iconUrl: '/square-arrow.svg',
-                iconAnchor: [10, 20]
+                iconUrl: '/arrow-big.svg',
+                iconAnchor: [12, 24]
               }),
             }
           }),
@@ -130,7 +130,7 @@ export function RouteMap({ routeCoords, candidates, selectedIds, onToggle }: Rou
               icon={buildCircleDivIcon({
                 icon: Icon,
                 color,
-                opacity: isSelected ? 0.9 : 0.35,
+                opacity: isSelected ? 1 : 0.35,
               })}
             >
               <Popup>

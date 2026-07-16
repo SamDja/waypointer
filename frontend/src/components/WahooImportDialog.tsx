@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { importWahooRoute } from "@/lib/api"
+import { toast } from "@/lib/toast"
 import { listWahooRoutes, type WahooRoute } from "@/lib/wahooApi"
 import { getValidWahooAccessToken } from "@/lib/wahooSettings"
 
@@ -15,21 +16,19 @@ export interface WahooImportDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   onImport: (file: File) => void
-  onError: (message: string) => void
 }
 
-export function WahooImportDialog({ open, onOpenChange, onImport, onError }: WahooImportDialogProps) {
+export function WahooImportDialog({ open, onOpenChange, onImport }: WahooImportDialogProps) {
   const [routes, setRoutes] = useState<WahooRoute[] | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [importingId, setImportingId] = useState<number | null>(null)
 
-  // Kept in refs so the fetch effect below can depend on `open` alone -
-  // these callbacks are recreated on every parent render, and including
-  // them as deps would re-run the effect (re-fetching the list) on every
-  // unrelated re-render while the dialog is open.
-  const onErrorRef = useRef(onError)
+  // Kept in a ref so the fetch effect below can depend on `open` alone -
+  // onOpenChange is recreated on every parent render, and including it as a
+  // dep would re-run the effect (re-fetching the list) on every unrelated
+  // re-render while the dialog is open. toast() itself is a stable
+  // module-level import, so it doesn't need the same treatment.
   const onOpenChangeRef = useRef(onOpenChange)
-  onErrorRef.current = onError
   onOpenChangeRef.current = onOpenChange
 
   useEffect(() => {
@@ -44,7 +43,7 @@ export function WahooImportDialog({ open, onOpenChange, onImport, onError }: Wah
         if (!cancelled) setRoutes(result)
       } catch (err) {
         if (cancelled) return
-        onErrorRef.current(err instanceof Error ? err.message : "Failed to load Wahoo routes.")
+        toast(err instanceof Error ? err.message : "Failed to load Wahoo routes.", "error")
         onOpenChangeRef.current(false)
       } finally {
         if (!cancelled) setIsLoading(false)
@@ -63,7 +62,7 @@ export function WahooImportDialog({ open, onOpenChange, onImport, onError }: Wah
       onImport(file)
       onOpenChange(false)
     } catch (err) {
-      onError(err instanceof Error ? err.message : "Failed to import the Wahoo route.")
+      toast(err instanceof Error ? err.message : "Failed to import the Wahoo route.", "error")
     } finally {
       setImportingId(null)
     }

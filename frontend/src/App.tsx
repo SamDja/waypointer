@@ -5,8 +5,8 @@ import { FindPoisCard } from "@/components/FindPoisCard"
 import { ImportCard } from "@/components/ImportCard"
 import { RouteMap } from "@/components/RouteMap"
 import { SaveCard } from "@/components/SaveCard"
-import { StatusMessage } from "@/components/StatusMessage"
 import { StepCard } from "@/components/StepCard"
+import { Toaster } from "@/components/Toaster"
 import { WahooProfileMenu } from "@/components/WahooProfileMenu"
 import { ApiError, findPois } from "@/lib/api"
 import { parseRouteCoordsFromGpx } from "@/lib/gpx"
@@ -18,6 +18,7 @@ import {
   type DeviceSettings,
   type PoiSearchEntry,
 } from "@/lib/settings"
+import { toast, updateToast } from "@/lib/toast"
 import { loadWahooTokens, type WahooTokens } from "@/lib/wahooSettings"
 import type { FindPoisResponse, PoiSearchConfig } from "@/types/candidate"
 
@@ -32,7 +33,6 @@ export default function App() {
   const [keptWaypointIndices, setKeptWaypointIndices] = useState<Set<number>>(new Set())
   const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>(() => loadSettings())
   const [poiSearchEntries, setPoiSearchEntries] = useState<PoiSearchEntry[]>(() => loadPoiSearchConfig())
-  const [status, setStatus] = useState({ message: "", isError: false })
   const [isFinding, setIsFinding] = useState(false)
   const [openStep, setOpenStep] = useState<Step | null>("import")
   const [wahooTokens, setWahooTokens] = useState<WahooTokens | null>(() => loadWahooTokens())
@@ -43,7 +43,6 @@ export default function App() {
     setSelectedIds(new Set())
     setSearchedPoiTypes([])
     setKeptWaypointIndices(new Set())
-    setStatus({ message: "", isError: false })
     setOpenStep("find")
 
     const text = await newFile.text()
@@ -93,7 +92,7 @@ export default function App() {
     if (poiConfig.length === 0) return
 
     setIsFinding(true)
-    setStatus({ message: "Searching OpenStreetMap for nearby POIs...", isError: false })
+    const toastId = toast("Searching OpenStreetMap for nearby POIs...", "loading")
     try {
       const result = await findPois(file, poiConfig)
       setFindResult(result)
@@ -102,11 +101,11 @@ export default function App() {
       // Default to keeping every pre-existing waypoint, matching today's
       // behavior before this toggle existed.
       setKeptWaypointIndices(new Set(result.existing_waypoints.map((w) => w.index)))
-      setStatus({ message: "", isError: false })
+      updateToast(toastId, `Found ${result.candidates.length} candidate(s).`, "success")
       setOpenStep("review")
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Network error while contacting the server."
-      setStatus({ message, isError: true })
+      updateToast(toastId, message, "error")
     } finally {
       setIsFinding(false)
     }
@@ -118,16 +117,13 @@ export default function App() {
 
   return (
     <div className="flex h-screen flex-col">
+      <Toaster />
       <header className="flex shrink-0 items-center justify-between gap-1.5 border-b px-4 py-2">
         <div className="flex items-center gap-1.5">
           <MapPinSearch className="size-5 text-indigo-600" />
           <h1 className="text-lg font-semibold">Waypointer</h1>
         </div>
-        <WahooProfileMenu
-          wahooTokens={wahooTokens}
-          onWahooTokensChange={setWahooTokens}
-          onStatus={(message, isError) => setStatus({ message, isError })}
-        />
+        <WahooProfileMenu wahooTokens={wahooTokens} onWahooTokensChange={setWahooTokens} />
       </header>
 
       <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
@@ -152,7 +148,6 @@ export default function App() {
                 onFileChange={handleFileChange}
                 wahooTokens={wahooTokens}
                 onWahooTokensChange={setWahooTokens}
-                onStatus={(message, isError) => setStatus({ message, isError })}
               />
             </StepCard>
 
@@ -190,24 +185,19 @@ export default function App() {
             )}
           </div>
 
-          {(status.message || (findResult && file)) && (
+          {findResult && file && (
             <div className="flex shrink-0 flex-col gap-4 border-t p-4">
-              <StatusMessage message={status.message} isError={status.isError} />
-
-              {findResult && file && (
-                <SaveCard
-                  file={file}
-                  candidates={findResult.candidates}
-                  selectedIds={selectedIds}
-                  existingWaypoints={findResult.existing_waypoints}
-                  keptWaypointIndices={keptWaypointIndices}
-                  settings={deviceSettings}
-                  onSettingsChange={handleDeviceSettingsChange}
-                  wahooTokens={wahooTokens}
-                  onWahooTokensChange={setWahooTokens}
-                  onStatus={(message, isError) => setStatus({ message, isError })}
-                />
-              )}
+              <SaveCard
+                file={file}
+                candidates={findResult.candidates}
+                selectedIds={selectedIds}
+                existingWaypoints={findResult.existing_waypoints}
+                keptWaypointIndices={keptWaypointIndices}
+                settings={deviceSettings}
+                onSettingsChange={handleDeviceSettingsChange}
+                wahooTokens={wahooTokens}
+                onWahooTokensChange={setWahooTokens}
+              />
             </div>
           )}
         </aside>

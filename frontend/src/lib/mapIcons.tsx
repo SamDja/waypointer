@@ -14,7 +14,7 @@ interface CircleDivIconOptions {
 
 export function buildCircleDivIcon({ icon: Icon, color, size = 28, opacity = 1 }: CircleDivIconOptions): L.DivIcon {
   const iconSize = Math.round(size * 0.55)
-  const iconSvg = renderToStaticMarkup(<Icon size={iconSize} color="#fff" strokeWidth={2.5} />)
+  const iconSvg = renderToStaticMarkup(<Icon size={iconSize} color="#fff" fill="#fff" strokeWidth={2.5} />)
   const html = `
     <div style="
       width: ${size}px;

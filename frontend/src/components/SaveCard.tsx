@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/select"
 import { ApiError, fetchWahooRoutePayload, saveRoute } from "@/lib/api"
 import type { DeviceSettings } from "@/lib/settings"
+import { toast, updateToast } from "@/lib/toast"
 import { pushRouteToWahoo } from "@/lib/wahooApi"
 import { missingWahooScopeWarning } from "@/lib/wahooAuth"
 import { connectWahoo } from "@/lib/wahooConnect"
@@ -28,7 +29,6 @@ export interface SaveCardProps {
   onSettingsChange: (settings: DeviceSettings) => void
   wahooTokens: WahooTokens | null
   onWahooTokensChange: (tokens: WahooTokens | null) => void
-  onStatus: (message: string, isError: boolean) => void
 }
 
 export function SaveCard({
@@ -41,7 +41,6 @@ export function SaveCard({
   onSettingsChange,
   wahooTokens,
   onWahooTokensChange,
-  onStatus,
 }: SaveCardProps) {
   const [isSaving, setIsSaving] = useState(false)
   const [isConnectingWahoo, setIsConnectingWahoo] = useState(false)
@@ -55,7 +54,7 @@ export function SaveCard({
       .map((w) => w.index)
 
     setIsSaving(true)
-    onStatus("Saving...", false)
+    const toastId = toast("Saving...", "loading")
     try {
       const { blob, filename } = await saveRoute({
         gpxFile: file,
@@ -74,10 +73,10 @@ export function SaveCard({
       document.body.removeChild(a)
       URL.revokeObjectURL(url)
 
-      onStatus(`Saved ${filename}.`, false)
+      updateToast(toastId, `Saved ${filename}.`, "success")
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Network error while contacting the server."
-      onStatus(message, true)
+      updateToast(toastId, message, "error")
     } finally {
       setIsSaving(false)
     }
@@ -85,14 +84,14 @@ export function SaveCard({
 
   async function handleConnectWahoo() {
     setIsConnectingWahoo(true)
-    onStatus("Connecting to Wahoo...", false)
+    const toastId = toast("Connecting to Wahoo...", "loading")
     try {
       const tokens = await connectWahoo()
       onWahooTokensChange(tokens)
       const scopeWarning = missingWahooScopeWarning(tokens)
-      onStatus(scopeWarning ?? "Connected to Wahoo.", scopeWarning !== null)
+      updateToast(toastId, scopeWarning ?? "Connected to Wahoo.", scopeWarning !== null ? "error" : "success")
     } catch (err) {
-      onStatus(err instanceof Error ? err.message : "Failed to connect to Wahoo.", true)
+      updateToast(toastId, err instanceof Error ? err.message : "Failed to connect to Wahoo.", "error")
     } finally {
       setIsConnectingWahoo(false)
     }
@@ -102,15 +101,15 @@ export function SaveCard({
     const selectedCandidates = candidates.filter((c) => selectedIds.has(c.osm_id))
 
     setIsSendingToWahoo(true)
-    onStatus("Sending to Wahoo...", false)
+    const toastId = toast("Sending to Wahoo...", "loading")
     try {
       const payload = await fetchWahooRoutePayload(file, selectedCandidates)
       const accessToken = await getValidWahooAccessToken()
       await pushRouteToWahoo(payload, accessToken)
-      onStatus("Sent to Wahoo - it will sync to your app and head unit shortly.", false)
+      updateToast(toastId, "Sent to Wahoo - it will sync to your app and head unit shortly.", "success")
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to send to Wahoo."
-      onStatus(message, true)
+      updateToast(toastId, message, "error")
     } finally {
       setIsSendingToWahoo(false)
     }
