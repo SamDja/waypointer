@@ -9,6 +9,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import { WahooRoutesDialog } from "@/components/WahooRoutesDialog"
 import { toast, updateToast } from "@/lib/toast"
 import { revokeWahooAccess } from "@/lib/wahooApi"
 import { missingWahooScopeWarning } from "@/lib/wahooAuth"
@@ -23,6 +24,7 @@ export interface WahooProfileMenuProps {
 export function WahooProfileMenu({ wahooTokens, onWahooTokensChange }: WahooProfileMenuProps) {
   const [isConnecting, setIsConnecting] = useState(false)
   const [isDisconnecting, setIsDisconnecting] = useState(false)
+  const [showManageDialog, setShowManageDialog] = useState(false)
 
   async function handleConnect() {
     setIsConnecting(true)
@@ -64,32 +66,39 @@ export function WahooProfileMenu({ wahooTokens, onWahooTokensChange }: WahooProf
   }
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button variant="ghost" className="w-fit" loading={isConnecting || isDisconnecting}>
-          <CircleUser className="size-4" />
-          {wahooTokens?.athleteLabel ?? "Connect Wahoo"}
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        {wahooTokens ? (
-          <>
-            <DropdownMenuLabel className="flex flex-col">
-              {wahooTokens.athleteLabel ? (
-                <>
-                <span className="text-black">{wahooTokens.athleteLabel}</span>
-                </>
-              ): (<></>)
-              }
-              <span className="text-xs font-normal text-muted-foreground">Connected to Wahoo</span>
-            </DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={handleDisconnect}>Disconnect</DropdownMenuItem>
-          </>
-        ) : (
-          <DropdownMenuItem onSelect={handleConnect}>Connect Wahoo</DropdownMenuItem>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button variant="ghost" className="w-fit" loading={isConnecting || isDisconnecting}>
+            <CircleUser className="size-4" />
+            {wahooTokens?.athleteLabel ?? "Connect Wahoo"}
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          {wahooTokens ? (
+            <>
+              <DropdownMenuLabel className="flex flex-col">
+                {wahooTokens.athleteLabel ? (
+                  <>
+                  <span className="text-black">{wahooTokens.athleteLabel}</span>
+                  </>
+                ): (<></>)
+                }
+                <span className="text-xs font-normal text-muted-foreground">Connected to Wahoo</span>
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem onSelect={() => setShowManageDialog(true)}>Manage routes</DropdownMenuItem>
+              <DropdownMenuItem onSelect={handleDisconnect}>Disconnect</DropdownMenuItem>
+            </>
+          ) : (
+            <DropdownMenuItem onSelect={handleConnect}>Connect Wahoo</DropdownMenuItem>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      {wahooTokens && (
+        <WahooRoutesDialog open={showManageDialog} onOpenChange={setShowManageDialog} mode="manage" />
+      )}
+    </>
   )
 }

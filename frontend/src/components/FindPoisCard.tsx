@@ -11,10 +11,9 @@ export interface FindPoisCardProps {
   onFind: () => void
   disabled: boolean
   isFinding: boolean
-  routeSummary: string | null
 }
 
-export function FindPoisCard({ entries, onChange, onFind, disabled, isFinding, routeSummary }: FindPoisCardProps) {
+export function FindPoisCard({ entries, onChange, onFind, disabled, isFinding }: FindPoisCardProps) {
   function updateEntry(poiType: string, changes: Partial<PoiSearchEntry>) {
     onChange(entries.map((entry) => (entry.poiType === poiType ? { ...entry, ...changes } : entry)))
   }
@@ -57,7 +56,6 @@ export function FindPoisCard({ entries, onChange, onFind, disabled, isFinding, r
       <Button onClick={onFind} disabled={disabled} loading={isFinding} className="w-fit">
         {isFinding ? "Finding POIs…" : "Find POIs"}
       </Button>
-      {routeSummary && <p className="text-sm text-muted-foreground">{routeSummary}</p>}
     </div>
   )
 }

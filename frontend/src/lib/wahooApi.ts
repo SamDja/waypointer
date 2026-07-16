@@ -27,6 +27,8 @@ export interface WahooRoute {
   ascentM: number
   createdAt: string
   fileUrl: string
+  startLat: number
+  startLng: number
 }
 
 interface RawWahooRoute {
@@ -36,6 +38,8 @@ interface RawWahooRoute {
   ascent: number
   created_at: string
   file: { url: string }
+  start_lat: number
+  start_lng: number
 }
 
 export async function pushRouteToWahoo(payload: WahooRoutePayload, accessToken: string): Promise<void> {
@@ -116,5 +120,40 @@ export async function listWahooRoutes(accessToken: string): Promise<WahooRoute[]
     ascentM: r.ascent,
     createdAt: r.created_at,
     fileUrl: r.file.url,
+    startLat: r.start_lat,
+    startLng: r.start_lng,
   }))
+}
+
+export async function deleteWahooRoute(id: number, accessToken: string): Promise<void> {
+  const response = await fetch(`${WAHOO_OAUTH_BASE}/v1/routes/${id}`, {
+    method: "DELETE",
+    headers: { Authorization: `Bearer ${accessToken}` },
+  })
+  if (!response.ok) {
+    throw new ApiError(`Failed to delete the route (${response.status}).`)
+  }
+}
+
+// Wahoo's PUT /v1/routes/:id requires route[provider_updated_at],
+// route[start_lat], route[start_lng], route[distance], and route[ascent] on
+// every update (only file-related fields are optional) - so a name-only
+// rename still has to resend the route's existing values for the rest.
+export async function updateWahooRouteName(route: WahooRoute, name: string, accessToken: string): Promise<void> {
+  const formData = new FormData()
+  formData.append("route[name]", name)
+  formData.append("route[provider_updated_at]", new Date().toISOString())
+  formData.append("route[start_lat]", String(route.startLat))
+  formData.append("route[start_lng]", String(route.startLng))
+  formData.append("route[distance]", String(route.distanceM))
+  formData.append("route[ascent]", String(route.ascentM))
+
+  const response = await fetch(`${WAHOO_OAUTH_BASE}/v1/routes/${route.id}`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${accessToken}` },
+    body: formData,
+  })
+  if (!response.ok) {
+    throw new ApiError(`Failed to rename the route (${response.status}).`)
+  }
 }

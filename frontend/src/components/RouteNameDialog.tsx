@@ -44,7 +44,14 @@ export function RouteNameDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      {/* z-[1150]/1151 - a tier above the base Dialog (z-[1100]/1101, see
+          dialog.tsx) since this can be opened nested on top of another
+          already-open Dialog (e.g. WahooRoutesDialog's rename flow) - without
+          this, CSS z-index ties would let that outer Dialog's opaque content
+          paint over this one's overlay, hiding the dimmed backdrop (same bug
+          fixed for alert-dialog.tsx, which sits one tier higher still since
+          it can in turn confirm on top of this dialog). */}
+      <DialogContent className="z-[1151]" overlayClassName="z-[1150]">
         <form onSubmit={handleSubmit}>
           <DialogHeader>
             <DialogTitle>Name your route</DialogTitle>

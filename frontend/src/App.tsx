@@ -111,10 +111,6 @@ export default function App() {
     }
   }
 
-  const routeSummary = findResult
-    ? `${findResult.point_count} route points, ${findResult.existing_waypoints.length} existing waypoint(s) in file.`
-    : null
-
   return (
     <div className="flex h-screen flex-col">
       <Toaster />
@@ -162,7 +158,6 @@ export default function App() {
                 onFind={handleFind}
                 disabled={!file || !poiSearchEntries.some((entry) => entry.enabled)}
                 isFinding={isFinding}
-                routeSummary={routeSummary}
               />
             </StepCard>
 

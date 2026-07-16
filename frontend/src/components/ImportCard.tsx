@@ -1,6 +1,6 @@
 import { useRef, useState, type DragEvent } from "react"
 import { Button } from "@/components/ui/button"
-import { WahooImportDialog } from "@/components/WahooImportDialog"
+import { WahooRoutesDialog } from "@/components/WahooRoutesDialog"
 import { toast, updateToast } from "@/lib/toast"
 import { missingWahooScopeWarning } from "@/lib/wahooAuth"
 import { connectWahoo } from "@/lib/wahooConnect"
@@ -97,7 +97,12 @@ export function ImportCard({ file, onFileChange, wahooTokens, onWahooTokensChang
         </Button>
       )}
 
-      <WahooImportDialog open={showWahooImport} onOpenChange={setShowWahooImport} onImport={onFileChange} />
+      <WahooRoutesDialog
+        open={showWahooImport}
+        onOpenChange={setShowWahooImport}
+        mode="import"
+        onImport={onFileChange}
+      />
     </div>
   )
 }
