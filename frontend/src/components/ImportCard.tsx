@@ -227,11 +227,11 @@ export function ImportCard({
         </Tabs>
 
         <div className="flex items-center gap-2">
-          <Button variant="destructive" className="w-fit flex-grow-1" onClick={() => setShowRemoveConfirm(true)}>
+          <Button variant="destructive" className="w-fit" onClick={() => setShowRemoveConfirm(true)}>
             <Trash2Icon className="size-4" />
             Remove route
           </Button>
-          <Button className="w-fit flex-grow-1" onClick={handleNext}>
+          <Button className="w-fit grow" onClick={handleNext}>
             Next
             <ArrowRightIcon className="size-4" />
           </Button>
@@ -247,7 +247,9 @@ export function ImportCard({
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={onRemove}>Remove</AlertDialogAction>
+              <AlertDialogAction onClick={onRemove} className="bg-red-600 text-white hover:bg-red-700">
+                Remove
+              </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>

@@ -20,7 +20,7 @@ interface CircleDivIconOptions {
 // the icon's innerHTML wholesale (react-leaflet's Marker.setIcon(), since
 // the icon object identity changes), leaving no previous DOM state for a
 // CSS transition to animate from - it would just snap.
-export function buildCircleDivIcon({ icon: Icon, bgColor, iconColor = colors.white, size = 28 }: CircleDivIconOptions): L.DivIcon {
+export function buildCircleDivIcon({ icon: Icon, bgColor, iconColor = colors.olive[50], size = 28 }: CircleDivIconOptions): L.DivIcon {
   const iconSize = Math.round(size * 0.7)
   const iconSvg = renderToStaticMarkup(<Icon size={iconSize} color={iconColor} strokeWidth={2} />)
   const html = `
