@@ -167,7 +167,7 @@ export function RouteMap({
               position={[candidate.lat, candidate.lon]}
               icon={buildCircleDivIcon({
                 icon: Icon,
-                iconColor: isSelected ? colors.white : colors.mist[400],
+                iconColor: isSelected ? colors.olive[50] : colors.mist[400],
                 bgColor: isSelected ? color : colors.mist[200],
               })}
               opacity={isHovered ? 1 : isHovering ? DIMMED_OPACITY : 1}
@@ -208,7 +208,7 @@ export function RouteMap({
               position={[waypoint.lat, waypoint.lon]}
               icon={buildCircleDivIcon({
                 icon: Icon,
-                iconColor: isKept ? colors.white : colors.mist[400],
+                iconColor: isKept ? colors.olive[50] : colors.mist[400],
                 bgColor: isKept ? color : colors.mist[200],
               })}
               opacity={isHovered ? 1 : isHovering ? DIMMED_OPACITY : 1}

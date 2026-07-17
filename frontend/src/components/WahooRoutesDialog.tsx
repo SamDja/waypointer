@@ -151,7 +151,6 @@ export function WahooRoutesDialog(props: WahooRoutesDialogProps) {
                       loading={importingId === route.id}
                       disabled={importingId !== null}
                       size="sm"
-                      variant="secondary"
                     >
                       Import
                     </Button>
@@ -226,7 +225,9 @@ export function WahooRoutesDialog(props: WahooRoutesDialogProps) {
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleConfirmDelete}>Delete</AlertDialogAction>
+                <AlertDialogAction onClick={handleConfirmDelete} className="bg-red-600 text-white hover:bg-red-700">
+                  Delete
+                </AlertDialogAction>
               </AlertDialogFooter>
             </AlertDialogContent>
           </AlertDialog>
