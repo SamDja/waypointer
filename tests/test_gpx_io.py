@@ -7,11 +7,13 @@ from waypointer.gpx_io import (
     add_waypoints,
     discard_waypoints,
     existing_osm_ids,
+    infer_poi_type,
     is_duplicate_candidate,
     make_waypoint,
     parse_gpx,
     route_coordinates,
     route_elevations,
+    stamp_poi_type,
     to_xml_bytes,
     total_ascent_m,
 )
@@ -157,6 +159,43 @@ def test_total_ascent_skips_gap_around_missing_elevation():
         </gpx>"""
     )
     assert total_ascent_m(gpx) == 0.0
+
+
+def test_infer_poi_type_from_osm_id_marker(sample_route_bytes):
+    gpx = parse_gpx(sample_route_bytes)
+    node = OsmNode(id=42, lat=48.0, lon=2.0, tags={"name": "Fontaine Wallace"})
+    add_waypoints(gpx, [make_waypoint(node, DEVICE_PROFILES["generic"], distance_m=1.0)])
+    reparsed = parse_gpx(to_xml_bytes(gpx))
+    new_wpt = next(w for w in reparsed.waypoints if w.name == "Fontaine Wallace")
+    assert infer_poi_type(new_wpt) == "water"
+
+
+def test_infer_poi_type_from_symbol_hint(sample_route_bytes):
+    gpx = parse_gpx(sample_route_bytes)
+    existing_wpt = next(w for w in gpx.waypoints if w.name == "Existing WPT")
+    existing_wpt.symbol = "Drinking Water"
+    assert infer_poi_type(existing_wpt) == "water"
+
+
+def test_infer_poi_type_defaults_to_generic_when_unmatched(sample_route_bytes):
+    gpx = parse_gpx(sample_route_bytes)
+    existing_wpt = next(w for w in gpx.waypoints if w.name == "Existing WPT")
+    assert infer_poi_type(existing_wpt) == "generic"
+
+
+def test_infer_poi_type_poi_type_marker_wins_over_osm_id_and_sym_hints(sample_route_bytes):
+    # A stamped poi_type marker is authoritative - it must win even when the
+    # waypoint also has the osm_id marker (which would otherwise imply
+    # "water") and a <sym> that would otherwise sym-hint-match "water".
+    gpx = parse_gpx(sample_route_bytes)
+    node = OsmNode(id=42, lat=48.0, lon=2.0, tags={"name": "Fontaine Wallace"})
+    waypoint = make_waypoint(node, DEVICE_PROFILES["generic"], distance_m=1.0)
+    waypoint.symbol = "Drinking Water"
+    stamp_poi_type(waypoint, "toilet")
+    add_waypoints(gpx, [waypoint])
+    reparsed = parse_gpx(to_xml_bytes(gpx))
+    new_wpt = next(w for w in reparsed.waypoints if w.name == "Fontaine Wallace")
+    assert infer_poi_type(new_wpt) == "toilet"
 
 
 def test_is_duplicate_candidate_by_proximity_fallback(sample_route_bytes):

@@ -1,16 +1,13 @@
-import { Checkbox } from "@/components/ui/checkbox"
-import { Label } from "@/components/ui/label"
+import { PoiListItem } from "@/components/PoiListItem"
 import { POI_TYPES } from "@/lib/poiTypes"
-import type { Candidate, ExistingWaypoint, PoiSearchConfig } from "@/types/candidate"
+import type { Candidate, PoiSearchConfig } from "@/types/candidate"
 
 export interface CandidateChecklistProps {
   candidates: Candidate[]
   selectedIds: Set<number>
   onToggle: (osmId: number) => void
   searchedPoiTypes: PoiSearchConfig[]
-  existingWaypoints: ExistingWaypoint[]
-  keptWaypointIndices: Set<number>
-  onToggleExistingWaypoint: (index: number) => void
+  onHoverCandidate?: (osmId: number | null) => void
 }
 
 export function CandidateChecklist({
@@ -18,73 +15,49 @@ export function CandidateChecklist({
   selectedIds,
   onToggle,
   searchedPoiTypes,
-  existingWaypoints,
-  keptWaypointIndices,
-  onToggleExistingWaypoint,
+  onHoverCandidate,
 }: CandidateChecklistProps) {
   return (
     <div className="flex flex-col gap-4">
-      {searchedPoiTypes.map((search) => {
-        const cfg = POI_TYPES.find((p) => p.key === search.poi_type)
-        const label = cfg?.label ?? search.poi_type
-        const Icon = cfg?.icon
-        const typeCandidates = candidates.filter((c) => c.poi_type === search.poi_type)
+      {POI_TYPES.filter((cfg) => cfg.searchable).map((cfg) => {
+        const Icon = cfg.icon
+        const typeCandidates = candidates.filter((c) => c.poi_type === cfg.key)
+        const search = searchedPoiTypes.find((s) => s.poi_type === cfg.key)
+
+        // Nothing to show for this type: no candidates found and it wasn't
+        // even searched for.
+        if (typeCandidates.length === 0 && !search) return null
+
         return (
-          <div key={search.poi_type} className="flex flex-col gap-2">
+          <div key={cfg.key} className="flex flex-col gap-2">
             <h3 className="flex items-center gap-1.5 text-sm font-medium">
-              {Icon && <Icon className="size-4" />}
-              {label}
+              <Icon className="size-4" color={cfg.color} />
+              {cfg.label}
             </h3>
             {typeCandidates.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No {label.toLowerCase()} found within {search.max_distance_m}m of this route.
+                No {cfg.label.toLowerCase()} found within {search!.max_distance_m}m of this route.
               </p>
             ) : (
               <ul className="flex max-h-80 flex-col gap-2 overflow-y-auto">
-                {typeCandidates.map((candidate) => {
-                  const id = `candidate-${candidate.osm_id}`
-                  return (
-                    <li key={candidate.osm_id} className="flex items-center gap-2">
-                      <Checkbox
-                        id={id}
-                        checked={selectedIds.has(candidate.osm_id)}
-                        onCheckedChange={() => onToggle(candidate.osm_id)}
-                      />
-                      <Label htmlFor={id} className="text-sm font-normal">
-                        {candidate.name ? candidate.name + " -" : ""} {candidate.distance_m.toFixed(0)}m away (
-                        {candidate.lat.toFixed(5)}, {candidate.lon.toFixed(5)})
-                      </Label>
-                    </li>
-                  )
-                })}
+                {typeCandidates.sort((a,b) => a.distance_from_start_m - b.distance_from_start_m).map((candidate) => (
+                  <PoiListItem
+                    key={candidate.osm_id}
+                    id={`candidate-${candidate.osm_id}`}
+                    title={candidate.name || candidate.poi_type}
+                    checked={selectedIds.has(candidate.osm_id)}
+                    onCheckedChange={() => onToggle(candidate.osm_id)}
+                    distanceFromStartM={candidate.distance_from_start_m}
+                    distanceFromRouteM={candidate.distance_m}
+                    onMouseEnter={() => onHoverCandidate?.(candidate.osm_id)}
+                    onMouseLeave={() => onHoverCandidate?.(null)}
+                  />
+                ))}
               </ul>
             )}
           </div>
         )
       })}
-
-      {existingWaypoints.length > 0 && (
-        <div className="flex flex-col gap-2">
-          <h3 className="text-sm font-medium">Already in this file</h3>
-          <ul className="flex max-h-80 flex-col gap-2 overflow-y-auto">
-            {existingWaypoints.map((waypoint) => {
-              const id = `existing-waypoint-${waypoint.index}`
-              return (
-                <li key={waypoint.index} className="flex items-center gap-2">
-                  <Checkbox
-                    id={id}
-                    checked={keptWaypointIndices.has(waypoint.index)}
-                    onCheckedChange={() => onToggleExistingWaypoint(waypoint.index)}
-                  />
-                  <Label htmlFor={id} className="text-sm font-normal">
-                    {waypoint.name || "(unnamed)"} ({waypoint.lat.toFixed(5)}, {waypoint.lon.toFixed(5)})
-                  </Label>
-                </li>
-              )
-            })}
-          </ul>
-        </div>
-      )}
     </div>
   )
 }

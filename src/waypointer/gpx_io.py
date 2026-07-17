@@ -12,11 +12,18 @@ import gpxpy.gpx
 from waypointer.device_profiles import DeviceProfile, build_waypoint
 from waypointer.geometry import LatLon, haversine_m
 from waypointer.osm import OsmNode
+from waypointer.poi_types import POI_TYPES
 
 WAYPOINTER_NS = "https://github.com/SamDja/waypointer"
 WAYPOINTER_PREFIX = "waypointer"
 OSM_ID_LOCAL_NAME = "osm_id"
 OSM_ID_CLARK_TAG = f"{{{WAYPOINTER_NS}}}{OSM_ID_LOCAL_NAME}"
+# Stamped onto waypoints synthesized from a FIT file's course points (see
+# fit_read.py) - carries the exact POI type recovered from the FIT
+# course_point_type developer field, so infer_poi_type doesn't need to
+# fall back to guessing from <sym>/<type> text for these.
+POI_TYPE_LOCAL_NAME = "poi_type"
+POI_TYPE_CLARK_TAG = f"{{{WAYPOINTER_NS}}}{POI_TYPE_LOCAL_NAME}"
 
 # Fallback dedup radius for waypoints that lack our marker (hand-edited
 # files, or files produced by another tool). Deliberately tight relative to
@@ -82,6 +89,56 @@ def existing_osm_ids(gpx: gpxpy.gpx.GPX) -> set[int]:
 
 def existing_waypoint_coords(gpx: gpxpy.gpx.GPX) -> list[LatLon]:
     return [(w.latitude, w.longitude) for w in gpx.waypoints]
+
+
+def _has_osm_id_marker(wpt: gpxpy.gpx.GPXWaypoint) -> bool:
+    return any(ext.tag == OSM_ID_CLARK_TAG for ext in wpt.extensions)
+
+
+def _poi_type_marker(wpt: gpxpy.gpx.GPXWaypoint) -> str | None:
+    for ext in wpt.extensions:
+        if ext.tag == POI_TYPE_CLARK_TAG and ext.text in POI_TYPES:
+            return ext.text
+    return None
+
+
+def stamp_poi_type(waypoint: gpxpy.gpx.GPXWaypoint, poi_type: str) -> None:
+    """Marks a waypoint with its exact, already-known POI type - used for
+    waypoints synthesized from a FIT file's course points (fit_read.py),
+    where the type comes from the course_point_type developer field rather
+    than a guess. infer_poi_type reads this back verbatim, ahead of its
+    other, fuzzier rules."""
+    marker = ET.Element(f"{WAYPOINTER_PREFIX}:{POI_TYPE_LOCAL_NAME}")
+    marker.text = poi_type
+    waypoint.extensions.append(marker)
+
+
+def infer_poi_type(wpt: gpxpy.gpx.GPXWaypoint) -> str:
+    """Best-effort guess at which registered POI type a pre-existing
+    waypoint represents - only a starting suggestion, since the frontend's
+    AssignWaypointTypesDialog lets the visitor correct it before it ever
+    affects export. A stamped poi_type marker (see stamp_poi_type) means the
+    type is already known exactly - e.g. recovered from a FIT file's
+    course_point_type developer field - so that always wins first. Otherwise
+    a stamped osm_id marker means we added this waypoint ourselves on a
+    previous export; since Find POIs only ever searches for "water" today
+    that's unambiguous (revisit if search expands to other types). Otherwise
+    falls back to a substring match of the waypoint's <sym>/<type> text
+    against each registered type's sym_hints - best-effort for hand-edited
+    files or other tools' exports, not exhaustive by design. Deliberately
+    does not match against <name>, which is free text and would produce
+    false positives (e.g. "Water Street Cafe"). Always resolves to a
+    concrete registry key, "generic" at worst - never None."""
+    marker_type = _poi_type_marker(wpt)
+    if marker_type is not None:
+        return marker_type
+    if _has_osm_id_marker(wpt):
+        return "water"
+    text = f"{wpt.symbol or ''} {wpt.type or ''}".lower()
+    for cfg in POI_TYPES.values():
+        if any(hint in text for hint in cfg.sym_hints):
+            return cfg.key
+    return "generic"
 
 
 def is_duplicate_candidate(node: OsmNode, gpx: gpxpy.gpx.GPX) -> bool:

@@ -1,20 +1,19 @@
-"""Builds a ridable FIT course file from a GPX route plus selected water
-fountain candidates. Bytes in (already-parsed route coordinates), bytes
-out, no filesystem I/O - same contract as gpx_io.py.
+"""Builds a ridable FIT course file from a GPX route plus a list of course
+points - both newly selected search candidates and kept pre-existing GPX
+<wpt> entries (main.py's callers build this combined list; see
+_build_fit_course_points). Bytes in (already-parsed route coordinates),
+bytes out, no filesystem I/O - same contract as gpx_io.py.
 
-Scope limitation (intentional): only newly selected water fountain
-candidates become course_point entries. Pre-existing GPX <wpt> elements
-(e.g. a route's own cue-sheet markers) are NOT translated into FIT course
-points - there's no confirmed developer-field mapping for those, so this
-module never sees them; callers must not pass them in.
-
-The water icon on a Wahoo ELEMNT ROAM v3 does not come from the standard
+Icon selection on a Wahoo ELEMNT ROAM v3 does not come from the standard
 FIT course_point.type enum. It comes from a developer field named
 "course_point_type" (uint8), confirmed by decoding a real FIT file
 (produced by Komoot's Wahoo integration) that the water fountain icon
-does render for - see the plan for the full investigation. Water points
-there had course_point_type=16 and a native type of GENERIC (0), which
-this module replicates exactly.
+does render for - see the plan for the full investigation. That file's
+water points had course_point_type=16 and a native type of GENERIC (0),
+which this module replicates exactly for every point regardless of POI
+type. The full course_point_type value per POI type key lives in
+poi_types.py (PoiTypeConfig.course_point_type), sourced from
+dev_tools/wahoo_poi_mapping.json's reverse-engineered 0-99 range.
 """
 
 import datetime
@@ -41,19 +40,20 @@ from fit_tool.profile.profile_type import (
 )
 
 from waypointer.geometry import LatLon, haversine_m
+from waypointer.poi_types import POI_TYPES
 
 DEVELOPER_DATA_INDEX = 0
 COURSE_POINT_TYPE_FIELD_NUM = 16  # mirrors the confirmed-working reference file
 COURSE_POINT_TYPE_FIELD_NAME = "course_point_type"
-WATER_COURSE_POINT_TYPE = 16  # confirmed value for water fountains
 TIMESTAMP_STEP_MS = 10_000  # synthetic, monotonically increasing only - not real ride timing
 
 
 @dataclass(frozen=True)
-class FitFountain:
+class FitCoursePoint:
     lat: float
     lon: float
     name: str | None
+    poi_type: str
 
 
 def _now_ms() -> int:
@@ -125,37 +125,38 @@ def _nearest_route_point_index(point: LatLon, route_coords: list[LatLon]) -> int
 
 
 def _course_point_messages(
-    fountains: list[FitFountain],
+    points: list[FitCoursePoint],
     route_coords: list[LatLon],
     route_distances: list[float],
     start_ts_ms: int,
 ) -> list[CoursePointMessage]:
     messages = []
-    for fountain in fountains:
-        idx = _nearest_route_point_index((fountain.lat, fountain.lon), route_coords)
+    for point in points:
+        idx = _nearest_route_point_index((point.lat, point.lon), route_coords)
+        cfg = POI_TYPES.get(point.poi_type, POI_TYPES["generic"])
 
-        message = CoursePointMessage(developer_fields=[_course_point_type_field(WATER_COURSE_POINT_TYPE)])
+        message = CoursePointMessage(developer_fields=[_course_point_type_field(cfg.course_point_type)])
         message.timestamp = start_ts_ms + idx * TIMESTAMP_STEP_MS
-        message.position_lat = fountain.lat
-        message.position_long = fountain.lon
+        message.position_lat = point.lat
+        message.position_long = point.lon
         message.distance = route_distances[idx]
         message.type = CoursePoint.GENERIC
-        message.course_point_name = fountain.name or "Water Fountain"
+        message.course_point_name = point.name or cfg.default_name
         messages.append(message)
     return messages
 
 
 def build_course_fit_bytes(
     route_coords: list[LatLon],
-    fountains: list[FitFountain],
+    course_points: list[FitCoursePoint],
     course_name: str,
     elevations_m: list[float | None] | None = None,
 ) -> bytes:
     """Builds a full ridable FIT course: file_id, course, timer start
     event, one record per route point, developer field declarations, one
-    course_point per fountain (native type=GENERIC, course_point_type
-    developer field=16), timer stop event, and a lap. Returns encoded
-    bytes - stateless, no filesystem I/O.
+    course_point per course_points entry (native type=GENERIC, course_point_type
+    developer field looked up per entry's poi_type), timer stop event, and a
+    lap. Returns encoded bytes - stateless, no filesystem I/O.
 
     elevations_m, if given, must be index-parallel to route_coords (see
     gpx_io.route_elevations()) and is used to set each record's altitude -
@@ -194,7 +195,7 @@ def build_course_fit_bytes(
     builder.add_all(records)
 
     builder.add_all(_developer_field_declaration_messages())
-    builder.add_all(_course_point_messages(fountains, route_coords, distances, start_ts_ms))
+    builder.add_all(_course_point_messages(course_points, route_coords, distances, start_ts_ms))
 
     end_ts_ms = records[-1].timestamp
     stop_event = EventMessage()

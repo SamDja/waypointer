@@ -19,16 +19,17 @@ import requests
 from fastapi import Depends, FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
-from gpxpy.gpx import GPX, GPXException
+from gpxpy.gpx import GPX, GPXException, GPXWaypoint
 from pydantic import TypeAdapter, ValidationError
 
 from waypointer.device_profiles import DEFAULT_DEVICE_KEY, DEVICE_PROFILES, OutputFormat
-from waypointer.fit_io import FitFountain, build_course_fit_bytes
+from waypointer.fit_io import FitCoursePoint, build_course_fit_bytes
 from waypointer.fit_read import fit_route_to_gpx_bytes
-from waypointer.geometry import LatLon, point_to_polyline_distance_m, simplify_rdp, total_distance_m
+from waypointer.geometry import LatLon, project_onto_polyline_m, simplify_rdp, total_distance_m
 from waypointer.gpx_io import (
     add_waypoints,
     discard_waypoints,
+    infer_poi_type,
     is_duplicate_candidate,
     make_waypoint,
     parse_gpx,
@@ -66,6 +67,7 @@ app = FastAPI(title="Waypointer")
 _selected_candidates_adapter = TypeAdapter(list[Candidate])
 _poi_config_adapter = TypeAdapter(list[PoiSearchConfig])
 _discarded_indices_adapter = TypeAdapter(list[int])
+_existing_waypoint_types_adapter = TypeAdapter(dict[str, str])
 
 
 async def _read_gpx_upload(gpx_file: UploadFile) -> tuple[GPX, list[LatLon]]:
@@ -110,6 +112,8 @@ async def find_pois(
         cfg = POI_TYPES.get(entry.poi_type)
         if cfg is None:
             raise HTTPException(status_code=400, detail=f"Unknown poi_type: {entry.poi_type}")
+        if cfg.tag_filter is None:
+            raise HTTPException(status_code=400, detail=f"{entry.poi_type} is not searchable")
         radius_m = clamp_distance_m(entry.poi_type, entry.max_distance_m)
 
         # The Overpass query runs against the simplified route, which can
@@ -137,7 +141,7 @@ async def find_pois(
             # route, never the simplified one used only to build the
             # Overpass query - and against this type's own clamped radius,
             # not a global constant.
-            distance_m = point_to_polyline_distance_m((node.lat, node.lon), coords)
+            distance_m, distance_from_start_m = project_onto_polyline_m((node.lat, node.lon), coords)
             if distance_m <= radius_m:
                 candidates.append(
                     Candidate(
@@ -147,14 +151,25 @@ async def find_pois(
                         lat=node.lat,
                         lon=node.lon,
                         distance_m=distance_m,
+                        distance_from_start_m=distance_from_start_m,
                     )
                 )
 
     candidates.sort(key=lambda c: c.distance_m)
-    existing_waypoints = [
-        ExistingWaypoint(index=i, name=w.name, lat=w.latitude, lon=w.longitude)
-        for i, w in enumerate(gpx.waypoints)
-    ]
+    existing_waypoints = []
+    for i, w in enumerate(gpx.waypoints):
+        distance_from_route_m, distance_from_start_m = project_onto_polyline_m((w.latitude, w.longitude), coords)
+        existing_waypoints.append(
+            ExistingWaypoint(
+                index=i,
+                name=w.name,
+                lat=w.latitude,
+                lon=w.longitude,
+                poi_type=infer_poi_type(w),
+                distance_from_route_m=distance_from_route_m,
+                distance_from_start_m=distance_from_start_m,
+            )
+        )
     return FindPoisResponse(
         candidates=candidates,
         point_count=len(coords),
@@ -181,8 +196,39 @@ def _display_name(route_name: str | None, fallback_filename: str | None) -> str:
 
 
 def _resolved_name(c: Candidate) -> str:
-    cfg = POI_TYPES.get(c.poi_type, POI_TYPES["water"])
+    cfg = POI_TYPES.get(c.poi_type, POI_TYPES["generic"])
     return c.name or cfg.default_name
+
+
+def _build_fit_course_points(
+    selected: list[Candidate],
+    original_waypoints: list[GPXWaypoint],
+    discarded_indices: set[int],
+    existing_types: dict[str, str],
+) -> list[FitCoursePoint]:
+    """Combines newly-selected candidates with kept (non-discarded)
+    pre-existing waypoints into one course-point list for FIT export -
+    shared by /api/save's FIT branch and /api/wahoo/route-payload, both of
+    which now treat existing and newly-found POIs identically. Each kept
+    waypoint's type comes from existing_types (the visitor's
+    AssignWaypointTypesDialog choice, keyed by original index as a string
+    since it arrives as JSON), defaulting to "generic" if missing/unknown -
+    original_waypoints must be the pre-discard snapshot so indices line up
+    with ExistingWaypoint.index."""
+    candidate_points = [
+        FitCoursePoint(lat=c.lat, lon=c.lon, name=_resolved_name(c), poi_type=c.poi_type) for c in selected
+    ]
+    existing_points = [
+        FitCoursePoint(
+            lat=w.latitude,
+            lon=w.longitude,
+            name=w.name,
+            poi_type=existing_types.get(str(i), "generic"),
+        )
+        for i, w in enumerate(original_waypoints)
+        if i not in discarded_indices
+    ]
+    return candidate_points + existing_points
 
 
 @app.post("/api/save")
@@ -192,6 +238,7 @@ async def save(
     device: str = Form(DEFAULT_DEVICE_KEY),
     water_symbol: str = Form("Water"),
     discarded_waypoint_indices: str = Form("[]"),
+    existing_waypoint_types: str = Form("{}"),
     route_name: str | None = Form(None),
 ) -> Response:
     gpx, coords = await _read_gpx_upload(gpx_file)
@@ -207,6 +254,16 @@ async def save(
         raise HTTPException(
             status_code=400, detail=f"Invalid discarded waypoint indices: {exc}"
         ) from exc
+
+    try:
+        existing_types = _existing_waypoint_types_adapter.validate_json(existing_waypoint_types)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid existing waypoint types: {exc}") from exc
+
+    # Snapshot before discard_waypoints mutates gpx.waypoints in place -
+    # _build_fit_course_points needs the original, pre-discard indices to
+    # line up with ExistingWaypoint.index/existing_types' keys.
+    original_waypoints = list(gpx.waypoints)
     # Indices refer to gpx.waypoints' original, pre-discard order, so this
     # must run before add_waypoints appends any newly selected candidates.
     discard_waypoints(gpx, discarded_indices)
@@ -232,10 +289,10 @@ async def save(
         media_type = "application/gpx+xml"
         extension = "gpx"
     else:
-        fountains = [FitFountain(lat=c.lat, lon=c.lon, name=_resolved_name(c)) for c in selected]
+        course_points = _build_fit_course_points(selected, original_waypoints, discarded_indices, existing_types)
         content = build_course_fit_bytes(
             coords,
-            fountains,
+            course_points,
             course_name=_display_name(route_name, gpx_file.filename),
             elevations_m=route_elevations(gpx),
         )
@@ -254,6 +311,8 @@ async def save(
 async def wahoo_route_payload(
     gpx_file: UploadFile,
     selected_candidates: str = Form(...),
+    discarded_waypoint_indices: str = Form("[]"),
+    existing_waypoint_types: str = Form("{}"),
     route_name: str | None = Form(None),
 ) -> WahooRoutePayload:
     """Builds the FIT bytes + metadata needed for a browser-side push to
@@ -263,8 +322,8 @@ async def wahoo_route_payload(
     simplified, elevation-stripped polyline for map rendering. Always
     produces FIT regardless of the visitor's local-download device
     selection, since Wahoo's route push has no GPX equivalent - and, like
-    /api/save's FIT branch, never carries pre-existing GPX <wpt> entries
-    into the course (see fit_io.py's documented scope)."""
+    /api/save's FIT branch, includes kept pre-existing GPX <wpt> entries as
+    course points too (see _build_fit_course_points)."""
     gpx, coords = await _read_gpx_upload(gpx_file)
 
     try:
@@ -272,11 +331,26 @@ async def wahoo_route_payload(
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid selection data: {exc}") from exc
 
-    fountains = [FitFountain(lat=c.lat, lon=c.lon, name=_resolved_name(c)) for c in selected]
+    try:
+        discarded_indices = set(_discarded_indices_adapter.validate_json(discarded_waypoint_indices))
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=400, detail=f"Invalid discarded waypoint indices: {exc}"
+        ) from exc
+
+    try:
+        existing_types = _existing_waypoint_types_adapter.validate_json(existing_waypoint_types)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid existing waypoint types: {exc}") from exc
+
+    # This endpoint never mutates gpx.waypoints, so gpx.waypoints itself
+    # (not a pre-mutation snapshot, unlike /api/save) already reflects the
+    # original document order.
+    course_points = _build_fit_course_points(selected, gpx.waypoints, discarded_indices, existing_types)
     name_stem = _safe_filename_stem(route_name or gpx_file.filename)
     display_name = _display_name(route_name, gpx_file.filename)
     fit_bytes = build_course_fit_bytes(
-        coords, fountains, course_name=display_name, elevations_m=route_elevations(gpx)
+        coords, course_points, course_name=display_name, elevations_m=route_elevations(gpx)
     )
 
     return WahooRoutePayload(

@@ -29,7 +29,6 @@ class DeviceProfile:
     name: str
     output_format: OutputFormat
     water_symbol: str = "Water"          # only meaningful for OutputFormat.GPX
-    water_course_point_type: int = 16    # only meaningful for OutputFormat.FIT; confirmed value
 
 
 DEVICE_PROFILES: dict[str, DeviceProfile] = {

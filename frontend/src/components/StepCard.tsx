@@ -16,7 +16,7 @@ export function StepCard({ title, open, onOpenChange, children, contentClassName
   return (
     <Card className="py-0">
       <Collapsible open={open} onOpenChange={onOpenChange}>
-        <CollapsibleTrigger className="group flex w-full items-center justify-between gap-2 px-(--card-spacing) py-(--card-spacing) text-left">
+        <CollapsibleTrigger className="group flex w-full cursor-pointer items-center justify-between gap-2 px-(--card-spacing) py-(--card-spacing) text-left">
           <CardTitle>{title}</CardTitle>
           <ChevronDown className="size-4 shrink-0 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
         </CollapsibleTrigger>
