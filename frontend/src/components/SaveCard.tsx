@@ -10,6 +10,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { RouteNameDialog } from "@/components/RouteNameDialog"
 import { ApiError, fetchWahooRoutePayload, saveRoute } from "@/lib/api"
 import type { DeviceSettings } from "@/lib/settings"
@@ -19,6 +20,7 @@ import { missingWahooScopeWarning } from "@/lib/wahooAuth"
 import { connectWahoo } from "@/lib/wahooConnect"
 import { getValidWahooAccessToken, type WahooTokens } from "@/lib/wahooSettings"
 import type { Candidate, ExistingWaypoint } from "@/types/candidate"
+import { Download, Upload } from "lucide-react"
 
 export interface SaveCardProps {
   file: File
@@ -48,6 +50,7 @@ export function SaveCard({
   const [isSendingToWahoo, setIsSendingToWahoo] = useState(false)
   const [showSaveNameDialog, setShowSaveNameDialog] = useState(false)
   const [showWahooNameDialog, setShowWahooNameDialog] = useState(false)
+  const [activeTab, setActiveTab] = useState<string>(() => (wahooTokens ? "wahoo" : "download"))
   const isFit = settings.device === "wahoo_elemnt_roam_v3"
   const defaultRouteName = file.name.replace(/\.gpx$/i, "")
 
@@ -141,86 +144,97 @@ export function SaveCard({
       <CardHeader>
         <CardTitle>3. Save</CardTitle>
       </CardHeader>
-      <CardContent className="flex flex-col gap-4">
-        <div className="flex items-center gap-3">
-          <Label htmlFor="device-select" className="w-40 shrink-0">
-            Device
-          </Label>
-          <Select
-            value={settings.device}
-            onValueChange={(device) => onSettingsChange({ ...settings, device })}
-          >
-            <SelectTrigger id="device-select" className="w-full">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="generic">Generic (GPX)</SelectItem>
-              <SelectItem value="wahoo_elemnt_roam_v3">Wahoo ELEMNT ROAM v3 (.fit)</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
+      <CardContent>
+        <Tabs value={activeTab} onValueChange={setActiveTab}>
+          <TabsList>
+            <TabsTrigger value="download">Download</TabsTrigger>
+            <TabsTrigger value="wahoo">Wahoo</TabsTrigger>
+          </TabsList>
 
-        {!isFit && (
-          <div className="flex items-center gap-3">
-            <Label htmlFor="water-symbol" className="w-40 shrink-0">
-              Water symbol (&lt;sym&gt;)
-            </Label>
-            <Input
-              id="water-symbol"
-              value={settings.waterSymbol}
-              onChange={(e) => onSettingsChange({ ...settings, waterSymbol: e.target.value })}
-            />
-          </div>
-        )}
-
-        {isFit && (
-          <p className="text-sm text-muted-foreground">
-            Exports a ridable FIT course file with the selected POIs (including any kept pre-existing
-            waypoints) encoded so their icons render correctly while navigating.
-          </p>
-        )}
-
-        <Button onClick={() => setShowSaveNameDialog(true)} loading={isSaving} className="w-fit">
-          {isSaving ? "Saving…" : "Download route"}
-        </Button>
-
-        <div className="flex flex-col gap-2 border-t pt-4">
-          {wahooTokens ? (
-            <>
-              <p className="text-sm text-muted-foreground">
-                Connected to Wahoo{wahooTokens.athleteLabel ? ` as ${wahooTokens.athleteLabel}` : ""}. Sending
-                syncs the route to your Wahoo app and head unit automatically.
-              </p>
-              <Button
-                onClick={() => setShowWahooNameDialog(true)}
-                loading={isSendingToWahoo}
-                variant="secondary"
-                className="w-fit"
+          <TabsContent value="download" className="flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <Label htmlFor="device-select" className="w-40 shrink-0">
+                Device
+              </Label>
+              <Select
+                value={settings.device}
+                onValueChange={(device) => onSettingsChange({ ...settings, device })}
               >
-                {isSendingToWahoo ? "Sending…" : "Send to Wahoo"}
-              </Button>
-            </>
-          ) : (
-            <Button onClick={handleConnectWahoo} loading={isConnectingWahoo} variant="secondary" className="w-fit">
-              {isConnectingWahoo ? "Connecting…" : "Connect Wahoo"}
-            </Button>
-          )}
-        </div>
+                <SelectTrigger id="device-select" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="generic">Generic (GPX)</SelectItem>
+                  <SelectItem value="wahoo_elemnt_roam_v3">Wahoo ELEMNT ROAM v3 (.fit)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
 
-        <RouteNameDialog
-          open={showSaveNameDialog}
-          onOpenChange={setShowSaveNameDialog}
-          defaultName={defaultRouteName}
-          confirmLabel="Download"
-          onConfirm={handleSave}
-        />
-        <RouteNameDialog
-          open={showWahooNameDialog}
-          onOpenChange={setShowWahooNameDialog}
-          defaultName={defaultRouteName}
-          confirmLabel="Send to Wahoo"
-          onConfirm={handleSendToWahoo}
-        />
+            {!isFit && (
+              <div className="flex items-center gap-3">
+                <Label htmlFor="water-symbol" className="w-40 shrink-0">
+                  Water symbol (&lt;sym&gt;)
+                </Label>
+                <Input
+                  id="water-symbol"
+                  value={settings.waterSymbol}
+                  onChange={(e) => onSettingsChange({ ...settings, waterSymbol: e.target.value })}
+                />
+              </div>
+            )}
+
+            {isFit && (
+              <p className="text-sm text-muted-foreground">
+                Exports a ridable FIT course file with the selected POIs (including any kept pre-existing
+                waypoints) encoded so their icons render correctly while navigating.
+              </p>
+            )}
+
+            <Button onClick={() => setShowSaveNameDialog(true)} loading={isSaving} className="w-fit">
+              {isSaving ? "Saving…" : "Download route"}
+              <Download className="size-4"></Download>
+            </Button>
+
+            <RouteNameDialog
+              open={showSaveNameDialog}
+              onOpenChange={setShowSaveNameDialog}
+              defaultName={defaultRouteName}
+              confirmLabel="Download"
+              onConfirm={handleSave}
+            />
+          </TabsContent>
+
+          <TabsContent value="wahoo" className="flex flex-col gap-2">
+            {wahooTokens ? (
+              <>
+                <p className="text-sm text-muted-foreground">
+                  Connected to Wahoo{wahooTokens.athleteLabel ? ` as ${wahooTokens.athleteLabel}` : ""}. Sending
+                  syncs the route to your Wahoo app and head unit automatically.
+                </p>
+                <Button
+                  onClick={() => setShowWahooNameDialog(true)}
+                  loading={isSendingToWahoo}
+                  className="w-fit"
+                >
+                  {isSendingToWahoo ? "Sending…" : "Send to Wahoo"}
+                  <Upload className="size-4"></Upload>
+                </Button>
+              </>
+            ) : (
+              <Button onClick={handleConnectWahoo} loading={isConnectingWahoo} variant="secondary" className="w-fit">
+                {isConnectingWahoo ? "Connecting…" : "Connect Wahoo"}
+              </Button>
+            )}
+
+            <RouteNameDialog
+              open={showWahooNameDialog}
+              onOpenChange={setShowWahooNameDialog}
+              defaultName={defaultRouteName}
+              confirmLabel="Send to Wahoo"
+              onConfirm={handleSendToWahoo}
+            />
+          </TabsContent>
+        </Tabs>
       </CardContent>
     </Card>
   )

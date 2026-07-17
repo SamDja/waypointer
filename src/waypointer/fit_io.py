@@ -117,6 +117,48 @@ def _record_messages(
     return records, distances[1:]
 
 
+@dataclass(frozen=True)
+class _ElevationStats:
+    total_ascent: float
+    total_descent: float
+    avg_altitude: float
+    max_altitude: float
+    min_altitude: float
+
+
+def _elevation_stats(elevations_m: list[float | None]) -> _ElevationStats | None:
+    """Lap-level ascent/descent/avg/min/max altitude, mirroring
+    gpx_io.total_ascent_m()'s pairwise skip-gap rule (a delta only counts
+    when both consecutive points carry elevation - gaps aren't bridged).
+    Returns None when no point has elevation, so the caller can leave the
+    Lap's altitude fields unset rather than defaulting to 0 - a course with
+    an all-zero elevation summary looks identical to a genuinely flat one,
+    which is exactly the "no elevation data" bug this exists to prevent.
+    """
+    known = [e for e in elevations_m if e is not None]
+    if not known:
+        return None
+
+    ascent = 0.0
+    descent = 0.0
+    for a, b in zip(elevations_m, elevations_m[1:]):
+        if a is None or b is None:
+            continue
+        delta = b - a
+        if delta > 0:
+            ascent += delta
+        else:
+            descent += -delta
+
+    return _ElevationStats(
+        total_ascent=ascent,
+        total_descent=descent,
+        avg_altitude=sum(known) / len(known),
+        max_altitude=max(known),
+        min_altitude=min(known),
+    )
+
+
 def _nearest_route_point_index(point: LatLon, route_coords: list[LatLon]) -> int:
     return min(
         range(len(route_coords)),
@@ -159,10 +201,14 @@ def build_course_fit_bytes(
     lap. Returns encoded bytes - stateless, no filesystem I/O.
 
     elevations_m, if given, must be index-parallel to route_coords (see
-    gpx_io.route_elevations()) and is used to set each record's altitude -
-    without it, Wahoo has no elevation data to show for the course at all.
-    Defaults to all-None (no altitude data) so callers that only have a
-    plain polyline (no source GPX) still work.
+    gpx_io.route_elevations()) and is used to set each record's altitude,
+    plus the lap's total_ascent/total_descent/avg_altitude/max_altitude/
+    min_altitude (see _elevation_stats) - without both, Wahoo has no
+    elevation data to show for the course at all, and per-record altitude
+    alone was observed to still render the route as a flat, uncolored
+    line on a Wahoo ELEMNT ROAM's navigation map. Defaults to all-None (no
+    altitude data at all) so callers that only have a plain polyline (no
+    source GPX) still work.
     """
     if not route_coords:
         raise ValueError("route_coords must contain at least one point")
@@ -214,6 +260,13 @@ def build_course_fit_bytes(
     lap.end_position_lat = route_coords[-1][0]
     lap.end_position_long = route_coords[-1][1]
     lap.total_distance = distances[-1]
+    elevation_stats = _elevation_stats(elevations_m)
+    if elevation_stats is not None:
+        lap.total_ascent = round(elevation_stats.total_ascent)
+        lap.total_descent = round(elevation_stats.total_descent)
+        lap.avg_altitude = elevation_stats.avg_altitude
+        lap.max_altitude = elevation_stats.max_altitude
+        lap.min_altitude = elevation_stats.min_altitude
     builder.add(lap)
 
     return builder.build().to_bytes()
