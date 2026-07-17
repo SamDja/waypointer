@@ -5,7 +5,7 @@ from fit_tool.profile.messages.file_id_message import FileIdMessage
 from fit_tool.profile.messages.record_message import RecordMessage
 from fit_tool.profile.profile_type import FileType
 
-from waypointer.fit_io import FitFountain, build_course_fit_bytes
+from waypointer.fit_io import FitCoursePoint, build_course_fit_bytes
 from waypointer.gpx_io import parse_gpx, route_coordinates, route_elevations
 
 
@@ -17,7 +17,7 @@ def _decode(fit_bytes: bytes) -> list:
 def test_build_course_fit_bytes_round_trip(sample_route_bytes):
     gpx = parse_gpx(sample_route_bytes)
     coords = route_coordinates(gpx)
-    fountains = [FitFountain(lat=48.8567, lon=2.3524, name="Fontaine Wallace")]
+    fountains = [FitCoursePoint(lat=48.8567, lon=2.3524, name="Fontaine Wallace", poi_type="water")]
 
     fit_bytes = build_course_fit_bytes(coords, fountains, course_name="Test Route")
     messages = _decode(fit_bytes)
@@ -31,6 +31,24 @@ def test_build_course_fit_bytes_round_trip(sample_route_bytes):
     assert round(course_point.position_long, 4) == round(2.3524, 4)
     assert course_point.developer_fields[0].name == "course_point_type"
     assert course_point.developer_fields[0].get_value(0) == 16
+
+
+def test_build_course_fit_bytes_uses_course_point_type_per_poi_type(sample_route_bytes):
+    gpx = parse_gpx(sample_route_bytes)
+    coords = route_coordinates(gpx)
+    points = [
+        FitCoursePoint(lat=48.8567, lon=2.3524, name="Toilet", poi_type="toilet"),
+        FitCoursePoint(lat=48.857, lon=2.353, name=None, poi_type="unknown_type"),
+    ]
+
+    fit_bytes = build_course_fit_bytes(coords, points, course_name="Test Route")
+    messages = _decode(fit_bytes)
+
+    course_points = [m for m in messages if isinstance(m, CoursePointMessage)]
+    assert course_points[0].developer_fields[0].get_value(0) == 59  # toilet
+    assert course_points[0].course_point_name == "Toilet"
+    assert course_points[1].developer_fields[0].get_value(0) == 0  # unknown -> generic
+    assert course_points[1].course_point_name == "Point of Interest"
 
     record_messages = [m for m in messages if isinstance(m, RecordMessage)]
     assert len(record_messages) == len(coords) == 3

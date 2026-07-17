@@ -18,7 +18,7 @@ export interface ExistingWaypoint {
   name: string | null
   lat: number
   lon: number
-  poi_type: string | null
+  poi_type: string
   distance_from_route_m: number
   distance_from_start_m: number
 }

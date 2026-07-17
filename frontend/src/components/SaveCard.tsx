@@ -51,6 +51,12 @@ export function SaveCard({
   const isFit = settings.device === "wahoo_elemnt_roam_v3"
   const defaultRouteName = file.name.replace(/\.gpx$/i, "")
 
+  function keptExistingWaypointTypes(): Record<number, string> {
+    return Object.fromEntries(
+      existingWaypoints.filter((w) => keptWaypointIndices.has(w.index)).map((w) => [w.index, w.poi_type])
+    )
+  }
+
   async function handleSave(routeName: string) {
     const selectedCandidates = candidates.filter((c) => selectedIds.has(c.osm_id))
     const discardedWaypointIndices = existingWaypoints
@@ -66,6 +72,7 @@ export function SaveCard({
         device: settings.device,
         waterSymbol: settings.waterSymbol,
         discardedWaypointIndices,
+        existingWaypointTypes: keptExistingWaypointTypes(),
         routeName,
       })
 
@@ -104,11 +111,20 @@ export function SaveCard({
 
   async function handleSendToWahoo(routeName: string) {
     const selectedCandidates = candidates.filter((c) => selectedIds.has(c.osm_id))
+    const discardedWaypointIndices = existingWaypoints
+      .filter((w) => !keptWaypointIndices.has(w.index))
+      .map((w) => w.index)
 
     setIsSendingToWahoo(true)
     const toastId = toast("Sending to Wahoo...", "loading")
     try {
-      const payload = await fetchWahooRoutePayload(file, selectedCandidates, routeName)
+      const payload = await fetchWahooRoutePayload(
+        file,
+        selectedCandidates,
+        discardedWaypointIndices,
+        keptExistingWaypointTypes(),
+        routeName,
+      )
       const accessToken = await getValidWahooAccessToken()
       await pushRouteToWahoo(payload, accessToken)
       updateToast(toastId, "Sent to Wahoo - it will sync to your app and head unit shortly.", "success")
@@ -159,10 +175,8 @@ export function SaveCard({
 
         {isFit && (
           <p className="text-sm text-muted-foreground">
-            Exports a ridable FIT course file with the water fountains encoded so the icon
-            renders correctly while navigating.
-            {existingWaypoints.length > 0 &&
-              " FIT courses never include the original file's pre-existing waypoints, so the keep/discard choice above only affects GPX exports."}
+            Exports a ridable FIT course file with the selected POIs (including any kept pre-existing
+            waypoints) encoded so their icons render correctly while navigating.
           </p>
         )}
 

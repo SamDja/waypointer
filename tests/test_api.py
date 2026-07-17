@@ -39,7 +39,7 @@ def test_find_pois_defaults_to_water_search(sample_route_bytes, overpass_respons
             "name": "Existing WPT",
             "lat": 48.86,
             "lon": 2.36,
-            "poi_type": None,
+            "poi_type": "generic",
             "distance_from_route_m": pytest.approx(distance_from_route_m),
             "distance_from_start_m": pytest.approx(distance_from_start_m),
         }
@@ -137,6 +137,7 @@ def test_find_pois_handles_multiple_poi_types(sample_route_bytes, overpass_respo
         poi_types.PoiTypeConfig(
             key="bench",
             label="Benches",
+            course_point_type=0,
             tag_filter='node["amenity"="bench"]',
             default_max_distance_m=20.0,
             min_distance_m=10.0,
@@ -274,6 +275,63 @@ def test_save_wahoo_returns_fit_file(sample_route_bytes):
     assert course_point.developer_fields[0].get_value(0) == 16
 
 
+def test_save_wahoo_includes_kept_existing_waypoint_with_assigned_type(sample_route_bytes):
+    # sample_route.gpx's fixture has one pre-existing waypoint ("Existing
+    # WPT") at index 0 - the visitor assigns it "toilet" via
+    # AssignWaypointTypesDialog, and it must show up as a second course
+    # point (kept, not discarded) with toilet's course_point_type, right
+    # alongside the newly-selected water candidate.
+    selected = json.dumps(
+        [
+            {
+                "osm_id": 1001,
+                "poi_type": "water",
+                "name": "Fontaine Wallace",
+                "lat": 48.8567,
+                "lon": 2.3524,
+                "distance_m": 12.0,
+                "distance_from_start_m": 34.0,
+            }
+        ]
+    )
+    response = client.post(
+        "/api/save",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={
+            "selected_candidates": selected,
+            "device": "wahoo_elemnt_roam_v3",
+            "existing_waypoint_types": json.dumps({"0": "toilet"}),
+        },
+    )
+    assert response.status_code == 200
+
+    fit_file = FitFile.from_bytes(response.content)
+    messages = [r.message for r in fit_file.records if not r.is_definition]
+    course_points = [m for m in messages if isinstance(m, CoursePointMessage)]
+    assert len(course_points) == 2
+    assert course_points[0].developer_fields[0].get_value(0) == 16  # water
+    assert course_points[1].developer_fields[0].get_value(0) == 59  # toilet
+    assert course_points[1].course_point_name == "Existing WPT"
+
+
+def test_save_wahoo_excludes_discarded_existing_waypoint(sample_route_bytes):
+    response = client.post(
+        "/api/save",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={
+            "selected_candidates": "[]",
+            "device": "wahoo_elemnt_roam_v3",
+            "discarded_waypoint_indices": "[0]",
+            "existing_waypoint_types": json.dumps({"0": "toilet"}),
+        },
+    )
+    assert response.status_code == 200
+
+    fit_file = FitFile.from_bytes(response.content)
+    messages = [r.message for r in fit_file.records if not r.is_definition]
+    assert not any(isinstance(m, CoursePointMessage) for m in messages)
+
+
 def test_save_honors_custom_route_name(sample_route_bytes):
     response = client.post(
         "/api/save",
@@ -350,6 +408,40 @@ def test_wahoo_route_payload_returns_fit_and_metadata(sample_route_bytes):
     messages = [r.message for r in fit_file.records if not r.is_definition]
     course_point = next(m for m in messages if isinstance(m, CoursePointMessage))
     assert course_point.developer_fields[0].get_value(0) == 16
+
+
+def test_wahoo_route_payload_includes_kept_existing_waypoint_with_assigned_type(sample_route_bytes):
+    response = client.post(
+        "/api/wahoo/route-payload",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={
+            "selected_candidates": "[]",
+            "existing_waypoint_types": json.dumps({"0": "toilet"}),
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    fit_bytes = base64.b64decode(data["fit_base64"])
+    fit_file = FitFile.from_bytes(fit_bytes)
+    messages = [r.message for r in fit_file.records if not r.is_definition]
+    course_point = next(m for m in messages if isinstance(m, CoursePointMessage))
+    assert course_point.developer_fields[0].get_value(0) == 59  # toilet
+
+
+def test_wahoo_route_payload_excludes_discarded_existing_waypoint(sample_route_bytes):
+    response = client.post(
+        "/api/wahoo/route-payload",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"selected_candidates": "[]", "discarded_waypoint_indices": "[0]"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+
+    fit_bytes = base64.b64decode(data["fit_base64"])
+    fit_file = FitFile.from_bytes(fit_bytes)
+    messages = [r.message for r in fit_file.records if not r.is_definition]
+    assert not any(isinstance(m, CoursePointMessage) for m in messages)
 
 
 def test_wahoo_route_payload_honors_custom_route_name(sample_route_bytes):

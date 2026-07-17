@@ -50,14 +50,15 @@ export function loadPoiSearchConfig(): PoiSearchEntry[] {
     stored = {}
   }
 
-  // Union in a default entry for any registry type missing from storage
-  // (e.g. a POI type added after the user's last visit), and clamp any
-  // stored distance into the registry's current bounds.
-  return POI_TYPES.map((cfg) => {
+  // Union in a default entry for any searchable registry type missing from
+  // storage (e.g. a POI type added after the user's last visit), and clamp
+  // any stored distance into the registry's current bounds. Non-searchable
+  // types (most of the registry) have no search config at all.
+  return POI_TYPES.filter((cfg) => cfg.searchable).map((cfg) => {
     const existing = stored[cfg.key]
     const maxDistanceM = existing
-      ? Math.min(Math.max(existing.maxDistanceM, cfg.minDistanceM), cfg.maxDistanceM)
-      : cfg.defaultMaxDistanceM
+      ? Math.min(Math.max(existing.maxDistanceM, cfg.minDistanceM!), cfg.maxDistanceM!)
+      : cfg.defaultMaxDistanceM!
     return {
       poiType: cfg.key,
       enabled: existing?.enabled ?? true,

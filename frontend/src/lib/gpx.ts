@@ -4,14 +4,23 @@ import type { ExistingWaypoint } from "@/types/candidate"
 
 // Matches the extensions namespace gpx_io.py stamps onto waypoints it adds
 // (WAYPOINTER_NS) - a <wpt> carrying a child in this namespace was added by
-// a previous Waypointer export, so its POI type is unambiguous today (only
-// "water" is registered - see gpx_io.infer_poi_type for the same rule).
+// a previous Waypointer export. A "poi_type" child carries the exact,
+// already-known type (e.g. recovered from a FIT file's course_point_type
+// developer field on import - see fit_read.py); an "osm_id" child means the
+// waypoint came from a search-candidate add, which only ever means "water"
+// today (see gpx_io.infer_poi_type for the same two rules).
 const WAYPOINTER_NS = "https://github.com/SamDja/waypointer"
 
-// Mirrors gpx_io.infer_poi_type: marker presence first, then a lowercase
-// substring match of <sym>/<type> against each registered type's symHints.
-// Deliberately ignores <name> (free text, would false-positive).
-function inferPoiType(wptEl: Element): string | null {
+// Mirrors gpx_io.infer_poi_type: poi_type marker first (exact, verbatim),
+// then the osm_id marker, then a lowercase substring match of <sym>/<type>
+// against each registered type's symHints. Deliberately ignores <name>
+// (free text, would false-positive). Always resolves to a concrete
+// registry key ("generic" at worst) - this is only a starting suggestion,
+// since ImportCard's "Waypoints" tab lets the visitor correct it.
+function inferPoiType(wptEl: Element): string {
+  const poiTypeMarker = wptEl.getElementsByTagNameNS(WAYPOINTER_NS, "poi_type")[0]?.textContent
+  if (poiTypeMarker && POI_TYPES.some((cfg) => cfg.key === poiTypeMarker)) return poiTypeMarker
+
   if (wptEl.getElementsByTagNameNS(WAYPOINTER_NS, "osm_id").length > 0) return "water"
 
   const sym = wptEl.getElementsByTagName("sym")[0]?.textContent ?? ""
@@ -20,7 +29,7 @@ function inferPoiType(wptEl: Element): string | null {
   for (const cfg of POI_TYPES) {
     if (cfg.symHints.some((hint) => text.includes(hint))) return cfg.key
   }
-  return null
+  return "generic"
 }
 
 // Shared by parseRouteCoordsFromGpx and parseExistingWaypointsFromGpx (the

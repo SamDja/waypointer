@@ -21,7 +21,7 @@ export function FindPoisCard({ entries, onChange, onFind, disabled, isFinding }:
   return (
     <div className="flex flex-col gap-3">
       <ul className="flex flex-col gap-2">
-        {POI_TYPES.map((cfg) => {
+        {POI_TYPES.filter((cfg) => cfg.searchable).map((cfg) => {
           const entry = entries.find((e) => e.poiType === cfg.key)
           const enabled = entry?.enabled ?? true
           const maxDistanceM = entry?.maxDistanceM ?? cfg.defaultMaxDistanceM

@@ -6,6 +6,7 @@ import "leaflet-polylinedecorator"
 import { MapPin, Play, Square } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
+import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
 import { buildCircleDivIcon, ROUTE_END_COLOR, ROUTE_START_COLOR } from "@/lib/mapIcons"
 import { POI_TYPES } from "@/lib/poiTypes"
 import type { Candidate, ExistingWaypoint } from "@/types/candidate"
@@ -18,6 +19,7 @@ export interface RouteMapProps {
   existingWaypoints?: ExistingWaypoint[]
   keptWaypointIndices?: Set<number>
   onToggleExistingWaypoint?: (index: number) => void
+  onChangeWaypointType?: (index: number, poiType: string) => void
 }
 
 const DEFAULT_CENTER: [number, number] = [46.06352, 11.12864]
@@ -127,6 +129,7 @@ export function RouteMap({
   existingWaypoints = [],
   keptWaypointIndices = new Set(),
   onToggleExistingWaypoint,
+  onChangeWaypointType,
 }: RouteMapProps) {
   const hasRoute = routeCoords.length > 0
   const center = hasRoute ? routeCoords[0] : DEFAULT_CENTER
@@ -201,9 +204,13 @@ export function RouteMap({
                     <Icon className="size-4" style={{ color }} />
                     {waypoint.name || "(unnamed)"}
                   </div>
-                  <p className="text-muted-foreground">
-                    Already in this file{poiType ? ` · ${poiType.label}` : ""}
-                  </p>
+                  <p className="text-muted-foreground">Already in this file</p>
+                  {onChangeWaypointType && (
+                    <PoiTypeCombobox
+                      value={waypoint.poi_type}
+                      onChange={(poiType) => onChangeWaypointType(waypoint.index, poiType)}
+                    />
+                  )}
                   {onToggleExistingWaypoint && (
                     <div className="flex items-center gap-2">
                       <Checkbox

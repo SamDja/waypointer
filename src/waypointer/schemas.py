@@ -26,10 +26,12 @@ class ExistingWaypoint(BaseModel):
     name: str | None = None
     lat: float
     lon: float
-    # Best-effort inferred POI type key (see gpx_io.infer_poi_type), None
-    # when it can't be inferred - lets the frontend group/iconify these the
-    # same way as freshly-found candidates when possible.
-    poi_type: str | None = None
+    # Best-effort inferred POI type key (see gpx_io.infer_poi_type),
+    # "generic" at worst - never unset. Lets the frontend group/iconize
+    # these the same way as freshly-found candidates, and is editable by the
+    # visitor via the AssignWaypointTypesDialog before it ever affects
+    # export (see main.py's /api/save existing_waypoint_types field).
+    poi_type: str = "generic"
     # Distance from the route/track, and cumulative distance along it from
     # the start - see geometry.project_onto_polyline_m. Computed against
     # the same full-resolution polyline as Candidate.distance_m.

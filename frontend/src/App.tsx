@@ -35,6 +35,12 @@ export default function App() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [searchedPoiTypes, setSearchedPoiTypes] = useState<PoiSearchConfig[]>([])
   const [keptWaypointIndices, setKeptWaypointIndices] = useState<Set<number>>(new Set())
+  // Visitor-chosen overrides of a pre-existing waypoint's suggested POI
+  // type (see ImportCard's "Waypoints" tab), keyed by ExistingWaypoint.index
+  // - applied on top of whatever existingWaypoints currently is (preview or
+  // backend-authoritative) so the choice survives a later /api/find-pois
+  // call, which recomputes its own suggestion from scratch.
+  const [waypointTypeOverrides, setWaypointTypeOverrides] = useState<Record<number, string>>({})
   const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>(() => loadSettings())
   const [poiSearchEntries, setPoiSearchEntries] = useState<PoiSearchEntry[]>(() => loadPoiSearchConfig())
   const [isFinding, setIsFinding] = useState(false)
@@ -56,6 +62,7 @@ export default function App() {
     // Default to keeping every pre-existing waypoint, matching the
     // post-search default in handleFind below.
     setKeptWaypointIndices(new Set(waypoints.map((w) => w.index)))
+    setWaypointTypeOverrides({})
   }
 
   function handleRemoveRoute() {
@@ -67,6 +74,7 @@ export default function App() {
     setSelectedIds(new Set())
     setSearchedPoiTypes([])
     setKeptWaypointIndices(new Set())
+    setWaypointTypeOverrides({})
     setOpenStep("import")
   }
 
@@ -97,6 +105,10 @@ export default function App() {
     })
   }
 
+  function handleAssignWaypointType(index: number, poiType: string) {
+    setWaypointTypeOverrides((prev) => ({ ...prev, [index]: poiType }))
+  }
+
   function handleToggleExistingWaypoint(index: number) {
     setKeptWaypointIndices((prev) => {
       const next = new Set(prev)
@@ -107,6 +119,10 @@ export default function App() {
       }
       return next
     })
+  }
+
+  function handleToggleAllExistingWaypoints(checked: boolean) {
+    setKeptWaypointIndices(checked ? new Set(existingWaypoints.map((w) => w.index)) : new Set())
   }
 
   async function handleFind() {
@@ -146,8 +162,13 @@ export default function App() {
   const distanceM = totalDistanceM(previewRouteCoords)
   const { gainM: elevationGainM, lossM: elevationLossM } = elevationGainLossM(previewElevations)
   // Same preview-then-authoritative pattern as routeCoords: client-parsed
-  // until /api/find-pois responds, then the backend's own parse wins.
-  const existingWaypoints = findResult?.existing_waypoints ?? previewExistingWaypoints
+  // until /api/find-pois responds, then the backend's own parse wins - with
+  // any visitor override from ImportCard's "Waypoints" tab applied on top,
+  // since a fresh find-pois response would otherwise silently discard it.
+  const existingWaypoints = (findResult?.existing_waypoints ?? previewExistingWaypoints).map((w) => ({
+    ...w,
+    poi_type: waypointTypeOverrides[w.index] ?? w.poi_type,
+  }))
 
   return (
     <div className="flex h-screen flex-col">
@@ -170,10 +191,11 @@ export default function App() {
             existingWaypoints={existingWaypoints}
             keptWaypointIndices={keptWaypointIndices}
             onToggleExistingWaypoint={handleToggleExistingWaypoint}
+            onChangeWaypointType={handleAssignWaypointType}
           />
         </div>
 
-        <aside className="flex w-full min-h-0 flex-1 flex-col border-t md:w-[380px] md:flex-none md:border-t-0 md:border-l">
+        <aside className="flex w-full min-h-0 flex-1 flex-col border-t md:w-1/3 md:min-w-[480px] md:flex-none md:border-t-0 md:border-l">
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0">
             <StepCard
               title={"1. Import route" + (file ? " ✅": "")}
@@ -186,6 +208,11 @@ export default function App() {
                 onRemove={handleRemoveRoute}
                 onNext={() => setOpenStep("find")}
                 pointCount={pointCount}
+                existingWaypoints={existingWaypoints}
+                onChangeWaypointType={handleAssignWaypointType}
+                keptWaypointIndices={keptWaypointIndices}
+                onToggleExistingWaypoint={handleToggleExistingWaypoint}
+                onToggleAllExistingWaypoints={handleToggleAllExistingWaypoints}
                 distanceM={distanceM}
                 elevationGainM={elevationGainM}
                 elevationLossM={elevationLossM}
@@ -198,7 +225,7 @@ export default function App() {
 
             {file && (
               <StepCard
-                title={"2. Find & review POIs" + (findResult ? " ✅": "")}
+                title={"2. Find POIs" + (findResult ? " ✅": "")}
                 open={openStep === "find"}
                 onOpenChange={(open) => setOpenStep(open ? "find" : null)}
               >
@@ -215,9 +242,6 @@ export default function App() {
                     selectedIds={selectedIds}
                     onToggle={handleToggle}
                     searchedPoiTypes={searchedPoiTypes}
-                    existingWaypoints={existingWaypoints}
-                    keptWaypointIndices={keptWaypointIndices}
-                    onToggleExistingWaypoint={handleToggleExistingWaypoint}
                   />
                 </div>
               </StepCard>
