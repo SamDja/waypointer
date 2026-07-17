@@ -133,3 +133,23 @@ body {
     @apply font-sans;
   }
 }
+
+/* Leaflet sets opacity via inline style directly on each layer's own
+   container div (the .leaflet-layer element created in GridLayer's
+   _initContainer) - declaring the transition here, unconditionally,
+   is more reliable than passing a Tailwind className through as a
+   Leaflet layer option, since that class only gets attached once, at
+   layer-creation time. */
+.leaflet-layer {
+  transition: opacity 150ms ease-out;
+}
+
+/* Same reasoning as .leaflet-layer above, but for Marker icons: Leaflet's
+   Marker.setOpacity() mutates style.opacity directly on the marker's
+   persistent icon element (this._icon) rather than recreating it, as
+   long as the icon stays a DivIcon across updates - see mapIcons.tsx's
+   buildCircleDivIcon for why opacity is deliberately kept out of that
+   icon's own HTML. */
+.leaflet-marker-icon {
+  transition: opacity 150ms ease-out;
+}

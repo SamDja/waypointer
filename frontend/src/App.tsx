@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useMemo, useState } from "react"
 import { CandidateChecklist } from "@/components/CandidateChecklist"
 import { FindPoisCard } from "@/components/FindPoisCard"
 import { ImportCard } from "@/components/ImportCard"
@@ -22,9 +22,16 @@ import {
 } from "@/lib/settings"
 import { toast, updateToast } from "@/lib/toast"
 import { loadWahooTokens, type WahooTokens } from "@/lib/wahooSettings"
-import type { ExistingWaypoint, FindPoisResponse, HoveredPoi, PoiSearchConfig } from "@/types/candidate"
+import type { Candidate, ExistingWaypoint, FindPoisResponse, HoveredPoi, PoiSearchConfig } from "@/types/candidate"
 
 type Step = "import" | "find"
+
+// Stable empty-array references so RouteMap's FitBounds effect (which
+// depends on candidates/existingWaypoints by reference) doesn't refire on
+// every unrelated App re-render (e.g. hovering a PoiListItem) just because
+// `findResult?.candidates ?? []` would otherwise produce a fresh array
+// literal each render.
+const EMPTY_CANDIDATES: Candidate[] = []
 
 export default function App() {
   const [file, setFile] = useState<File | null>(null)
@@ -174,10 +181,14 @@ export default function App() {
   // until /api/find-pois responds, then the backend's own parse wins - with
   // any visitor override from ImportCard's "Waypoints" tab applied on top,
   // since a fresh find-pois response would otherwise silently discard it.
-  const existingWaypoints = (findResult?.existing_waypoints ?? previewExistingWaypoints).map((w) => ({
-    ...w,
-    poi_type: waypointTypeOverrides[w.index] ?? w.poi_type,
-  }))
+  const existingWaypoints = useMemo(
+    () =>
+      (findResult?.existing_waypoints ?? previewExistingWaypoints).map((w) => ({
+        ...w,
+        poi_type: waypointTypeOverrides[w.index] ?? w.poi_type,
+      })),
+    [findResult, previewExistingWaypoints, waypointTypeOverrides]
+  )
 
   return (
     <div className="flex h-screen flex-col">
@@ -194,7 +205,7 @@ export default function App() {
         <div className="h-[50vh] shrink-0 md:h-auto md:flex-1">
           <RouteMap
             routeCoords={findResult?.route_coords ?? previewRouteCoords}
-            candidates={findResult?.candidates ?? []}
+            candidates={findResult?.candidates ?? EMPTY_CANDIDATES}
             selectedIds={selectedIds}
             onToggle={handleToggle}
             existingWaypoints={existingWaypoints}
@@ -249,7 +260,7 @@ export default function App() {
                     isFinding={isFinding}
                   />
                   <CandidateChecklist
-                    candidates={findResult?.candidates ?? []}
+                    candidates={findResult?.candidates ?? EMPTY_CANDIDATES}
                     selectedIds={selectedIds}
                     onToggle={handleToggle}
                     searchedPoiTypes={searchedPoiTypes}
@@ -262,7 +273,7 @@ export default function App() {
             {file && (
               <SaveCard
                 file={file}
-                candidates={findResult?.candidates ?? []}
+                candidates={findResult?.candidates ?? EMPTY_CANDIDATES}
                 selectedIds={selectedIds}
                 existingWaypoints={existingWaypoints}
                 keptWaypointIndices={keptWaypointIndices}

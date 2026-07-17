@@ -10,6 +10,7 @@ import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
 import { buildCircleDivIcon, ROUTE_END_COLOR, ROUTE_START_COLOR } from "@/lib/mapIcons"
 import { POI_TYPES } from "@/lib/poiTypes"
 import type { Candidate, ExistingWaypoint, HoveredPoi } from "@/types/candidate"
+import colors from "tailwindcss/colors"
 
 export interface RouteMapProps {
   routeCoords: [number, number][]
@@ -25,7 +26,9 @@ export interface RouteMapProps {
 
 const DEFAULT_CENTER: [number, number] = [46.06352, 11.12864]
 const DEFAULT_ZOOM = 14
-const EXISTING_WAYPOINT_COLOR = "oklch(65.6% 0.241 354.308)"
+const EXISTING_WAYPOINT_COLOR = colors.pink[500]
+const DIMMED_OPACITY = 0.32
+const MAP_TILES_DIMMED_OPACITY = 0.60
 
 function FitBounds({
   routeCoords,
@@ -55,14 +58,13 @@ function FitBounds({
 
 function RouteEndpointMarkers({ routeCoords }: { routeCoords: [number, number][] }) {
   if (routeCoords.length === 0) return null
-
   const start = routeCoords[0]
   const end = routeCoords[routeCoords.length - 1]
   const isLoop = start[0] === end[0] && start[1] === end[1]
 
   if (isLoop) {
     return (
-      <Marker position={start} icon={buildCircleDivIcon({ icon: Play, color: ROUTE_START_COLOR })}>
+      <Marker position={start} icon={buildCircleDivIcon({ icon: Play, bgColor: ROUTE_START_COLOR })}>
         <Tooltip>Start / End</Tooltip>
       </Marker>
     )
@@ -70,10 +72,10 @@ function RouteEndpointMarkers({ routeCoords }: { routeCoords: [number, number][]
 
   return (
     <>
-      <Marker position={start} icon={buildCircleDivIcon({ icon: Play, color: ROUTE_START_COLOR })}>
+      <Marker position={start} icon={buildCircleDivIcon({ icon: Play, bgColor: ROUTE_START_COLOR })}>
         <Tooltip>Start</Tooltip>
       </Marker>
-      <Marker position={end} icon={buildCircleDivIcon({ icon: Square, color: ROUTE_END_COLOR })}>
+      <Marker position={end} icon={buildCircleDivIcon({ icon: Square, bgColor: ROUTE_END_COLOR })}>
         <Tooltip>End</Tooltip>
       </Marker>
     </>
@@ -98,7 +100,7 @@ function RouteDirectionArrows({ routeCoords }: { routeCoords: [number, number][]
               interactive: false,
               icon: L.icon({
                 iconUrl: '/arrow-big.svg',
-                iconAnchor: [12, 24]
+                iconAnchor: [12, 24],
               }),
             }
           }),
@@ -136,6 +138,7 @@ export function RouteMap({
   const hasRoute = routeCoords.length > 0
   const center = hasRoute ? routeCoords[0] : DEFAULT_CENTER
   const zoom = hasRoute ? 13 : DEFAULT_ZOOM
+  const isHovering = hoveredPoi !== null
 
   return (
     <div className="h-full w-full">
@@ -143,11 +146,17 @@ export function RouteMap({
         <TileLayer
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+          opacity={isHovering ? MAP_TILES_DIMMED_OPACITY : 1}
         />
-        {hasRoute && <Polyline positions={routeCoords} pathOptions={{ color: "oklch(45.7% 0.24 277.023)", weight: 3 }} />}
+        {hasRoute && (
+          <Polyline
+            positions={routeCoords}
+            pathOptions={{ color: colors.violet[600], weight: 3 }}
+          />
+        )}
         {candidates.map((candidate) => {
           const isSelected = selectedIds.has(candidate.osm_id)
-          const isHighlighted = hoveredPoi?.kind === "candidate" && hoveredPoi.id === candidate.osm_id
+          const isHovered = hoveredPoi?.kind === "candidate" && hoveredPoi.id === candidate.osm_id
           const checkboxId = `map-candidate-${candidate.osm_id}`
           const poiType = POI_TYPES.find((p) => p.key === candidate.poi_type)
           const Icon = poiType?.icon ?? POI_TYPES[0].icon
@@ -158,10 +167,10 @@ export function RouteMap({
               position={[candidate.lat, candidate.lon]}
               icon={buildCircleDivIcon({
                 icon: Icon,
-                color,
-                opacity: isSelected ? 1 : 0.35,
-                highlighted: isHighlighted,
+                iconColor: isSelected ? colors.white : colors.mist[400],
+                bgColor: isSelected ? color : colors.mist[200],
               })}
+              opacity={isHovered ? 1 : isHovering ? DIMMED_OPACITY : 1}
             >
               <Popup>
                 <div className="flex flex-col gap-2 text-sm">
@@ -188,7 +197,7 @@ export function RouteMap({
         })}
         {existingWaypoints.map((waypoint) => {
           const isKept = keptWaypointIndices.has(waypoint.index)
-          const isHighlighted = hoveredPoi?.kind === "waypoint" && hoveredPoi.id === waypoint.index
+          const isHovered = hoveredPoi?.kind === "waypoint" && hoveredPoi.id === waypoint.index
           const checkboxId = `map-existing-waypoint-${waypoint.index}`
           const poiType = POI_TYPES.find((p) => p.key === waypoint.poi_type)
           const Icon = poiType?.icon ?? MapPin
@@ -199,10 +208,10 @@ export function RouteMap({
               position={[waypoint.lat, waypoint.lon]}
               icon={buildCircleDivIcon({
                 icon: Icon,
-                color,
-                opacity: isKept ? 1 : 0.35,
-                highlighted: isHighlighted,
+                iconColor: isKept ? colors.white : colors.mist[400],
+                bgColor: isKept ? color : colors.mist[200],
               })}
+              opacity={isHovered ? 1 : isHovering ? DIMMED_OPACITY : 1}
             >
               <Popup>
                 <div className="flex flex-col gap-2 text-sm">
