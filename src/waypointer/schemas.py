@@ -8,6 +8,7 @@ class Candidate(BaseModel):
     lat: float
     lon: float
     distance_m: float
+    distance_from_start_m: float
 
 
 class PoiSearchConfig(BaseModel):
@@ -25,6 +26,15 @@ class ExistingWaypoint(BaseModel):
     name: str | None = None
     lat: float
     lon: float
+    # Best-effort inferred POI type key (see gpx_io.infer_poi_type), None
+    # when it can't be inferred - lets the frontend group/iconify these the
+    # same way as freshly-found candidates when possible.
+    poi_type: str | None = None
+    # Distance from the route/track, and cumulative distance along it from
+    # the start - see geometry.project_onto_polyline_m. Computed against
+    # the same full-resolution polyline as Candidate.distance_m.
+    distance_from_route_m: float
+    distance_from_start_m: float
 
 
 class FindPoisResponse(BaseModel):

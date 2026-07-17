@@ -4,6 +4,7 @@ from waypointer.geometry import (
     haversine_m,
     point_to_polyline_distance_m,
     point_to_segment_distance_m,
+    project_onto_polyline_m,
     simplify_rdp,
     total_distance_m,
 )
@@ -58,6 +59,21 @@ def test_point_to_polyline_takes_minimum():
 def test_point_to_polyline_requires_points():
     with pytest.raises(ValueError):
         point_to_polyline_distance_m((48.0, 2.0), [])
+
+
+def test_project_onto_polyline_returns_distance_and_position():
+    polyline = [(48.0, 2.0), (48.001, 2.0), (48.002, 2.0)]
+    seg0_len = haversine_m(*polyline[0], *polyline[1])
+    seg1_len = haversine_m(*polyline[1], *polyline[2])
+    p = (48.0015, 2.0)  # on the line, midway along the second segment
+    distance_from_route_m, distance_from_start_m = project_onto_polyline_m(p, polyline)
+    assert distance_from_route_m < 0.5
+    assert distance_from_start_m == pytest.approx(seg0_len + 0.5 * seg1_len, rel=1e-3)
+
+
+def test_project_onto_polyline_requires_points():
+    with pytest.raises(ValueError):
+        project_onto_polyline_m((48.0, 2.0), [])
 
 
 def test_simplify_rdp_straight_line_collapses():

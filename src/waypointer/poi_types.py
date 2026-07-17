@@ -19,6 +19,10 @@ class PoiTypeConfig:
     min_distance_m: float
     max_distance_m: float
     default_name: str
+    # Lowercase substrings matched against a pre-existing waypoint's <sym>/
+    # <type> text to best-effort infer its POI type when it wasn't added by
+    # us (no osm_id marker) - see gpx_io.infer_poi_type.
+    sym_hints: tuple[str, ...] = ()
 
 
 POI_TYPES: dict[str, PoiTypeConfig] = {
@@ -30,6 +34,7 @@ POI_TYPES: dict[str, PoiTypeConfig] = {
         min_distance_m=1.0,
         max_distance_m=500.0,
         default_name="Water Fountain",
+        sym_hints=("water", "fountain"),
     ),
 }
 

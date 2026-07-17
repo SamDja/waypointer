@@ -123,7 +123,7 @@ export function SaveCard({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>4. Save</CardTitle>
+        <CardTitle>3. Save</CardTitle>
       </CardHeader>
       <CardContent className="flex flex-col gap-4">
         <div className="flex items-center gap-3">

@@ -25,10 +25,11 @@ from pydantic import TypeAdapter, ValidationError
 from waypointer.device_profiles import DEFAULT_DEVICE_KEY, DEVICE_PROFILES, OutputFormat
 from waypointer.fit_io import FitFountain, build_course_fit_bytes
 from waypointer.fit_read import fit_route_to_gpx_bytes
-from waypointer.geometry import LatLon, point_to_polyline_distance_m, simplify_rdp, total_distance_m
+from waypointer.geometry import LatLon, project_onto_polyline_m, simplify_rdp, total_distance_m
 from waypointer.gpx_io import (
     add_waypoints,
     discard_waypoints,
+    infer_poi_type,
     is_duplicate_candidate,
     make_waypoint,
     parse_gpx,
@@ -137,7 +138,7 @@ async def find_pois(
             # route, never the simplified one used only to build the
             # Overpass query - and against this type's own clamped radius,
             # not a global constant.
-            distance_m = point_to_polyline_distance_m((node.lat, node.lon), coords)
+            distance_m, distance_from_start_m = project_onto_polyline_m((node.lat, node.lon), coords)
             if distance_m <= radius_m:
                 candidates.append(
                     Candidate(
@@ -147,14 +148,25 @@ async def find_pois(
                         lat=node.lat,
                         lon=node.lon,
                         distance_m=distance_m,
+                        distance_from_start_m=distance_from_start_m,
                     )
                 )
 
     candidates.sort(key=lambda c: c.distance_m)
-    existing_waypoints = [
-        ExistingWaypoint(index=i, name=w.name, lat=w.latitude, lon=w.longitude)
-        for i, w in enumerate(gpx.waypoints)
-    ]
+    existing_waypoints = []
+    for i, w in enumerate(gpx.waypoints):
+        distance_from_route_m, distance_from_start_m = project_onto_polyline_m((w.latitude, w.longitude), coords)
+        existing_waypoints.append(
+            ExistingWaypoint(
+                index=i,
+                name=w.name,
+                lat=w.latitude,
+                lon=w.longitude,
+                poi_type=infer_poi_type(w),
+                distance_from_route_m=distance_from_route_m,
+                distance_from_start_m=distance_from_start_m,
+            )
+        )
     return FindPoisResponse(
         candidates=candidates,
         point_count=len(coords),

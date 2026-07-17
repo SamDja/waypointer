@@ -5,6 +5,7 @@ export interface Candidate {
   lat: number
   lon: number
   distance_m: number
+  distance_from_start_m: number
 }
 
 export interface PoiSearchConfig {
@@ -17,6 +18,9 @@ export interface ExistingWaypoint {
   name: string | null
   lat: number
   lon: number
+  poi_type: string | null
+  distance_from_route_m: number
+  distance_from_start_m: number
 }
 
 export interface FindPoisResponse {

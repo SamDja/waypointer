@@ -11,6 +11,7 @@ from fit_tool.profile.messages.course_point_message import CoursePointMessage
 
 from waypointer import poi_types
 from waypointer.fit_io import build_course_fit_bytes
+from waypointer.geometry import project_onto_polyline_m
 from waypointer.main import app
 from waypointer.osm import OVERPASS_URL
 from waypointer.rate_limit import REQUESTS_PER_WINDOW
@@ -30,8 +31,18 @@ def test_find_pois_defaults_to_water_search(sample_route_bytes, overpass_respons
     assert response.status_code == 200
     data = response.json()
     assert data["point_count"] == 3
+    route_coords = [(48.8566, 2.3522), (48.857, 2.353), (48.8575, 2.354)]
+    distance_from_route_m, distance_from_start_m = project_onto_polyline_m((48.86, 2.36), route_coords)
     assert data["existing_waypoints"] == [
-        {"index": 0, "name": "Existing WPT", "lat": 48.86, "lon": 2.36}
+        {
+            "index": 0,
+            "name": "Existing WPT",
+            "lat": 48.86,
+            "lon": 2.36,
+            "poi_type": None,
+            "distance_from_route_m": pytest.approx(distance_from_route_m),
+            "distance_from_start_m": pytest.approx(distance_from_start_m),
+        }
     ]
     # node 1002 (~400m away) must be excluded by the authoritative distance check
     assert [c["osm_id"] for c in data["candidates"]] == [1001]
@@ -166,6 +177,7 @@ def test_save_generic_round_trip(sample_route_bytes):
                 "lat": 48.8567,
                 "lon": 2.3524,
                 "distance_m": 12.0,
+                "distance_from_start_m": 34.0,
             }
         ]
     )
@@ -242,6 +254,7 @@ def test_save_wahoo_returns_fit_file(sample_route_bytes):
                 "lat": 48.8567,
                 "lon": 2.3524,
                 "distance_m": 12.0,
+                "distance_from_start_m": 34.0,
             }
         ]
     )
@@ -313,6 +326,7 @@ def test_wahoo_route_payload_returns_fit_and_metadata(sample_route_bytes):
                 "lat": 48.8567,
                 "lon": 2.3524,
                 "distance_m": 12.0,
+                "distance_from_start_m": 34.0,
             }
         ]
     )

@@ -13,6 +13,10 @@ export interface PoiTypeConfig {
   defaultMaxDistanceM: number
   minDistanceM: number
   maxDistanceM: number
+  // Lowercase substrings matched against a pre-existing waypoint's <sym>/
+  // <type> text to best-effort infer its POI type - mirrors the backend's
+  // poi_types.py sym_hints, see lib/gpx.ts's parseExistingWaypointsFromGpx.
+  symHints: string[]
 }
 
 export const POI_TYPES: PoiTypeConfig[] = [
@@ -24,5 +28,6 @@ export const POI_TYPES: PoiTypeConfig[] = [
     defaultMaxDistanceM: 10,
     minDistanceM: 1,
     maxDistanceM: 500,
+    symHints: ["water", "fountain"],
   },
 ]

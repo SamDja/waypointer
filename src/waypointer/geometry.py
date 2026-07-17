@@ -28,8 +28,11 @@ def _to_local_xy(lat: float, lon: float, ref_lat: float) -> tuple[float, float]:
     return x, y
 
 
-def point_to_segment_distance_m(p: LatLon, a: LatLon, b: LatLon) -> float:
-    """Distance from point p to the segment a-b, in meters."""
+def _point_to_segment_projection(p: LatLon, a: LatLon, b: LatLon) -> tuple[float, float]:
+    """Distance from p to segment a-b, and the fractional position t along
+    a-b (clamped to [0, 1]) of the closest point - shared by
+    point_to_segment_distance_m and project_onto_polyline_m, the latter
+    needing t to compute cumulative distance along a polyline."""
     ref_lat = (p[0] + a[0] + b[0]) / 3
     px, py = _to_local_xy(p[0], p[1], ref_lat)
     ax, ay = _to_local_xy(a[0], a[1], ref_lat)
@@ -38,13 +41,18 @@ def point_to_segment_distance_m(p: LatLon, a: LatLon, b: LatLon) -> float:
     abx, aby = bx - ax, by - ay
     len_sq = abx * abx + aby * aby
     if len_sq == 0:
-        return math.hypot(px - ax, py - ay)
+        return math.hypot(px - ax, py - ay), 0.0
 
     t = ((px - ax) * abx + (py - ay) * aby) / len_sq
     t = max(0.0, min(1.0, t))
     closest_x = ax + t * abx
     closest_y = ay + t * aby
-    return math.hypot(px - closest_x, py - closest_y)
+    return math.hypot(px - closest_x, py - closest_y), t
+
+
+def point_to_segment_distance_m(p: LatLon, a: LatLon, b: LatLon) -> float:
+    """Distance from point p to the segment a-b, in meters."""
+    return _point_to_segment_projection(p, a, b)[0]
 
 
 def total_distance_m(coords: list[LatLon]) -> float:
@@ -65,6 +73,30 @@ def point_to_polyline_distance_m(p: LatLon, polyline: list[LatLon]) -> float:
         point_to_segment_distance_m(p, polyline[i], polyline[i + 1])
         for i in range(len(polyline) - 1)
     )
+
+
+def project_onto_polyline_m(p: LatLon, polyline: list[LatLon]) -> tuple[float, float]:
+    """Returns (distance_from_route_m, distance_from_start_m): p's
+    perpendicular distance to the nearest segment of polyline, and the
+    cumulative distance along polyline from its first point to that nearest
+    projection. polyline must contain at least one point."""
+    if not polyline:
+        raise ValueError("polyline must contain at least one point")
+    if len(polyline) == 1:
+        return haversine_m(p[0], p[1], polyline[0][0], polyline[0][1]), 0.0
+
+    best_distance_m = math.inf
+    best_distance_from_start_m = 0.0
+    cumulative_m = 0.0
+    for i in range(len(polyline) - 1):
+        a, b = polyline[i], polyline[i + 1]
+        segment_len_m = haversine_m(a[0], a[1], b[0], b[1])
+        distance_m, t = _point_to_segment_projection(p, a, b)
+        if distance_m < best_distance_m:
+            best_distance_m = distance_m
+            best_distance_from_start_m = cumulative_m + t * segment_len_m
+        cumulative_m += segment_len_m
+    return best_distance_m, best_distance_from_start_m
 
 
 def simplify_rdp(points: list[LatLon], tolerance_m: float = 8.0) -> list[LatLon]:

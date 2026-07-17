@@ -182,23 +182,28 @@ export function RouteMap({
         {existingWaypoints.map((waypoint) => {
           const isKept = keptWaypointIndices.has(waypoint.index)
           const checkboxId = `map-existing-waypoint-${waypoint.index}`
+          const poiType = POI_TYPES.find((p) => p.key === waypoint.poi_type)
+          const Icon = poiType?.icon ?? MapPin
+          const color = poiType?.color ?? EXISTING_WAYPOINT_COLOR
           return (
             <Marker
               key={waypoint.index}
               position={[waypoint.lat, waypoint.lon]}
               icon={buildCircleDivIcon({
-                icon: MapPin,
-                color: EXISTING_WAYPOINT_COLOR,
+                icon: Icon,
+                color,
                 opacity: isKept ? 1 : 0.35,
               })}
             >
               <Popup>
                 <div className="flex flex-col gap-2 text-sm">
                   <div className="flex items-center gap-1 font-medium">
-                    <MapPin className="size-4" style={{ color: EXISTING_WAYPOINT_COLOR }} />
+                    <Icon className="size-4" style={{ color }} />
                     {waypoint.name || "(unnamed)"}
                   </div>
-                  <p className="text-muted-foreground">Already in this file</p>
+                  <p className="text-muted-foreground">
+                    Already in this file{poiType ? ` · ${poiType.label}` : ""}
+                  </p>
                   {onToggleExistingWaypoint && (
                     <div className="flex items-center gap-2">
                       <Checkbox

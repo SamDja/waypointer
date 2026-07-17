@@ -12,6 +12,7 @@ import gpxpy.gpx
 from waypointer.device_profiles import DeviceProfile, build_waypoint
 from waypointer.geometry import LatLon, haversine_m
 from waypointer.osm import OsmNode
+from waypointer.poi_types import POI_TYPES
 
 WAYPOINTER_NS = "https://github.com/SamDja/waypointer"
 WAYPOINTER_PREFIX = "waypointer"
@@ -82,6 +83,30 @@ def existing_osm_ids(gpx: gpxpy.gpx.GPX) -> set[int]:
 
 def existing_waypoint_coords(gpx: gpxpy.gpx.GPX) -> list[LatLon]:
     return [(w.latitude, w.longitude) for w in gpx.waypoints]
+
+
+def _has_osm_id_marker(wpt: gpxpy.gpx.GPXWaypoint) -> bool:
+    return any(ext.tag == OSM_ID_CLARK_TAG for ext in wpt.extensions)
+
+
+def infer_poi_type(wpt: gpxpy.gpx.GPXWaypoint) -> str | None:
+    """Best-effort guess at which registered POI type a pre-existing
+    waypoint represents, for map icon/checklist grouping only - never
+    affects dedup or export. A stamped osm_id marker means we added this
+    waypoint ourselves on a previous export; since only "water" is
+    registered today that's unambiguous (revisit once a second POI type
+    exists). Otherwise falls back to a substring match of the waypoint's
+    <sym>/<type> text against each registered type's sym_hints - best-effort
+    for hand-edited files or other tools' exports. Deliberately does not
+    match against <name>, which is free text and would produce false
+    positives (e.g. "Water Street Cafe")."""
+    if _has_osm_id_marker(wpt):
+        return "water"
+    text = f"{wpt.symbol or ''} {wpt.type or ''}".lower()
+    for cfg in POI_TYPES.values():
+        if any(hint in text for hint in cfg.sym_hints):
+            return cfg.key
+    return None
 
 
 def is_duplicate_candidate(node: OsmNode, gpx: gpxpy.gpx.GPX) -> bool:
