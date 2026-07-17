@@ -23,7 +23,16 @@ import { missingWahooScopeWarning } from "@/lib/wahooAuth"
 import { connectWahoo } from "@/lib/wahooConnect"
 import { type WahooTokens } from "@/lib/wahooSettings"
 import { cn } from "@/lib/utils"
-import { ArrowRightIcon, FileUp, FileText, Trash2Icon } from "lucide-react"
+import {
+  ArrowRightIcon,
+  Clock,
+  FileUp,
+  FileText,
+  RulerDimensionLine,
+  Trash2Icon,
+  TrendingDown,
+  TrendingUp,
+} from "lucide-react"
 import type { ExistingWaypoint } from "@/types/candidate"
 
 export interface ImportCardProps {
@@ -137,21 +146,41 @@ export function ImportCard({
 
           <TabsContent value="info">
             <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border p-4 text-sm">
-              <div className="flex flex-col">
-                <span className="text-xs text-muted-foreground">Distance</span>
-                <span className="font-medium">{(distanceM / 1000).toFixed(1)}km</span>
+              <div className="flex flex-row items-center gap-2">
+                <RulerDimensionLine className="size-6" />
+                <div className="flex flex-col">
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    Distance
+                  </span>
+                  <span className="font-medium">{(distanceM / 1000).toFixed(1)}km</span>
+                </div>
               </div>
-              <div className="flex flex-col">
-                <span className="text-xs text-muted-foreground">Est. duration</span>
-                <span className="font-medium">{formatDurationHours(durationHours)}</span>
+              <div className="flex flex-row items-center gap-2">
+                <Clock className="size-6" />
+                <div className="flex flex-col">
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    Est. duration
+                  </span>
+                  <span className="font-medium">{formatDurationHours(durationHours)}</span>
+                </div>
               </div>
-              <div className="flex flex-col">
-                <span className="text-xs text-muted-foreground">Elevation gain</span>
-                <span className="font-medium">{Math.round(elevationGainM)}m</span>
+              <div className="flex flex-row items-center gap-2">
+                <TrendingUp className="size-6" />
+                <div className="flex flex-col">
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    Elevation gain
+                  </span>
+                  <span className="font-medium">{Math.round(elevationGainM)}m</span>
+                </div>
               </div>
-              <div className="flex flex-col">
-                <span className="text-xs text-muted-foreground">Elevation loss</span>
-                <span className="font-medium">{Math.round(elevationLossM)}m</span>
+              <div className="flex flex-row items-center gap-2">
+                <TrendingDown className="size-6" />
+                <div className="flex flex-col">
+                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                    Elevation loss
+                  </span>
+                  <span className="font-medium">{Math.round(elevationLossM)}m</span>
+                </div>
               </div>
 
               <div className="col-span-2 flex items-center gap-2 border-t pt-2">
@@ -200,7 +229,7 @@ export function ImportCard({
                   </Label>
                 </div>
                 <ul className="flex max-h-96 flex-col gap-3 overflow-y-auto">
-                  {existingWaypoints.sort((a,b) => a.distance_from_start_m - b.distance_from_start_m).map((waypoint) => (
+                  {existingWaypoints.sort((a, b) => a.distance_from_start_m - b.distance_from_start_m).map((waypoint) => (
                     <PoiListItem
                       key={waypoint.index}
                       id={`waypoint-kept-${waypoint.index}`}
