@@ -22,7 +22,7 @@ import {
 } from "@/lib/settings"
 import { toast, updateToast } from "@/lib/toast"
 import { loadWahooTokens, type WahooTokens } from "@/lib/wahooSettings"
-import type { ExistingWaypoint, FindPoisResponse, PoiSearchConfig } from "@/types/candidate"
+import type { ExistingWaypoint, FindPoisResponse, HoveredPoi, PoiSearchConfig } from "@/types/candidate"
 
 type Step = "import" | "find"
 
@@ -35,6 +35,7 @@ export default function App() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [searchedPoiTypes, setSearchedPoiTypes] = useState<PoiSearchConfig[]>([])
   const [keptWaypointIndices, setKeptWaypointIndices] = useState<Set<number>>(new Set())
+  const [hoveredPoi, setHoveredPoi] = useState<HoveredPoi>(null)
   // Visitor-chosen overrides of a pre-existing waypoint's suggested POI
   // type (see ImportCard's "Waypoints" tab), keyed by ExistingWaypoint.index
   // - applied on top of whatever existingWaypoints currently is (preview or
@@ -125,6 +126,14 @@ export default function App() {
     setKeptWaypointIndices(checked ? new Set(existingWaypoints.map((w) => w.index)) : new Set())
   }
 
+  function handleHoverCandidate(osmId: number | null) {
+    setHoveredPoi(osmId === null ? null : { kind: "candidate", id: osmId })
+  }
+
+  function handleHoverWaypoint(index: number | null) {
+    setHoveredPoi(index === null ? null : { kind: "waypoint", id: index })
+  }
+
   async function handleFind() {
     if (!file) return
 
@@ -192,6 +201,7 @@ export default function App() {
             keptWaypointIndices={keptWaypointIndices}
             onToggleExistingWaypoint={handleToggleExistingWaypoint}
             onChangeWaypointType={handleAssignWaypointType}
+            hoveredPoi={hoveredPoi}
           />
         </div>
 
@@ -213,6 +223,7 @@ export default function App() {
                 keptWaypointIndices={keptWaypointIndices}
                 onToggleExistingWaypoint={handleToggleExistingWaypoint}
                 onToggleAllExistingWaypoints={handleToggleAllExistingWaypoints}
+                onHoverWaypoint={handleHoverWaypoint}
                 distanceM={distanceM}
                 elevationGainM={elevationGainM}
                 elevationLossM={elevationLossM}
@@ -242,6 +253,7 @@ export default function App() {
                     selectedIds={selectedIds}
                     onToggle={handleToggle}
                     searchedPoiTypes={searchedPoiTypes}
+                    onHoverCandidate={handleHoverCandidate}
                   />
                 </div>
               </StepCard>

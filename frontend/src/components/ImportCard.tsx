@@ -13,10 +13,11 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { PoiListItem } from "@/components/PoiListItem"
 import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { WahooRoutesDialog } from "@/components/WahooRoutesDialog"
-import { formatDistanceM, formatDurationHours } from "@/lib/geometry"
+import { formatDurationHours } from "@/lib/geometry"
 import { toast, updateToast } from "@/lib/toast"
 import { missingWahooScopeWarning } from "@/lib/wahooAuth"
 import { connectWahoo } from "@/lib/wahooConnect"
@@ -43,6 +44,7 @@ export interface ImportCardProps {
   onAvgSpeedChange: (speedKmh: number) => void
   wahooTokens: WahooTokens | null
   onWahooTokensChange: (tokens: WahooTokens | null) => void
+  onHoverWaypoint?: (index: number | null) => void
 }
 
 export function ImportCard({
@@ -63,6 +65,7 @@ export function ImportCard({
   onAvgSpeedChange,
   wahooTokens,
   onWahooTokensChange,
+  onHoverWaypoint,
 }: ImportCardProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [isDragActive, setIsDragActive] = useState(false)
@@ -197,39 +200,26 @@ export function ImportCard({
                   </Label>
                 </div>
                 <ul className="flex max-h-96 flex-col gap-3 overflow-y-auto">
-                  {existingWaypoints.sort((a,b) => a.distance_from_start_m - b.distance_from_start_m).map((waypoint) => {
-                    const id = `waypoint-kept-${waypoint.index}`
-                    return (
-                      <li key={waypoint.index} className="flex items-start justify-between gap-3">
-                        <div className="flex min-w-0 items-start gap-2">
-                          <Checkbox
-                            id={id}
-                            className="mt-1"
-                            checked={keptWaypointIndices.has(waypoint.index)}
-                            onCheckedChange={() => onToggleExistingWaypoint(waypoint.index)}
-                          />
-                          <Label htmlFor={id} className="flex min-w-0 flex-col items-start gap-0 font-normal">
-                            <span className="truncate text-sm">{waypoint.name || "(unnamed)"}</span>
-                            <span className="flex w-full gap-2 text-xs">
-                              <span>
-                                {formatDistanceM(waypoint.distance_from_start_m)}{" "}
-                                <span className="text-muted-foreground">from start</span>
-                              </span>
-                              <span>
-                                {formatDistanceM(waypoint.distance_from_route_m)}{" "}
-                                <span className="text-muted-foreground">from track</span>
-                              </span>
-                            </span>
-                          </Label>
-                        </div>
+                  {existingWaypoints.sort((a,b) => a.distance_from_start_m - b.distance_from_start_m).map((waypoint) => (
+                    <PoiListItem
+                      key={waypoint.index}
+                      id={`waypoint-kept-${waypoint.index}`}
+                      title={waypoint.name || "(unnamed)"}
+                      checked={keptWaypointIndices.has(waypoint.index)}
+                      onCheckedChange={() => onToggleExistingWaypoint(waypoint.index)}
+                      distanceFromStartM={waypoint.distance_from_start_m}
+                      distanceFromRouteM={waypoint.distance_from_route_m}
+                      trailing={
                         <PoiTypeCombobox
                           value={waypoint.poi_type}
                           onChange={(poiType) => onChangeWaypointType(waypoint.index, poiType)}
                           className="shrink-0"
                         />
-                      </li>
-                    )
-                  })}
+                      }
+                      onMouseEnter={() => onHoverWaypoint?.(waypoint.index)}
+                      onMouseLeave={() => onHoverWaypoint?.(null)}
+                    />
+                  ))}
                 </ul>
               </div>
             </TabsContent>

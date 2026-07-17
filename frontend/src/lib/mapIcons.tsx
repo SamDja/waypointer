@@ -4,15 +4,23 @@ import type { LucideIcon } from "lucide-react"
 
 export const ROUTE_START_COLOR = "oklch(53.2% 0.157 131.589)"
 export const ROUTE_END_COLOR = "oklch(50.5% 0.213 27.518)"
+export const HIGHLIGHT_COLOR = "#fde047"
 
 interface CircleDivIconOptions {
   icon: LucideIcon
   color: string
   size?: number
   opacity?: number
+  highlighted?: boolean
 }
 
-export function buildCircleDivIcon({ icon: Icon, color, size = 28, opacity = 1 }: CircleDivIconOptions): L.DivIcon {
+export function buildCircleDivIcon({
+  icon: Icon,
+  color,
+  size = 28,
+  opacity = 1,
+  highlighted = false,
+}: CircleDivIconOptions): L.DivIcon {
   const iconSize = Math.round(size * 0.7)
   const iconSvg = renderToStaticMarkup(<Icon size={iconSize} color="#fff" strokeWidth={2} />)
   const html = `
@@ -27,6 +35,7 @@ export function buildCircleDivIcon({ icon: Icon, color, size = 28, opacity = 1 }
       align-items: center;
       justify-content: center;
       box-sizing: border-box;
+      ${highlighted ? `border: 3px solid ${HIGHLIGHT_COLOR};` : ""}
     ">${iconSvg}</div>
   `
   return L.divIcon({

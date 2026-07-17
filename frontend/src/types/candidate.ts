@@ -23,6 +23,8 @@ export interface ExistingWaypoint {
   distance_from_start_m: number
 }
 
+export type HoveredPoi = { kind: "candidate"; id: number } | { kind: "waypoint"; id: number } | null
+
 export interface FindPoisResponse {
   candidates: Candidate[]
   point_count: number

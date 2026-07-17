@@ -9,7 +9,7 @@ import { Label } from "@/components/ui/label"
 import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
 import { buildCircleDivIcon, ROUTE_END_COLOR, ROUTE_START_COLOR } from "@/lib/mapIcons"
 import { POI_TYPES } from "@/lib/poiTypes"
-import type { Candidate, ExistingWaypoint } from "@/types/candidate"
+import type { Candidate, ExistingWaypoint, HoveredPoi } from "@/types/candidate"
 
 export interface RouteMapProps {
   routeCoords: [number, number][]
@@ -20,6 +20,7 @@ export interface RouteMapProps {
   keptWaypointIndices?: Set<number>
   onToggleExistingWaypoint?: (index: number) => void
   onChangeWaypointType?: (index: number, poiType: string) => void
+  hoveredPoi?: HoveredPoi
 }
 
 const DEFAULT_CENTER: [number, number] = [46.06352, 11.12864]
@@ -130,6 +131,7 @@ export function RouteMap({
   keptWaypointIndices = new Set(),
   onToggleExistingWaypoint,
   onChangeWaypointType,
+  hoveredPoi = null,
 }: RouteMapProps) {
   const hasRoute = routeCoords.length > 0
   const center = hasRoute ? routeCoords[0] : DEFAULT_CENTER
@@ -145,6 +147,7 @@ export function RouteMap({
         {hasRoute && <Polyline positions={routeCoords} pathOptions={{ color: "oklch(45.7% 0.24 277.023)", weight: 3 }} />}
         {candidates.map((candidate) => {
           const isSelected = selectedIds.has(candidate.osm_id)
+          const isHighlighted = hoveredPoi?.kind === "candidate" && hoveredPoi.id === candidate.osm_id
           const checkboxId = `map-candidate-${candidate.osm_id}`
           const poiType = POI_TYPES.find((p) => p.key === candidate.poi_type)
           const Icon = poiType?.icon ?? POI_TYPES[0].icon
@@ -157,6 +160,7 @@ export function RouteMap({
                 icon: Icon,
                 color,
                 opacity: isSelected ? 1 : 0.35,
+                highlighted: isHighlighted,
               })}
             >
               <Popup>
@@ -184,6 +188,7 @@ export function RouteMap({
         })}
         {existingWaypoints.map((waypoint) => {
           const isKept = keptWaypointIndices.has(waypoint.index)
+          const isHighlighted = hoveredPoi?.kind === "waypoint" && hoveredPoi.id === waypoint.index
           const checkboxId = `map-existing-waypoint-${waypoint.index}`
           const poiType = POI_TYPES.find((p) => p.key === waypoint.poi_type)
           const Icon = poiType?.icon ?? MapPin
@@ -196,6 +201,7 @@ export function RouteMap({
                 icon: Icon,
                 color,
                 opacity: isKept ? 1 : 0.35,
+                highlighted: isHighlighted,
               })}
             >
               <Popup>

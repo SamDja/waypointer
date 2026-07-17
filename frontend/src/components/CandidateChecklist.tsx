@@ -1,6 +1,4 @@
-import { Checkbox } from "@/components/ui/checkbox"
-import { Label } from "@/components/ui/label"
-import { formatDistanceM } from "@/lib/geometry"
+import { PoiListItem } from "@/components/PoiListItem"
 import { POI_TYPES } from "@/lib/poiTypes"
 import type { Candidate, PoiSearchConfig } from "@/types/candidate"
 
@@ -9,6 +7,7 @@ export interface CandidateChecklistProps {
   selectedIds: Set<number>
   onToggle: (osmId: number) => void
   searchedPoiTypes: PoiSearchConfig[]
+  onHoverCandidate?: (osmId: number | null) => void
 }
 
 export function CandidateChecklist({
@@ -16,6 +15,7 @@ export function CandidateChecklist({
   selectedIds,
   onToggle,
   searchedPoiTypes,
+  onHoverCandidate,
 }: CandidateChecklistProps) {
   return (
     <div className="flex flex-col gap-4">
@@ -40,25 +40,19 @@ export function CandidateChecklist({
               </p>
             ) : (
               <ul className="flex max-h-80 flex-col gap-2 overflow-y-auto">
-                {typeCandidates.sort((a,b) => a.distance_from_start_m - b.distance_from_start_m).map((candidate) => {
-                  const id = `candidate-${candidate.osm_id}`
-                  return (
-                    <li key={id} className="flex items-center gap-2 bg-gray-100 p-2 rounded-xl">
-                      <Checkbox
-                        id={id}
-                        checked={selectedIds.has(candidate.osm_id)}
-                        onCheckedChange={() => onToggle(candidate.osm_id)}
-                      />
-                      <Label htmlFor={id} className="flex flex-col items-start gap-0 w-full">
-                        {candidate.name ? <h4>{candidate.name}</h4> : <h4>{candidate.poi_type}</h4>}
-                        <span className="text-sm font-normal flex w-full">
-                          <span className="grow-1">{formatDistanceM(candidate.distance_from_start_m)} <span className="text-muted-foreground">from start</span></span>
-                          <span className="grow-1">{formatDistanceM(candidate.distance_m)} <span className="text-muted-foreground">from track</span></span>
-                        </span>
-                      </Label>
-                    </li>
-                  )
-                })}
+                {typeCandidates.sort((a,b) => a.distance_from_start_m - b.distance_from_start_m).map((candidate) => (
+                  <PoiListItem
+                    key={candidate.osm_id}
+                    id={`candidate-${candidate.osm_id}`}
+                    title={candidate.name || candidate.poi_type}
+                    checked={selectedIds.has(candidate.osm_id)}
+                    onCheckedChange={() => onToggle(candidate.osm_id)}
+                    distanceFromStartM={candidate.distance_from_start_m}
+                    distanceFromRouteM={candidate.distance_m}
+                    onMouseEnter={() => onHoverCandidate?.(candidate.osm_id)}
+                    onMouseLeave={() => onHoverCandidate?.(null)}
+                  />
+                ))}
               </ul>
             )}
           </div>
