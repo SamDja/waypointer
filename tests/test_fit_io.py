@@ -2,6 +2,7 @@ import pytest
 from fit_tool.fit_file import FitFile
 from fit_tool.profile.messages.course_point_message import CoursePointMessage
 from fit_tool.profile.messages.file_id_message import FileIdMessage
+from fit_tool.profile.messages.lap_message import LapMessage
 from fit_tool.profile.messages.record_message import RecordMessage
 from fit_tool.profile.profile_type import FileType
 
@@ -78,6 +79,43 @@ def test_build_course_fit_bytes_without_elevations_leaves_altitude_unset(sample_
 
     record_messages = [m for m in messages if isinstance(m, RecordMessage)]
     assert all(r.altitude is None for r in record_messages)
+
+
+def test_build_course_fit_bytes_sets_lap_elevation_summary_from_elevations(sample_route_bytes):
+    # sample_route.gpx's three trkpts have ele 35.0 -> 36.0 -> 37.0, i.e.
+    # 2m of ascent and 0m of descent, avg 36.0, min 35.0, max 37.0.
+    gpx = parse_gpx(sample_route_bytes)
+    coords = route_coordinates(gpx)
+    elevations = route_elevations(gpx)
+
+    fit_bytes = build_course_fit_bytes(
+        coords, [], course_name="Test Route", elevations_m=elevations
+    )
+    messages = _decode(fit_bytes)
+
+    lap = next(m for m in messages if isinstance(m, LapMessage))
+    assert lap.total_ascent == 2
+    assert lap.total_descent == 0
+    assert round(lap.avg_altitude, 1) == 36.0
+    assert round(lap.max_altitude, 1) == 37.0
+    assert round(lap.min_altitude, 1) == 35.0
+
+
+def test_build_course_fit_bytes_without_elevations_leaves_lap_elevation_summary_unset(
+    sample_route_bytes,
+):
+    gpx = parse_gpx(sample_route_bytes)
+    coords = route_coordinates(gpx)
+
+    fit_bytes = build_course_fit_bytes(coords, [], course_name="Test Route")
+    messages = _decode(fit_bytes)
+
+    lap = next(m for m in messages if isinstance(m, LapMessage))
+    assert lap.total_ascent is None
+    assert lap.total_descent is None
+    assert lap.avg_altitude is None
+    assert lap.max_altitude is None
+    assert lap.min_altitude is None
 
 
 def test_build_course_fit_bytes_rejects_empty_route():
