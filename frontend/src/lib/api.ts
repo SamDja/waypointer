@@ -23,7 +23,7 @@ export interface SaveParams {
   gpxFile: File
   selectedCandidates: Candidate[]
   device: string
-  waterSymbol: string
+  symbols: Record<string, string>
   discardedWaypointIndices: number[]
   existingWaypointTypes: Record<number, string>
   routeName?: string
@@ -38,7 +38,7 @@ export async function saveRoute({
   gpxFile,
   selectedCandidates,
   device,
-  waterSymbol,
+  symbols,
   discardedWaypointIndices,
   existingWaypointTypes,
   routeName,
@@ -47,7 +47,7 @@ export async function saveRoute({
   formData.append("gpx_file", gpxFile)
   formData.append("selected_candidates", JSON.stringify(selectedCandidates))
   formData.append("device", device)
-  formData.append("water_symbol", waterSymbol)
+  formData.append("symbols", JSON.stringify(symbols))
   formData.append("discarded_waypoint_indices", JSON.stringify(discardedWaypointIndices))
   formData.append("existing_waypoint_types", JSON.stringify(existingWaypointTypes))
   if (routeName) formData.append("route_name", routeName)

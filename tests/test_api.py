@@ -188,13 +188,14 @@ def test_save_generic_round_trip(sample_route_bytes):
         data={
             "selected_candidates": selected,
             "device": "generic",
-            "water_symbol": "Water",
         },
     )
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/gpx+xml")
     assert "route_waypoints.gpx" in response.headers["content-disposition"]
     assert b"Fontaine Wallace" in response.content
+    # No explicit symbols form field - falls back to POI_TYPES["water"]'s
+    # default_gpx_symbol.
     assert b"<sym>Water</sym>" in response.content
 
 
@@ -206,6 +207,37 @@ def test_save_keeps_existing_waypoints_by_default(sample_route_bytes):
     )
     assert response.status_code == 200
     assert b"Existing WPT" in response.content
+
+
+@responses.activate
+def test_save_generic_applies_per_type_symbol_overrides(sample_route_bytes):
+    # sample_route.gpx's one pre-existing waypoint has no <sym>/type marker,
+    # so it infers as "generic" unless existing_waypoint_types overrides it.
+    selected = json.dumps(
+        [
+            {
+                "osm_id": 1001,
+                "poi_type": "water",
+                "name": "Fontaine Wallace",
+                "lat": 48.8567,
+                "lon": 2.3524,
+                "distance_m": 12.0,
+                "distance_from_start_m": 34.0,
+            }
+        ]
+    )
+    response = client.post(
+        "/api/save",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={
+            "selected_candidates": selected,
+            "device": "generic",
+            "symbols": json.dumps({"water": "Potable Water", "generic": "Misc"}),
+        },
+    )
+    assert response.status_code == 200
+    assert b"<sym>Potable Water</sym>" in response.content
+    assert b"<sym>Misc</sym>" in response.content
 
 
 def test_save_discards_selected_existing_waypoints(sample_route_bytes):

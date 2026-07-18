@@ -13,6 +13,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { RouteNameDialog } from "@/components/RouteNameDialog"
 import { ApiError, fetchWahooRoutePayload, saveRoute } from "@/lib/api"
+import { POI_TYPES } from "@/lib/poiTypes"
 import type { DeviceSettings } from "@/lib/settings"
 import { toast, updateToast } from "@/lib/toast"
 import { pushRouteToWahoo } from "@/lib/wahooApi"
@@ -21,6 +22,14 @@ import { connectWahoo } from "@/lib/wahooConnect"
 import { getValidWahooAccessToken, type WahooTokens } from "@/lib/wahooSettings"
 import type { Candidate, ExistingWaypoint } from "@/types/candidate"
 import { Download, Upload } from "lucide-react"
+
+// The visitor's chosen GPX <sym> for this type, if any, else the
+// registry's suggested default, else the type's own label - mirrors
+// main.py's _resolve_symbol.
+function resolveSymbol(poiType: string, symbols: Record<string, string>): string {
+  const cfg = POI_TYPES.find((c) => c.key === poiType)
+  return symbols[poiType] || cfg?.defaultGpxSymbol || cfg?.label || poiType
+}
 
 export interface SaveCardProps {
   file: File
@@ -54,6 +63,15 @@ export function SaveCard({
   const isFit = settings.device === "wahoo_elemnt_roam_v3"
   const defaultRouteName = file.name.replace(/\.gpx$/i, "")
 
+  // Only POI types actually present in the output - a candidate must be
+  // selected, an existing waypoint must be kept - not the full registry.
+  const presentPoiTypes = Array.from(
+    new Set([
+      ...candidates.filter((c) => selectedIds.has(c.osm_id)).map((c) => c.poi_type),
+      ...existingWaypoints.filter((w) => keptWaypointIndices.has(w.index)).map((w) => w.poi_type),
+    ])
+  )
+
   function keptExistingWaypointTypes(): Record<number, string> {
     return Object.fromEntries(
       existingWaypoints.filter((w) => keptWaypointIndices.has(w.index)).map((w) => [w.index, w.poi_type])
@@ -65,6 +83,9 @@ export function SaveCard({
     const discardedWaypointIndices = existingWaypoints
       .filter((w) => !keptWaypointIndices.has(w.index))
       .map((w) => w.index)
+    const symbols = Object.fromEntries(
+      presentPoiTypes.map((poiType) => [poiType, resolveSymbol(poiType, settings.symbols)])
+    )
 
     setIsSaving(true)
     const toastId = toast("Saving...", "loading")
@@ -73,7 +94,7 @@ export function SaveCard({
         gpxFile: file,
         selectedCandidates,
         device: settings.device,
-        waterSymbol: settings.waterSymbol,
+        symbols,
         discardedWaypointIndices,
         existingWaypointTypes: keptExistingWaypointTypes(),
         routeName,
@@ -147,7 +168,7 @@ export function SaveCard({
       <CardContent>
         <Tabs value={activeTab} onValueChange={setActiveTab}>
           <TabsList>
-            <TabsTrigger value="download">Download</TabsTrigger>
+            <TabsTrigger value="download">Download file</TabsTrigger>
             <TabsTrigger value="wahoo">Wahoo</TabsTrigger>
           </TabsList>
 
@@ -170,16 +191,33 @@ export function SaveCard({
               </Select>
             </div>
 
-            {!isFit && (
-              <div className="flex items-center gap-3">
-                <Label htmlFor="water-symbol" className="w-40 shrink-0">
-                  Water symbol (&lt;sym&gt;)
-                </Label>
-                <Input
-                  id="water-symbol"
-                  value={settings.waterSymbol}
-                  onChange={(e) => onSettingsChange({ ...settings, waterSymbol: e.target.value })}
-                />
+            {!isFit && presentPoiTypes.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <span className="text-xs text-muted-foreground">
+                  Symbol (&lt;sym&gt;) for each POI type in this file
+                </span>
+                {presentPoiTypes.map((poiType) => {
+                  const cfg = POI_TYPES.find((c) => c.key === poiType)
+                  const id = `symbol-${poiType}`
+                  return (
+                    <div key={poiType} className="flex items-center gap-3">
+                      <Label htmlFor={id} className="w-40 shrink-0">
+                        {cfg ? <cfg.icon className="size-4" color={cfg.color}></ cfg.icon> : null}
+                        <span>{cfg?.label ?? poiType}</span>
+                      </Label>
+                      <Input
+                        id={id}
+                        value={resolveSymbol(poiType, settings.symbols)}
+                        onChange={(e) =>
+                          onSettingsChange({
+                            ...settings,
+                            symbols: { ...settings.symbols, [poiType]: e.target.value },
+                          })
+                        }
+                      />
+                    </div>
+                  )
+                })}
               </div>
             )}
 

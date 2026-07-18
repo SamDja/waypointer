@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 import gpxpy
 import gpxpy.gpx
 
-from waypointer.device_profiles import DeviceProfile, build_waypoint
+from waypointer.device_profiles import build_waypoint
 from waypointer.geometry import LatLon, haversine_m
 from waypointer.osm import OsmNode
 from waypointer.poi_types import POI_TYPES
@@ -154,12 +154,12 @@ def is_duplicate_candidate(node: OsmNode, gpx: gpxpy.gpx.GPX) -> bool:
 
 
 def make_waypoint(
-    node: OsmNode, profile: DeviceProfile, distance_m: float
+    node: OsmNode, symbol: str, distance_m: float
 ) -> gpxpy.gpx.GPXWaypoint:
     """Builds the GPXWaypoint via device_profiles, then stamps the dedup
     marker - kept out of device_profiles so that module stays unaware of
     GPX extension/dedup mechanics."""
-    waypoint = build_waypoint(node, profile, distance_m)
+    waypoint = build_waypoint(node, symbol, distance_m)
     marker = ET.Element(f"{WAYPOINTER_PREFIX}:{OSM_ID_LOCAL_NAME}")
     marker.text = str(node.id)
     waypoint.extensions.append(marker)

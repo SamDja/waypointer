@@ -6,10 +6,14 @@ const AVG_SPEED_KEY = "waypointer.avgSpeedKmh"
 
 export interface DeviceSettings {
   device: string
-  waterSymbol: string
+  // Sparse: only populated for POI types the visitor has actually edited
+  // a GPX <sym> value for - see SaveCard.tsx, which falls back to each
+  // type's suggested default (POI_TYPES[...].defaultGpxSymbol ?? label)
+  // for any present-in-output type missing here.
+  symbols: Record<string, string>
 }
 
-export const DEFAULT_SETTINGS: DeviceSettings = { device: "generic", waterSymbol: "Water" }
+export const DEFAULT_SETTINGS: DeviceSettings = { device: "generic", symbols: {} }
 
 export function loadSettings(): DeviceSettings {
   try {
@@ -18,7 +22,7 @@ export function loadSettings(): DeviceSettings {
     const parsed = JSON.parse(raw)
     return {
       device: parsed.device || DEFAULT_SETTINGS.device,
-      waterSymbol: parsed.waterSymbol || DEFAULT_SETTINGS.waterSymbol,
+      symbols: parsed.symbols && typeof parsed.symbols === "object" ? parsed.symbols : {},
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
