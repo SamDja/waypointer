@@ -40,7 +40,7 @@ export function PoiListItem({
             {formatDistanceM(distanceFromStartM)} <span className="text-muted-foreground">from start</span>
           </span>
           <span>
-            {formatDistanceM(distanceFromRouteM)} <span className="text-muted-foreground">from track</span>
+            {formatDistanceM(distanceFromRouteM)} <span className="text-muted-foreground">off track</span>
           </span>
         </span>
       </Label>

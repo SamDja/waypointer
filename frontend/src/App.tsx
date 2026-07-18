@@ -133,6 +133,24 @@ export default function App() {
     setKeptWaypointIndices(checked ? new Set(existingWaypoints.map((w) => w.index)) : new Set())
   }
 
+  // Only touches the given ids (the currently filtered/visible candidates
+  // in CandidateChecklist) rather than every candidate, so selecting all
+  // within a type filter doesn't clobber selections made under a
+  // different filter.
+  function handleToggleAllCandidates(checked: boolean, osmIds: number[]) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      for (const id of osmIds) {
+        if (checked) {
+          next.add(id)
+        } else {
+          next.delete(id)
+        }
+      }
+      return next
+    })
+  }
+
   function handleHoverCandidate(osmId: number | null) {
     setHoveredPoi(osmId === null ? null : { kind: "candidate", id: osmId })
   }
@@ -263,6 +281,7 @@ export default function App() {
                     candidates={findResult?.candidates ?? EMPTY_CANDIDATES}
                     selectedIds={selectedIds}
                     onToggle={handleToggle}
+                    onToggleAll={handleToggleAllCandidates}
                     searchedPoiTypes={searchedPoiTypes}
                     onHoverCandidate={handleHoverCandidate}
                   />

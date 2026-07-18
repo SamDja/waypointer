@@ -38,7 +38,7 @@ from waypointer.gpx_io import (
     total_ascent_m,
 )
 from waypointer.osm import USER_AGENT, OsmNode, OverpassError, build_overpass_query, query_overpass
-from waypointer.poi_types import POI_TYPES, clamp_distance_m
+from waypointer.poi_types import DEFAULT_VISIBLE_POI_TYPES, POI_TYPES, clamp_distance_m
 from waypointer.rate_limit import rate_limit
 from waypointer.schemas import (
     Candidate,
@@ -85,8 +85,10 @@ async def _read_gpx_upload(gpx_file: UploadFile) -> tuple[GPX, list[LatLon]]:
 
 
 def _default_poi_config() -> list[PoiSearchConfig]:
-    water = POI_TYPES["water"]
-    return [PoiSearchConfig(poi_type=water.key, max_distance_m=water.default_max_distance_m)]
+    return [
+        PoiSearchConfig(poi_type=key, max_distance_m=POI_TYPES[key].default_max_distance_m)
+        for key in DEFAULT_VISIBLE_POI_TYPES
+    ]
 
 
 @app.post("/api/find-pois", response_model=FindPoisResponse, dependencies=[Depends(rate_limit)])
