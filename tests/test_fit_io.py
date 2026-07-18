@@ -1,10 +1,12 @@
 import pytest
 from fit_tool.fit_file import FitFile
 from fit_tool.profile.messages.course_point_message import CoursePointMessage
+from fit_tool.profile.messages.developer_data_id_message import DeveloperDataIdMessage
+from fit_tool.profile.messages.event_message import EventMessage
 from fit_tool.profile.messages.file_id_message import FileIdMessage
 from fit_tool.profile.messages.lap_message import LapMessage
 from fit_tool.profile.messages.record_message import RecordMessage
-from fit_tool.profile.profile_type import FileType
+from fit_tool.profile.profile_type import EventType, FileType, Manufacturer, Sport
 
 from waypointer.fit_io import FitCoursePoint, build_course_fit_bytes
 from waypointer.gpx_io import parse_gpx, route_coordinates, route_elevations
@@ -25,6 +27,17 @@ def test_build_course_fit_bytes_round_trip(sample_route_bytes):
 
     file_id = next(m for m in messages if isinstance(m, FileIdMessage))
     assert file_id.type == FileType.COURSE.value
+    # Matches both the Strava and Komoot reference files, which declare
+    # manufacturer as Wahoo itself (not a generic/development identity)
+    # and leave serial_number unset.
+    assert file_id.manufacturer == Manufacturer.WAHOO_FITNESS.value
+    assert file_id.serial_number is None
+
+    # Matches Komoot's reference file (the only one of the two with course
+    # points, so the only one that emits this message at all).
+    developer_data_id = next(m for m in messages if isinstance(m, DeveloperDataIdMessage))
+    assert developer_data_id.developer_id == [255]
+    assert developer_data_id.manufacturer_id == Manufacturer.WAHOO_FITNESS.value
 
     course_point = next(m for m in messages if isinstance(m, CoursePointMessage))
     assert course_point.course_point_name == "Fontaine Wallace"
@@ -116,6 +129,46 @@ def test_build_course_fit_bytes_without_elevations_leaves_lap_elevation_summary_
     assert lap.avg_altitude is None
     assert lap.max_altitude is None
     assert lap.min_altitude is None
+
+
+def test_build_course_fit_bytes_sets_record_speed_invalid_sentinel(sample_route_bytes):
+    # Matches a Strava-exported and a Komoot-exported reference file for a
+    # Wahoo-confirmed-working route, both of which set every record's
+    # speed to the FIT invalid sentinel (65.535) rather than omitting it.
+    gpx = parse_gpx(sample_route_bytes)
+    coords = route_coordinates(gpx)
+
+    fit_bytes = build_course_fit_bytes(coords, [], course_name="Test Route")
+    messages = _decode(fit_bytes)
+
+    record_messages = [m for m in messages if isinstance(m, RecordMessage)]
+    assert all(round(r.speed, 3) == 65.535 for r in record_messages)
+
+
+def test_build_course_fit_bytes_sets_lap_sport(sample_route_bytes):
+    gpx = parse_gpx(sample_route_bytes)
+    coords = route_coordinates(gpx)
+
+    fit_bytes = build_course_fit_bytes(coords, [], course_name="Test Route")
+    messages = _decode(fit_bytes)
+
+    lap = next(m for m in messages if isinstance(m, LapMessage))
+    assert lap.sport == Sport.CYCLING.value
+
+
+def test_build_course_fit_bytes_uses_stop_disable_all_event_type(sample_route_bytes):
+    # Matches a Strava-exported and a Komoot-exported reference file for a
+    # Wahoo-confirmed-working route, both of which use STOP_DISABLE_ALL
+    # rather than STOP_ALL for the closing timer event.
+    gpx = parse_gpx(sample_route_bytes)
+    coords = route_coordinates(gpx)
+
+    fit_bytes = build_course_fit_bytes(coords, [], course_name="Test Route")
+    messages = _decode(fit_bytes)
+
+    event_messages = [m for m in messages if isinstance(m, EventMessage)]
+    stop_event = event_messages[-1]
+    assert stop_event.event_type == EventType.STOP_DISABLE_ALL.value
 
 
 def test_build_course_fit_bytes_rejects_empty_route():

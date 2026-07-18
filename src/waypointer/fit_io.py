@@ -14,6 +14,17 @@ which this module replicates exactly for every point regardless of POI
 type. The full course_point_type value per POI type key lives in
 poi_types.py (PoiTypeConfig.course_point_type), sourced from
 dev_tools/wahoo_poi_mapping.json's reverse-engineered 0-99 range.
+
+A separate quirk, also reverse-engineered by diffing against real
+reference files (a Strava export and dev_tools/route_with_komoot.fit,
+both confirmed to render colored elevation on a Wahoo ELEMNT ROAM,
+compared byte-for-byte via fit-tool against this module's own output):
+routes built by this module rendered with a flat, uncolored navigation
+path on-device despite per-record altitude being set correctly. Both
+reference files additionally set record.speed to FIT's invalid sentinel
+(65.535) on every record - which this module previously omitted - and
+set lap.sport (not just course.sport) to Sport.CYCLING. See
+_record_messages and build_course_fit_bytes's lap construction.
 """
 
 import datetime
@@ -63,6 +74,13 @@ def _now_ms() -> int:
 def _developer_field_declaration_messages() -> list:
     developer_data_id = DeveloperDataIdMessage()
     developer_data_id.developer_data_index = DEVELOPER_DATA_INDEX
+    # Komoot's reference file (the only one of the two with course points,
+    # so the only one that emits this message at all - Strava's test route
+    # has none) also sets developer_id and manufacturer_id, which we
+    # omitted. manufacturer_id matches the same Wahoo identity used for
+    # file_id above.
+    developer_data_id.developer_id = bytes([255])
+    developer_data_id.manufacturer_id = Manufacturer.WAHOO_FITNESS.value
 
     field_description = FieldDescriptionMessage()
     field_description.developer_data_index = DEVELOPER_DATA_INDEX
@@ -112,6 +130,13 @@ def _record_messages(
         elevation = elevations_m[i] if i < len(elevations_m) else None
         if elevation is not None:
             record.altitude = elevation
+        # Both a Strava-exported and a Komoot-exported reference FIT file
+        # for a Wahoo-confirmed-working route set speed to the FIT
+        # "invalid" sentinel (65.535, i.e. raw uint16 65535) on every
+        # record rather than omitting the field - ours omitted it
+        # entirely. Set unconditionally since it's a constant, not
+        # derived from any input data.
+        record.speed = 65.535
         records.append(record)
 
     return records, distances[1:]
@@ -219,11 +244,17 @@ def build_course_fit_bytes(
     start_ts_ms = _now_ms()
 
     file_id = FileIdMessage()
-    file_id.type = FileType.COURSE
-    file_id.manufacturer = Manufacturer.DEVELOPMENT.value
-    file_id.product = 0
     file_id.time_created = start_ts_ms
-    file_id.serial_number = 0x12345678
+    file_id.type = FileType.COURSE
+    # Both the Strava and Komoot reference files declare manufacturer as
+    # Wahoo itself (not their own identity), rather than a generic
+    # development/placeholder identity - matched here, since course-
+    # specific device features (like elevation coloring) may be gated on
+    # a trusted manufacturer id. Neither reference sets serial_number at
+    # all, so it's left unset here too. See the module docstring's
+    # reverse-engineering note.
+    file_id.manufacturer = Manufacturer.WAHOO_FITNESS.value
+    file_id.product = 0
     builder.add(file_id)
 
     course = CourseMessage()
@@ -246,7 +277,11 @@ def build_course_fit_bytes(
     end_ts_ms = records[-1].timestamp
     stop_event = EventMessage()
     stop_event.event = Event.TIMER
-    stop_event.event_type = EventType.STOP_ALL
+    # Both the Strava and Komoot reference files use STOP_DISABLE_ALL here,
+    # not STOP_ALL - matched to stay consistent with confirmed-working
+    # real-world output (see the module docstring's reverse-engineering
+    # note).
+    stop_event.event_type = EventType.STOP_DISABLE_ALL
     stop_event.timestamp = end_ts_ms
     builder.add(stop_event)
 
@@ -260,6 +295,13 @@ def build_course_fit_bytes(
     lap.end_position_lat = route_coords[-1][0]
     lap.end_position_long = route_coords[-1][1]
     lap.total_distance = distances[-1]
+    # Both the Strava and Komoot reference files set sport on the lap
+    # message itself (not just the course message above) - real data,
+    # not an invalid sentinel, and the two tools agree on it (unlike
+    # sub_sport, where they disagree - TRAIL vs GENERIC - suggesting
+    # that's route-specific terrain inference we can't replicate from a
+    # GPX file, so it's left unset here).
+    lap.sport = Sport.CYCLING
     elevation_stats = _elevation_stats(elevations_m)
     if elevation_stats is not None:
         lap.total_ascent = round(elevation_stats.total_ascent)
