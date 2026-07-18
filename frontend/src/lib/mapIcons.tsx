@@ -11,6 +11,13 @@ interface CircleDivIconOptions {
   bgColor: string
   iconColor?: string
   size?: number
+  // Adds a glow ring in the marker's own bgColor around the base drop
+  // shadow - see RouteMap.tsx's isHovered. Baked into the icon HTML (like
+  // bgColor itself) rather than driven through a <Marker> prop, so unlike
+  // opacity (see below) this snaps rather than transitions on hover - a
+  // discrete highlight toggle rather than a continuous fade, which reads
+  // fine for something as instantaneous as a hover.
+  highlighted?: boolean
 }
 
 // Opacity is deliberately not an option here - it's driven via the
@@ -20,16 +27,25 @@ interface CircleDivIconOptions {
 // the icon's innerHTML wholesale (react-leaflet's Marker.setIcon(), since
 // the icon object identity changes), leaving no previous DOM state for a
 // CSS transition to animate from - it would just snap.
-export function buildCircleDivIcon({ icon: Icon, bgColor, iconColor = colors.olive[50], size = 28 }: CircleDivIconOptions): L.DivIcon {
+export function buildCircleDivIcon({
+  icon: Icon,
+  bgColor,
+  iconColor = colors.olive[50],
+  size = 28,
+  highlighted = false,
+}: CircleDivIconOptions): L.DivIcon {
   const iconSize = Math.round(size * 0.7)
   const iconSvg = renderToStaticMarkup(<Icon size={iconSize} color={iconColor} strokeWidth={2} />)
+  const boxShadow = highlighted
+    ? `0 0 4px 4px color-mix(in oklch, ${bgColor} 55%, transparent), 0 2px 6px rgba(0,0,0,0.5)`
+    : "0 1px 3px rgba(0,0,0,0.4)"
   const html = `
     <div style="
       width: ${size}px;
       height: ${size}px;
       border-radius: 100%;
       background-color: ${bgColor};
-      box-shadow: 0 1px 3px rgba(0,0,0,0.4);
+      box-shadow: ${boxShadow};
       display: flex;
       align-items: center;
       justify-content: center;

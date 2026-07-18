@@ -175,7 +175,7 @@ export function SaveCard({
           <TabsContent value="download" className="flex flex-col gap-4">
             <div className="flex items-center gap-3">
               <Label htmlFor="device-select" className="w-40 shrink-0">
-                Device
+                File format
               </Label>
               <Select
                 value={settings.device}

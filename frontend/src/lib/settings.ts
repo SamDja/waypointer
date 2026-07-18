@@ -1,4 +1,4 @@
-import { POI_TYPES } from "@/lib/poiTypes"
+import { DEFAULT_VISIBLE_POI_TYPES, POI_TYPES } from "@/lib/poiTypes"
 
 const SETTINGS_KEY = "waypointer.settings"
 const POI_SEARCH_KEY = "waypointer.poiSearch"
@@ -43,10 +43,12 @@ export interface PoiSearchEntry {
 // export-time concern, this is a find-time concern (which POI types to
 // search for, and how far). Kept in the same file for colocation.
 export function loadPoiSearchConfig(): PoiSearchEntry[] {
+  const raw = localStorage.getItem(POI_SEARCH_KEY)
   let stored: Record<string, PoiSearchEntry> = {}
+  let hasStoredValue = false
   try {
-    const raw = localStorage.getItem(POI_SEARCH_KEY)
     if (raw) {
+      hasStoredValue = true
       const parsed = JSON.parse(raw) as PoiSearchEntry[]
       stored = Object.fromEntries(parsed.map((entry) => [entry.poiType, entry]))
     }
@@ -54,17 +56,25 @@ export function loadPoiSearchConfig(): PoiSearchEntry[] {
     stored = {}
   }
 
-  // Union in a default entry for any searchable registry type missing from
-  // storage (e.g. a POI type added after the user's last visit), and clamp
-  // any stored distance into the registry's current bounds. Non-searchable
-  // types (most of the registry) have no search config at all.
-  return POI_TYPES.filter((cfg) => cfg.searchable).map((cfg) => {
-    const existing = stored[cfg.key]
+  // First-ever visit (nothing stored yet) seeds the default-visible set.
+  // Otherwise the visitor's own list - whatever they've added or removed
+  // via FindPoisCard - is authoritative; re-unioning every searchable
+  // registry type here would resurrect a type the visitor deliberately
+  // removed. Either way, filter to keys that are still searchable, in case
+  // a stored type was desearchified in a later release.
+  const keys = hasStoredValue
+    ? Object.keys(stored).filter((key) => POI_TYPES.some((cfg) => cfg.key === key && cfg.searchable))
+    : DEFAULT_VISIBLE_POI_TYPES
+
+  // Clamp any stored distance into the registry's current bounds.
+  return keys.map((key) => {
+    const cfg = POI_TYPES.find((c) => c.key === key)!
+    const existing = stored[key]
     const maxDistanceM = existing
       ? Math.min(Math.max(existing.maxDistanceM, cfg.minDistanceM!), cfg.maxDistanceM!)
       : cfg.defaultMaxDistanceM!
     return {
-      poiType: cfg.key,
+      poiType: key,
       enabled: existing?.enabled ?? true,
       maxDistanceM,
     }

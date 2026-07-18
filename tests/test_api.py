@@ -20,9 +20,13 @@ client = TestClient(app)
 
 
 @responses.activate
-def test_find_pois_defaults_to_water_search(sample_route_bytes, overpass_response_json):
+def test_find_pois_defaults_to_default_visible_types(sample_route_bytes, overpass_response_json):
     # No poi_config form field sent - exercises the endpoint's default
-    # fallback (water, at the registry's default_max_distance_m).
+    # fallback (DEFAULT_VISIBLE_POI_TYPES, each at its registry default_max_distance_m).
+    # The mock responds identically to all 6 default types' Overpass queries,
+    # so node 1001 comes back once per type rather than just for water - a
+    # test-mocking artifact (real Overpass queries differ per tag_filter),
+    # not a real dedup bug.
     responses.add(responses.POST, OVERPASS_URL, json=overpass_response_json, status=200)
     response = client.post(
         "/api/find-pois",
@@ -44,9 +48,10 @@ def test_find_pois_defaults_to_water_search(sample_route_bytes, overpass_respons
             "distance_from_start_m": pytest.approx(distance_from_start_m),
         }
     ]
-    # node 1002 (~400m away) must be excluded by the authoritative distance check
-    assert [c["osm_id"] for c in data["candidates"]] == [1001]
-    assert data["candidates"][0]["poi_type"] == "water"
+    # node 1002 (~400m away) must be excluded by the authoritative distance
+    # check for every default type queried.
+    assert {c["osm_id"] for c in data["candidates"]} == {1001}
+    assert {c["poi_type"] for c in data["candidates"]} == set(poi_types.DEFAULT_VISIBLE_POI_TYPES)
     assert data["route_coords"]
     assert all(len(pt) == 2 for pt in data["route_coords"])
 

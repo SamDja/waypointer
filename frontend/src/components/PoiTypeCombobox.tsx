@@ -11,12 +11,17 @@ import {
 } from "@/components/ui/command"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import { POI_TYPES } from "@/lib/poiTypes"
+import { POI_TYPES, type PoiTypeConfig } from "@/lib/poiTypes"
 
 export interface PoiTypeComboboxProps {
   value: string
   onChange: (poiType: string) => void
   className?: string
+  // Defaults to the full registry (existing-waypoint reassignment usage).
+  // FindPoisCard passes a filtered subset (searchable, not-yet-added
+  // types) for its "add a POI type" picker.
+  options?: PoiTypeConfig[]
+  placeholder?: string
 }
 
 // A searchable POI-type picker - the registry has ~55 entries, too many
@@ -24,7 +29,13 @@ export interface PoiTypeComboboxProps {
 // autocomplete/combobox primitive, so this follows the standard shadcn
 // combobox recipe: a Popover housing a Command list, which gets free
 // type-to-filter and keyboard navigation from cmdk).
-export function PoiTypeCombobox({ value, onChange, className }: PoiTypeComboboxProps) {
+export function PoiTypeCombobox({
+  value,
+  onChange,
+  className,
+  options = POI_TYPES,
+  placeholder = "Select type…",
+}: PoiTypeComboboxProps) {
   const [open, setOpen] = useState(false)
   const selected = POI_TYPES.find((cfg) => cfg.key === value)
   const SelectedIcon = selected?.icon
@@ -40,7 +51,7 @@ export function PoiTypeCombobox({ value, onChange, className }: PoiTypeComboboxP
         >
           <span className="flex min-w-0 items-center gap-2">
             {SelectedIcon && <SelectedIcon className="size-4 shrink-0" style={{ color: selected?.color }} />}
-            <span className="truncate">{selected?.label ?? "Select type…"}</span>
+            <span className="truncate">{selected?.label ?? placeholder}</span>
           </span>
           <ChevronsUpDown className="size-4 shrink-0 opacity-50" />
         </Button>
@@ -51,7 +62,7 @@ export function PoiTypeCombobox({ value, onChange, className }: PoiTypeComboboxP
           <CommandList>
             <CommandEmpty>No type found.</CommandEmpty>
             <CommandGroup>
-              {POI_TYPES.map((cfg) => {
+              {options.map((cfg) => {
                 const Icon = cfg.icon
                 return (
                   <CommandItem

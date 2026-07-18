@@ -29,6 +29,15 @@ const DEFAULT_ZOOM = 14
 const EXISTING_WAYPOINT_COLOR = colors.pink[500]
 const DIMMED_OPACITY = 0.32
 const MAP_TILES_DIMMED_OPACITY = 0.60
+// Leaflet markers default to zIndexOffset 0 - bumping the hovered one above
+// every other marker (including any that are naturally further "south",
+// which Leaflet otherwise stacks on top by latitude) and letting it fall
+// back to 0 on mouseleave, per HoveredPoi going back to null.
+const HOVERED_Z_INDEX_OFFSET = 1000
+// Sits above ordinary POI markers (0) so the route start/end pins stay on
+// top of them, but below HOVERED_Z_INDEX_OFFSET so a hovered POI marker
+// still wins over the endpoints.
+const ROUTE_ENDPOINT_Z_INDEX_OFFSET = 500
 
 function FitBounds({
   routeCoords,
@@ -64,7 +73,11 @@ function RouteEndpointMarkers({ routeCoords }: { routeCoords: [number, number][]
 
   if (isLoop) {
     return (
-      <Marker position={start} icon={buildCircleDivIcon({ icon: Play, bgColor: ROUTE_START_COLOR })}>
+      <Marker
+        position={start}
+        icon={buildCircleDivIcon({ icon: Play, bgColor: ROUTE_START_COLOR })}
+        zIndexOffset={ROUTE_ENDPOINT_Z_INDEX_OFFSET}
+      >
         <Tooltip>Start / End</Tooltip>
       </Marker>
     )
@@ -72,10 +85,18 @@ function RouteEndpointMarkers({ routeCoords }: { routeCoords: [number, number][]
 
   return (
     <>
-      <Marker position={start} icon={buildCircleDivIcon({ icon: Play, bgColor: ROUTE_START_COLOR })}>
+      <Marker
+        position={start}
+        icon={buildCircleDivIcon({ icon: Play, bgColor: ROUTE_START_COLOR })}
+        zIndexOffset={ROUTE_ENDPOINT_Z_INDEX_OFFSET}
+      >
         <Tooltip>Start</Tooltip>
       </Marker>
-      <Marker position={end} icon={buildCircleDivIcon({ icon: Square, bgColor: ROUTE_END_COLOR })}>
+      <Marker
+        position={end}
+        icon={buildCircleDivIcon({ icon: Square, bgColor: ROUTE_END_COLOR })}
+        zIndexOffset={ROUTE_ENDPOINT_Z_INDEX_OFFSET}
+      >
         <Tooltip>End</Tooltip>
       </Marker>
     </>
@@ -169,8 +190,10 @@ export function RouteMap({
                 icon: Icon,
                 iconColor: isSelected ? colors.olive[50] : colors.mist[400],
                 bgColor: isSelected ? color : colors.mist[200],
+                highlighted: isHovered,
               })}
               opacity={isHovered ? 1 : isHovering ? DIMMED_OPACITY : 1}
+              zIndexOffset={isHovered ? HOVERED_Z_INDEX_OFFSET : 0}
             >
               <Popup>
                 <div className="flex flex-col gap-2 text-sm">
@@ -210,8 +233,10 @@ export function RouteMap({
                 icon: Icon,
                 iconColor: isKept ? colors.olive[50] : colors.mist[400],
                 bgColor: isKept ? color : colors.mist[200],
+                highlighted: isHovered,
               })}
               opacity={isHovered ? 1 : isHovering ? DIMMED_OPACITY : 1}
+              zIndexOffset={isHovered ? HOVERED_Z_INDEX_OFFSET : 0}
             >
               <Popup>
                 <div className="flex flex-col gap-2 text-sm">
