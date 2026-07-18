@@ -32,6 +32,12 @@ class PoiTypeConfig:
     default_max_distance_m: float | None = None
     min_distance_m: float | None = None
     max_distance_m: float | None = None
+    # Suggested default for the GPX <sym> tag when exporting this POI type
+    # to a generic (non-Wahoo) device - see main.py's _resolve_symbol. None
+    # means "fall back to label", which is a fine default for most types;
+    # only water needs an explicit override since "Water Fountains" (its
+    # label) isn't the conventional Garmin/Basecamp symbol name.
+    default_gpx_symbol: str | None = None
 
 
 POI_TYPES: dict[str, PoiTypeConfig] = {
@@ -45,6 +51,7 @@ POI_TYPES: dict[str, PoiTypeConfig] = {
         default_max_distance_m=10.0,
         min_distance_m=1.0,
         max_distance_m=500.0,
+        default_gpx_symbol="Water",
     ),
     "warning": PoiTypeConfig(
         key="warning", label="Warning", course_point_type=13,

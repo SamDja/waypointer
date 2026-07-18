@@ -4,10 +4,12 @@ declares which output format each supported device uses.
 Wahoo's GPX <sym> mapping is undocumented and, per investigation, isn't
 even what drives icon selection during navigation on a Wahoo ELEMNT ROAM v3
 - that comes from a FIT course_point developer field instead (see
-fit_io.py). So devices aren't just a tunable symbol string anymore: each
-one picks an OutputFormat, and only the GPX-producing profiles need a
-water_symbol at all. This stays a plain registry, not a plugin system,
-since there are exactly two entries.
+fit_io.py). So devices aren't a tunable symbol string at all: each one
+just picks an OutputFormat. The GPX <sym> value itself is resolved
+per-POI-type by the caller (main.py's _resolve_symbol, using
+poi_types.py's PoiTypeConfig.default_gpx_symbol) and passed into
+build_waypoint directly - this stays a plain registry, not a plugin
+system, since there are exactly two entries.
 """
 
 from dataclasses import dataclass
@@ -28,7 +30,6 @@ class DeviceProfile:
     key: str
     name: str
     output_format: OutputFormat
-    water_symbol: str = "Water"          # only meaningful for OutputFormat.GPX
 
 
 DEVICE_PROFILES: dict[str, DeviceProfile] = {
@@ -43,9 +44,9 @@ DEFAULT_DEVICE_KEY = "generic"
 
 
 def build_waypoint(
-    node: OsmNode, profile: DeviceProfile, distance_m: float
+    node: OsmNode, symbol: str, distance_m: float
 ) -> gpxpy.gpx.GPXWaypoint:
-    """Pure OSM node + profile -> populated GPXWaypoint. Does not attach the
+    """Pure OSM node + symbol -> populated GPXWaypoint. Does not attach the
     dedup marker extension - that's gpx_io's concern, keeping this module
     unaware of GPX extension/dedup mechanics. Only called for GPX profiles.
     The caller (main.py) always resolves a non-empty name via the POI type
@@ -56,6 +57,6 @@ def build_waypoint(
         latitude=node.lat,
         longitude=node.lon,
         name=name,
-        symbol=profile.water_symbol,
+        symbol=symbol,
         description=f"{distance_m:.0f}m from route",
     )

@@ -8,7 +8,6 @@ needed afterwards.
 """
 
 import base64
-import dataclasses
 import math
 import os
 import re
@@ -231,12 +230,22 @@ def _build_fit_course_points(
     return candidate_points + existing_points
 
 
+def _resolve_symbol(poi_type: str, symbols: dict[str, str]) -> str:
+    """The visitor's chosen GPX <sym> for this POI type, if any, else the
+    registry's suggested default, else the type's own label - always
+    resolves to a non-empty string. Only meaningful for GPX exports; FIT
+    course points get their icon from course_point_type instead (see
+    fit_io.py)."""
+    cfg = POI_TYPES[poi_type]
+    return symbols.get(poi_type) or cfg.default_gpx_symbol or cfg.label
+
+
 @app.post("/api/save")
 async def save(
     gpx_file: UploadFile,
     selected_candidates: str = Form(...),
     device: str = Form(DEFAULT_DEVICE_KEY),
-    water_symbol: str = Form("Water"),
+    symbols: str = Form("{}"),
     discarded_waypoint_indices: str = Form("[]"),
     existing_waypoint_types: str = Form("{}"),
     route_name: str | None = Form(None),
@@ -260,10 +269,20 @@ async def save(
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid existing waypoint types: {exc}") from exc
 
+    try:
+        symbol_overrides = _existing_waypoint_types_adapter.validate_json(symbols)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid symbols: {exc}") from exc
+
     # Snapshot before discard_waypoints mutates gpx.waypoints in place -
     # _build_fit_course_points needs the original, pre-discard indices to
     # line up with ExistingWaypoint.index/existing_types' keys.
     original_waypoints = list(gpx.waypoints)
+    # Only meaningful for the GPX branch below, but harmless either way -
+    # mutates the same waypoint objects discard_waypoints then filters.
+    for i, w in enumerate(original_waypoints):
+        if i not in discarded_indices:
+            w.symbol = _resolve_symbol(existing_types.get(str(i), "generic"), symbol_overrides)
     # Indices refer to gpx.waypoints' original, pre-discard order, so this
     # must run before add_waypoints appends any newly selected candidates.
     discard_waypoints(gpx, discarded_indices)
@@ -275,11 +294,10 @@ async def save(
     name_stem = _safe_filename_stem(route_name or gpx_file.filename)
 
     if profile.output_format is OutputFormat.GPX:
-        effective_profile = dataclasses.replace(profile, water_symbol=water_symbol.strip() or "Water")
         waypoints = [
             make_waypoint(
                 OsmNode(id=c.osm_id, lat=c.lat, lon=c.lon, tags={"name": _resolved_name(c)}),
-                effective_profile,
+                _resolve_symbol(c.poi_type, symbol_overrides),
                 c.distance_m,
             )
             for c in selected

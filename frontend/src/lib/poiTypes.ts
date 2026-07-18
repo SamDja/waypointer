@@ -76,6 +76,11 @@ export interface PoiTypeConfig {
   defaultMaxDistanceM?: number
   minDistanceM?: number
   maxDistanceM?: number
+  // Suggested default for the GPX <sym> tag when exporting this POI type
+  // to a generic (non-Wahoo) device - mirrors the backend's
+  // poi_types.py PoiTypeConfig.default_gpx_symbol. Undefined means "fall
+  // back to label" (see SaveCard.tsx).
+  defaultGpxSymbol?: string
 }
 
 export const POI_TYPES: PoiTypeConfig[] = [
@@ -89,6 +94,7 @@ export const POI_TYPES: PoiTypeConfig[] = [
     defaultMaxDistanceM: 10,
     minDistanceM: 1,
     maxDistanceM: 500,
+    defaultGpxSymbol: "Water",
   },
   { key: "warning", label: "Warning", icon: TriangleAlert, color: colors.rose[700], symHints: ["warning", "hazard", "danger"], searchable: false },
   { key: "first_aid", label: "First Aid", icon: Cross, color: colors.rose[700], symHints: ["first aid", "first-aid", "medical"], searchable: false },
