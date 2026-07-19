@@ -1,4 +1,14 @@
 import { useState } from "react"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -59,18 +69,31 @@ export function SaveCard({
   const [isSendingToWahoo, setIsSendingToWahoo] = useState(false)
   const [showSaveNameDialog, setShowSaveNameDialog] = useState(false)
   const [showWahooNameDialog, setShowWahooNameDialog] = useState(false)
+  const [pendingSaveAction, setPendingSaveAction] = useState<"download" | "wahoo" | null>(null)
   const [activeTab, setActiveTab] = useState<string>(() => (wahooTokens ? "wahoo" : "download"))
   const isFit = settings.device === "wahoo_elemnt_roam_v3"
   const defaultRouteName = file.name.replace(/\.gpx$/i, "")
+
+  const selectedCandidates = candidates.filter((c) => selectedIds.has(c.osm_id))
 
   // Only POI types actually present in the output - a candidate must be
   // selected, an existing waypoint must be kept - not the full registry.
   const presentPoiTypes = Array.from(
     new Set([
-      ...candidates.filter((c) => selectedIds.has(c.osm_id)).map((c) => c.poi_type),
+      ...selectedCandidates.map((c) => c.poi_type),
       ...existingWaypoints.filter((w) => keptWaypointIndices.has(w.index)).map((w) => w.poi_type),
     ])
   )
+
+  function requestSave(action: "download" | "wahoo") {
+    if (selectedCandidates.length === 0) {
+      setPendingSaveAction(action)
+    } else if (action === "download") {
+      setShowSaveNameDialog(true)
+    } else {
+      setShowWahooNameDialog(true)
+    }
+  }
 
   function keptExistingWaypointTypes(): Record<number, string> {
     return Object.fromEntries(
@@ -79,7 +102,6 @@ export function SaveCard({
   }
 
   async function handleSave(routeName: string) {
-    const selectedCandidates = candidates.filter((c) => selectedIds.has(c.osm_id))
     const discardedWaypointIndices = existingWaypoints
       .filter((w) => !keptWaypointIndices.has(w.index))
       .map((w) => w.index)
@@ -134,7 +156,6 @@ export function SaveCard({
   }
 
   async function handleSendToWahoo(routeName: string) {
-    const selectedCandidates = candidates.filter((c) => selectedIds.has(c.osm_id))
     const discardedWaypointIndices = existingWaypoints
       .filter((w) => !keptWaypointIndices.has(w.index))
       .map((w) => w.index)
@@ -228,7 +249,7 @@ export function SaveCard({
               </p>
             )}
 
-            <Button onClick={() => setShowSaveNameDialog(true)} loading={isSaving} className="w-fit">
+            <Button onClick={() => requestSave("download")} loading={isSaving} className="w-fit">
               {isSaving ? "Saving…" : "Download route"}
               <Download className="size-4"></Download>
             </Button>
@@ -250,7 +271,7 @@ export function SaveCard({
                   syncs the route to your Wahoo app and head unit automatically.
                 </p>
                 <Button
-                  onClick={() => setShowWahooNameDialog(true)}
+                  onClick={() => requestSave("wahoo")}
                   loading={isSendingToWahoo}
                   className="w-fit"
                 >
@@ -274,6 +295,30 @@ export function SaveCard({
           </TabsContent>
         </Tabs>
       </CardContent>
+
+      <AlertDialog open={pendingSaveAction !== null} onOpenChange={(next) => !next && setPendingSaveAction(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>No POIs added yet</AlertDialogTitle>
+            <AlertDialogDescription>
+              You haven't found or added any points of interest to this route. Use Find POIs above - after
+              selecting the POI types you want to discover - then choose which ones to add, or save the route
+              as-is.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel
+              onClick={() => {
+                if (pendingSaveAction === "download") setShowSaveNameDialog(true)
+                else if (pendingSaveAction === "wahoo") setShowWahooNameDialog(true)
+              }}
+            >
+              Save anyway
+            </AlertDialogCancel>
+            <AlertDialogAction>Let's find some POIs</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   )
 }
