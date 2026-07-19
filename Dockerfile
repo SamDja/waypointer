@@ -10,6 +10,10 @@ COPY frontend/ ./
 # name as an automatic build arg for Docker-runtime services.
 ARG VITE_WAHOO_CLIENT_ID
 ENV VITE_WAHOO_CLIENT_ID=$VITE_WAHOO_CLIENT_ID
+# Not secret - just identifies the public Tally feedback form (see
+# frontend/src/lib/feedbackConfig.ts) - same build-arg reasoning as above.
+ARG VITE_TALLY_FORM_ID
+ENV VITE_TALLY_FORM_ID=$VITE_TALLY_FORM_ID
 RUN npm run build
 
 # ---- python stage ----

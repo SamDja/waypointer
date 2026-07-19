@@ -13,3 +13,7 @@ services:
       # runtime. Set the value in the Render dashboard, not here.
       - key: VITE_WAHOO_CLIENT_ID
         sync: false
+      # Not secret - just identifies the public Tally feedback form. Same
+      # build-arg forwarding as VITE_WAHOO_CLIENT_ID above (see Dockerfile).
+      - key: VITE_TALLY_FORM_ID
+        sync: false
