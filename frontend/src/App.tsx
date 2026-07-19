@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 import { CandidateChecklist } from "@/components/CandidateChecklist"
+import { FeedbackWidget } from "@/components/FeedbackWidget"
 import { FindPoisCard } from "@/components/FindPoisCard"
 import { ImportCard } from "@/components/ImportCard"
 import { RouteMap } from "@/components/RouteMap"
@@ -211,6 +212,7 @@ export default function App() {
   return (
     <div className="flex h-screen flex-col">
       <Toaster />
+      <FeedbackWidget />
       <header className="flex shrink-0 items-center justify-between gap-1.5 border-b px-4 py-2">
         <div className="flex items-center gap-1.5">
           <img src="favicon.svg" className="w-6" />
