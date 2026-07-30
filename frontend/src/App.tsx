@@ -168,16 +168,39 @@ export default function App() {
       .map((entry) => ({ poi_type: entry.poiType, max_distance_m: entry.maxDistanceM }))
     if (poiConfig.length === 0) return
 
+    const previousCandidateIds = new Set(findResult?.candidates.map((c) => c.osm_id) ?? [])
+    // Waypoints parsed from the uploaded file are already toggleable before
+    // the first search ever runs (ImportCard's "Waypoints" tab), so their
+    // indices count as "previously seen" even when findResult is still null.
+    const previousWaypointIndices = new Set([
+      ...(findResult?.existing_waypoints.map((w) => w.index) ?? []),
+      ...previewExistingWaypoints.map((w) => w.index),
+    ])
+
     setIsFinding(true)
     const toastId = toast("Searching OpenStreetMap for nearby POIs...", "loading")
     try {
       const result = await findPois(file, poiConfig)
       setFindResult(result)
-      setSelectedIds(new Set(result.candidates.map((c) => c.osm_id)))
+      // Preserve the visitor's selection for candidates seen in a prior
+      // search; default new ones to selected, matching first-search behavior.
+      setSelectedIds(
+        new Set(
+          result.candidates
+            .map((c) => c.osm_id)
+            .filter((id) => (previousCandidateIds.has(id) ? selectedIds.has(id) : true)),
+        ),
+      )
       setSearchedPoiTypes(poiConfig)
-      // Default to keeping every pre-existing waypoint, matching today's
-      // behavior before this toggle existed.
-      setKeptWaypointIndices(new Set(result.existing_waypoints.map((w) => w.index)))
+      // Preserve the visitor's keep/discard choice for waypoints seen in a
+      // prior search; default new ones to kept, matching first-search behavior.
+      setKeptWaypointIndices(
+        new Set(
+          result.existing_waypoints
+            .map((w) => w.index)
+            .filter((idx) => (previousWaypointIndices.has(idx) ? keptWaypointIndices.has(idx) : true)),
+        ),
+      )
       updateToast(toastId, `Found ${result.candidates.length} candidate(s).`, "success")
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Network error while contacting the server."
