@@ -20,6 +20,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { MapLegend } from "@/components/MapLegend"
 import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
 import { CircleMarkerIcon, ROUTE_END_COLOR, ROUTE_START_COLOR, UserLocationMarker } from "@/lib/mapIcons"
 import { MAP_STYLES } from "@/lib/mapStyles"
@@ -555,6 +556,10 @@ export function RouteMap({
           )}
           <FitBounds routeCoords={routeCoords} candidates={candidates} existingWaypoints={existingWaypoints} />
         </Map>
+
+        <div className="absolute left-2 top-2 z-10">
+          <MapLegend candidates={candidates} existingWaypoints={existingWaypoints} mapStyleKey={mapStyleKey} />
+        </div>
 
         <div className="absolute right-2 top-2 z-10">
           <Select value={mapStyleKey} onValueChange={onMapStyleChange}>
