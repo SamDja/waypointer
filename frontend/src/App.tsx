@@ -13,9 +13,11 @@ import { elevationGainLossM, totalDistanceM } from "@/lib/geometry"
 import { parseExistingWaypointsFromGpx, parseRouteCoordsFromGpx, parseRouteElevationsFromGpx } from "@/lib/gpx"
 import {
   loadAvgSpeedKmh,
+  loadMapStyleKey,
   loadPoiSearchConfig,
   loadSettings,
   saveAvgSpeedKmh,
+  saveMapStyleKey,
   savePoiSearchConfig,
   saveSettings,
   type DeviceSettings,
@@ -56,6 +58,7 @@ export default function App() {
   const [openStep, setOpenStep] = useState<Step | null>("import")
   const [wahooTokens, setWahooTokens] = useState<WahooTokens | null>(() => loadWahooTokens())
   const [avgSpeedKmh, setAvgSpeedKmh] = useState<number>(() => loadAvgSpeedKmh())
+  const [mapStyleKey, setMapStyleKey] = useState<string>(() => loadMapStyleKey())
 
   async function handleFileChange(newFile: File) {
     setFile(newFile)
@@ -90,6 +93,11 @@ export default function App() {
   function handleAvgSpeedChange(speedKmh: number) {
     setAvgSpeedKmh(speedKmh)
     saveAvgSpeedKmh(speedKmh)
+  }
+
+  function handleMapStyleChange(key: string) {
+    setMapStyleKey(key)
+    saveMapStyleKey(key)
   }
 
   function handleDeviceSettingsChange(settings: DeviceSettings) {
@@ -256,6 +264,8 @@ export default function App() {
             onToggleExistingWaypoint={handleToggleExistingWaypoint}
             onChangeWaypointType={handleAssignWaypointType}
             hoveredPoi={hoveredPoi}
+            mapStyleKey={mapStyleKey}
+            onMapStyleChange={handleMapStyleChange}
           />
         </div>
 

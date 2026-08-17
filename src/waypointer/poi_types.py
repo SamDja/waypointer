@@ -137,9 +137,9 @@ POI_TYPES: dict[str, PoiTypeConfig] = {
     ),
     "lodging": PoiTypeConfig(
         key="lodging", label="Lodging", course_point_type=51,
-        default_name="Lodging", sym_hints=("lodging", "hotel", "hostel", "motel"),
-        tag_filter='node["tourism"~"^(hotel|hostel|guest_house|motel)$"]',
-        default_max_distance_m=50.0, min_distance_m=1.0, max_distance_m=500.0,
+        default_name="Lodging", sym_hints=("lodging", "hotel", "hostel", "motel", "alpine hut"),
+        tag_filter='node["tourism"~"^(hotel|hostel|guest_house|motel|alpine_hut)$"]',
+        default_max_distance_m=50.0, min_distance_m=1.0, max_distance_m=1000.0,
     ),
     "shower": PoiTypeConfig(
         key="shower", label="Shower", course_point_type=60,

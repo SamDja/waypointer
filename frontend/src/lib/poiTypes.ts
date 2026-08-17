@@ -111,7 +111,7 @@ export const POI_TYPES: PoiTypeConfig[] = [
   { key: "info", label: "Info Point", icon: Info, color: colors.violet[700], symHints: ["info", "information"], searchable: true, defaultMaxDistanceM: 10, minDistanceM: 1, maxDistanceM: 500 },
   { key: "internet", label: "Internet", icon: Wifi, color: colors.violet[700], symHints: ["internet", "wifi"], searchable: false },
   { key: "library", label: "Library", icon: BookOpen, color: colors.violet[700], symHints: ["library"], searchable: false },
-  { key: "lodging", label: "Lodging", icon: BedDouble, color: colors.violet[700], symHints: ["lodging", "hotel", "hostel", "motel"], searchable: true, defaultMaxDistanceM: 50, minDistanceM: 1, maxDistanceM: 500 },
+  { key: "lodging", label: "Lodging", icon: BedDouble, color: colors.violet[700], symHints: ["lodging", "hotel", "hostel", "motel", "alpine hut"], searchable: true, defaultMaxDistanceM: 50, minDistanceM: 1, maxDistanceM: 500 },
   { key: "shower", label: "Shower", icon: ShowerHead, color: colors.violet[700], symHints: ["shower"], searchable: true, defaultMaxDistanceM: 10, minDistanceM: 1, maxDistanceM: 500 },
   { key: "toilet", label: "Toilet", icon: Toilet, color: colors.violet[700], symHints: ["toilet", "restroom", "wc"], searchable: true, defaultMaxDistanceM: 10, minDistanceM: 1, maxDistanceM: 500 },
   { key: "bike_parking", label: "Bike Parking", icon: Bike, color: colors.cyan[700], symHints: ["bike parking", "bicycle parking"], searchable: true, defaultMaxDistanceM: 10, minDistanceM: 1, maxDistanceM: 500 },

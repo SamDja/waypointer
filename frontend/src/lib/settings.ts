@@ -1,8 +1,10 @@
+import { DEFAULT_MAP_STYLE_KEY, MAP_STYLES } from "@/lib/mapStyles"
 import { DEFAULT_VISIBLE_POI_TYPES, POI_TYPES } from "@/lib/poiTypes"
 
 const SETTINGS_KEY = "waypointer.settings"
 const POI_SEARCH_KEY = "waypointer.poiSearch"
 const AVG_SPEED_KEY = "waypointer.avgSpeedKmh"
+const MAP_STYLE_KEY = "waypointer.mapStyle"
 
 export interface DeviceSettings {
   device: string
@@ -101,4 +103,19 @@ export function loadAvgSpeedKmh(): number {
 
 export function saveAvgSpeedKmh(speedKmh: number): void {
   localStorage.setItem(AVG_SPEED_KEY, String(speedKmh))
+}
+
+// Distinct from the settings above: this is a display-time concern (which
+// map style to render), not export- or find-time.
+export function loadMapStyleKey(): string {
+  try {
+    const raw = localStorage.getItem(MAP_STYLE_KEY)
+    return raw && MAP_STYLES.some((s) => s.key === raw) ? raw : DEFAULT_MAP_STYLE_KEY
+  } catch {
+    return DEFAULT_MAP_STYLE_KEY
+  }
+}
+
+export function saveMapStyleKey(key: string): void {
+  localStorage.setItem(MAP_STYLE_KEY, key)
 }
