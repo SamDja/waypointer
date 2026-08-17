@@ -13,7 +13,14 @@ uv run pytest
 uv run uvicorn waypointer.main:app --reload
 ```
 
-Then open http://localhost:8000.
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Then open http://localhost:5173. Run both the backend and `npm run dev` side by side — the
+Vite dev server proxies `/api/*` requests to the backend on port 8000.
 
 ## Deployment
 

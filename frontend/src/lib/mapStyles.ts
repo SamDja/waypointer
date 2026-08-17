@@ -60,11 +60,11 @@ export const MAP_STYLES: MapStyleConfig[] = [
     styleUrl: "/map-styles/road-cycling.json",
     hasCustomRoadColors: true,
   },
-  { key: "gravel", label: "Gravel", styleUrl: "https://tiles.openfreemap.org/styles/bright" },
-  { key: "mtb", label: "Mountain Biking", styleUrl: "https://tiles.openfreemap.org/styles/bright" },
-  { key: "cycloturism", label: "Cycloturism", styleUrl: "https://tiles.openfreemap.org/styles/liberty" },
-  { key: "hiking", label: "Hiking", styleUrl: "https://tiles.openfreemap.org/styles/positron" },
-  { key: "multiday", label: "Multi-day (Pedestrian)", styleUrl: "https://tiles.openfreemap.org/styles/positron" },
+  // { key: "gravel", label: "Gravel", styleUrl: "https://tiles.openfreemap.org/styles/bright" },
+  // { key: "mtb", label: "Mountain Biking", styleUrl: "https://tiles.openfreemap.org/styles/bright" },
+  // { key: "cycloturism", label: "Cycloturism", styleUrl: "https://tiles.openfreemap.org/styles/liberty" },
+  // { key: "hiking", label: "Hiking", styleUrl: "https://tiles.openfreemap.org/styles/positron" },
+  // { key: "multiday", label: "Multi-day (Pedestrian)", styleUrl: "https://tiles.openfreemap.org/styles/positron" },
 ]
 
 export const DEFAULT_MAP_STYLE_KEY = "road_cycling"
