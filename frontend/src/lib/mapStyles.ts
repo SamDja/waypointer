@@ -1,13 +1,58 @@
+export interface RoadLegendCategory {
+  label: string
+  // Real layer id in the style JSON providing the fill (top) line - the
+  // legend evaluates this layer's actual paint expressions at render time
+  // (see lib/mapStyleLegend.ts) instead of hand-copying its color/width, so
+  // it can't silently drift out of sync with the style file the way a
+  // literal-value mirror can.
+  fillLayerId: string
+  // Real layer id providing the casing (outline) line underneath the fill,
+  // if this category has one (not every category does - e.g. cycleway and
+  // footpath render as a single flat line in road-cycling.json).
+  casingLayerId?: string
+  // Synthetic feature properties to evaluate this category's paint
+  // expressions against. Omit for the category's normal/default appearance;
+  // set e.g. {surface: "gravel"} to render the "restricted/unsuitable"
+  // branch of a layer's case expression.
+  properties?: Record<string, unknown>
+}
+
 export interface MapStyleConfig {
   key: string
   label: string
   styleUrl: string
-  // Whether MapLegend should render the road-color section (see
-  // ROAD_CYCLING_LEGEND below) for this style. There's no way to introspect
-  // a MapLibre style JSON's semantics at runtime, so this is a manual flag
-  // rather than something derived from styleUrl.
-  hasCustomRoadColors?: boolean
+  // Road-color legend rows for this style. Omit to hide the "Road colors"
+  // section for this style entirely - there's no separate boolean flag to
+  // keep in sync with this.
+  roadLegend?: RoadLegendCategory[]
 }
+
+// Hand-mirrors road-cycling.json's layer ids (not its colors - see
+// RoadLegendCategory above) so the legend's road-color rows always reflect
+// whatever road-cycling.json currently renders. The last row surfaces the
+// style's unified "not suitable for road cycling" look (bike-prohibited OR
+// bad surface, see road-cycling.json's UNSUITABLE_* case expressions) via
+// road_secondary_tertiary specifically, since its case branches on color
+// (motorway's only branches on opacity, which reads poorly as a tiny swatch).
+const ROAD_CYCLING_LEGEND: RoadLegendCategory[] = [
+  { label: "Motorway", fillLayerId: "road_motorway", casingLayerId: "road_motorway_casing" },
+  { label: "Primary / trunk road", fillLayerId: "road_trunk_primary", casingLayerId: "road_trunk_primary_casing" },
+  {
+    label: "Secondary / tertiary road",
+    fillLayerId: "road_secondary_tertiary",
+    casingLayerId: "road_secondary_tertiary_casing",
+  },
+  { label: "Minor / residential street", fillLayerId: "road_minor", casingLayerId: "road_minor_casing" },
+  { label: "Dedicated cycleway", fillLayerId: "cycleway" },
+  { label: "Unpaved track", fillLayerId: "road_track", casingLayerId: "road_track_casing" },
+  { label: "Footpath", fillLayerId: "road_path_pedestrian" },
+  {
+    label: "Not suitable for cycling",
+    fillLayerId: "road_secondary_tertiary",
+    casingLayerId: "road_secondary_tertiary_casing",
+    properties: { surface: "gravel" },
+  },
+]
 
 // OpenFreeMap (openfreemap.org) only ships 4 generic base styles today -
 // no activity-specific cartography exists yet, apart from road_cycling
@@ -19,46 +64,21 @@ export interface MapStyleConfig {
 // OpenFreeMap's "liberty" style, forked and hand-edited: it still points at
 // OpenFreeMap's hosted vector tiles/sprite/glyphs (self-hosting those is a
 // much bigger undertaking than editing the style layer definitions), but
-// adds a "cycleway" layer that highlights class=path/subclass=cycleway
-// ways (OpenMapTiles' tagging for OSM highway=cycleway) in blue from
-// zoom 10, well below the stock style's path/pedestrian layer's minzoom 14 -
-// road cyclists need to spot dedicated cycling infrastructure while still
-// planning a route, not just once they've zoomed to street level. Road/path
-// colors also approximate CyclOSM's (cyclosm.org) palette pulled from its
-// CartoCSS source - faded grey motorways, khaki/olive primary-tertiary
-// roads, dark-green dashed unpaved tracks (split out of the stock style's
-// combined service+track layer into its own road_track/road_track_casing),
-// and brown dashed footpaths distinct from the blue cycleway. CyclOSM's
-// hillshading/contours and numbered cycle-route ribbons aren't reproduced -
-// that data isn't in OpenFreeMap's OpenMapTiles-schema vector tiles. Beyond
-// class=motorway, any other road (trunk/primary/secondary/tertiary/minor/
-// link/service/track) also renders motorway-grey if OpenFreeMap's transportation
-// layer marks it bicycle=no, or access=no without a permissive bicycle
-// override - confirmed these fields are actually populated in OpenFreeMap's
-// served tiles, not just documented in the abstract OpenMapTiles schema.
-// access=private/customers roads are deliberately left at their normal
-// class color (a property-access restriction, not a cycling ban).
-// Hand-mirrors the line-color/line-dasharray values actually set in
-// public/map-styles/road-cycling.json - same "keep two files in sync by
-// hand" convention as schemas.py/candidate.ts, since a MapLibre style JSON
-// isn't introspectable for "what does this color mean" at runtime.
-export const ROAD_CYCLING_LEGEND: { label: string; color: string; dashed?: boolean }[] = [
-  { label: "Motorway", color: "#a3a3a3" },
-  { label: "Bikes not permitted", color: "#a3a3a3" },
-  { label: "Primary / trunk road", color: "#d8b267" },
-  { label: "Secondary / tertiary road", color: "#b1bb5d" },
-  { label: "Minor / residential street", color: "#888888" },
-  { label: "Unpaved track", color: "#5c8a52", dashed: true },
-  { label: "Footpath", color: "#8b6b47", dashed: true },
-  { label: "Dedicated cycleway", color: "#0033cc" },
-]
-
+// adds "cycleway"/"tunnel_cycleway"/"bridge_cycleway" layers that highlight
+// class=path/subclass=cycleway ways (OpenMapTiles' tagging for OSM
+// highway=cycleway) in blue at every zoom - road cyclists need to spot
+// dedicated cycling infrastructure while still planning a route, not just
+// once they've zoomed to street level. Any other road/path (motorway down
+// to footpath/track) that's bike-prohibited (bicycle=no, or access=no
+// without a permissive bicycle override) or tagged with a non-paved surface
+// (gravel/dirt/unpaved/etc.) renders grayed-out/dimmed instead of its
+// normal class color, so unsuitable roads visually recede.
 export const MAP_STYLES: MapStyleConfig[] = [
   {
     key: "road_cycling",
     label: "Road Cycling",
     styleUrl: "/map-styles/road-cycling.json",
-    hasCustomRoadColors: true,
+    roadLegend: ROAD_CYCLING_LEGEND,
   },
   // { key: "gravel", label: "Gravel", styleUrl: "https://tiles.openfreemap.org/styles/bright" },
   // { key: "mtb", label: "Mountain Biking", styleUrl: "https://tiles.openfreemap.org/styles/bright" },

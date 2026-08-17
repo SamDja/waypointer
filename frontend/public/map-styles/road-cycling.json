@@ -611,6 +611,82 @@
           4,
           20,
           15
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -647,7 +723,90 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#cfcdca",
+        "line-color": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ],
+            [
+              "==",
+              [
+                "get",
+                "class"
+              ],
+              "track"
+            ]
+          ],
+          "#a3a3a3",
+          "#cfcdca"
+        ],
         "line-dasharray": [
           0.5,
           0.25
@@ -667,6 +826,90 @@
           4,
           20,
           11
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ],
+            [
+              "==",
+              [
+                "get",
+                "class"
+              ],
+              "track"
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -739,6 +982,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#a3a3a3",
@@ -761,6 +1031,79 @@
           4,
           20,
           15
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -838,6 +1181,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#a3a3a3",
@@ -852,9 +1222,153 @@
             "zoom"
           ],
           12,
-          0,
+          [
+            "case",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ],
+              [
+                "match",
+                [
+                  "get",
+                  "surface"
+                ],
+                [
+                  "gravel",
+                  "dirt",
+                  "ground",
+                  "unpaved",
+                  "sand",
+                  "grass",
+                  "mud",
+                  "compacted",
+                  "fine_gravel",
+                  "pebblestone",
+                  "earth",
+                  "dirt/sand",
+                  "cobblestone",
+                  "sett",
+                  "wood",
+                  "woodchips"
+                ],
+                true,
+                false
+              ]
+            ],
+            0.5,
+            0
+          ],
           12.5,
-          1
+          [
+            "case",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ],
+              [
+                "match",
+                [
+                  "get",
+                  "surface"
+                ],
+                [
+                  "gravel",
+                  "dirt",
+                  "ground",
+                  "unpaved",
+                  "sand",
+                  "grass",
+                  "mud",
+                  "compacted",
+                  "fine_gravel",
+                  "pebblestone",
+                  "earth",
+                  "dirt/sand",
+                  "cobblestone",
+                  "sett",
+                  "wood",
+                  "woodchips"
+                ],
+                true,
+                false
+              ]
+            ],
+            0.5,
+            1
+          ]
         ],
         "line-width": [
           "interpolate",
@@ -950,6 +1464,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#a3a3a3",
@@ -968,6 +1509,79 @@
           1.5,
           20,
           17
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -1045,6 +1659,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#a3a3a3",
@@ -1067,6 +1708,79 @@
           1.75,
           20,
           22
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -1128,6 +1842,150 @@
           1.75,
           20,
           22
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
+        ]
+      }
+    },
+    {
+      "id": "tunnel_cycleway",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "match",
+          [
+            "geometry-type"
+          ],
+          [
+            "LineString",
+            "MultiLineString"
+          ],
+          true,
+          false
+        ],
+        [
+          "==",
+          [
+            "get",
+            "brunnel"
+          ],
+          "tunnel"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "class"
+          ],
+          "path"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "subclass"
+          ],
+          "cycleway"
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#0033cc",
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.2
+          ],
+          [
+            "zoom"
+          ],
+          10,
+          0.75,
+          14,
+          2,
+          20,
+          9
         ]
       }
     },
@@ -1181,7 +2039,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#8b6b47",
+        "line-color": "#a3a3a3",
         "line-dasharray": [
           1,
           0.75
@@ -1199,7 +2057,8 @@
           0.5,
           20,
           10
-        ]
+        ],
+        "line-opacity": 0.5
       }
     },
     {
@@ -1256,6 +2115,82 @@
           2.5,
           20,
           11.5
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -1292,7 +2227,90 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#fff",
+        "line-color": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ],
+            [
+              "==",
+              [
+                "get",
+                "class"
+              ],
+              "track"
+            ]
+          ],
+          "#d4d4d4",
+          "#fff"
+        ],
         "line-width": [
           "interpolate",
           [
@@ -1308,6 +2326,90 @@
           2,
           20,
           7.5
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ],
+            [
+              "==",
+              [
+                "get",
+                "class"
+              ],
+              "track"
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -1380,6 +2482,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#d4d4d4",
@@ -1402,6 +2531,79 @@
           2.5,
           20,
           11.5
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -1478,6 +2680,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#d4d4d4",
@@ -1498,6 +2727,79 @@
           2.5,
           20,
           11.5
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -1575,6 +2877,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#d4d4d4",
@@ -1595,6 +2924,79 @@
           0.5,
           20,
           10
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -1672,6 +3074,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#d4d4d4",
@@ -1692,6 +3121,79 @@
           1,
           20,
           18
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -1747,6 +3249,82 @@
           1,
           20,
           18
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -2024,6 +3602,82 @@
           4,
           20,
           15
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -2102,6 +3756,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#a3a3a3",
@@ -2122,44 +3803,8 @@
           4,
           20,
           11
-        ]
-      }
-    },
-    {
-      "id": "road_track_casing",
-      "type": "line",
-      "source": "openmaptiles",
-      "source-layer": "transportation",
-      "filter": [
-        "all",
-        [
-          "match",
-          [
-            "get",
-            "brunnel"
-          ],
-          [
-            "bridge",
-            "tunnel"
-          ],
-          false,
-          true
         ],
-        [
-          "==",
-          [
-            "get",
-            "class"
-          ],
-          "track"
-        ]
-      ],
-      "layout": {
-        "line-cap": "round",
-        "line-join": "round"
-      },
-      "paint": {
-        "line-color": [
+        "line-opacity": [
           "case",
           [
             "any",
@@ -2200,11 +3845,75 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
-          "#a3a3a3",
-          "#5c8a52"
+          0.5,
+          1
+        ]
+      }
+    },
+    {
+      "id": "road_track_casing",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "match",
+          [
+            "get",
+            "brunnel"
+          ],
+          [
+            "bridge",
+            "tunnel"
+          ],
+          false,
+          true
         ],
+        [
+          "==",
+          [
+            "get",
+            "class"
+          ],
+          "track"
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#a3a3a3",
         "line-width": [
           "interpolate",
           [
@@ -2224,7 +3933,8 @@
         "line-dasharray": [
           2,
           1.5
-        ]
+        ],
+        "line-opacity": 0.5
       }
     },
     {
@@ -2319,6 +4029,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#a3a3a3",
@@ -2341,6 +4078,79 @@
           4,
           20,
           15
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -2443,6 +4253,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#a3a3a3",
@@ -2457,9 +4294,153 @@
             "zoom"
           ],
           12,
-          0,
+          [
+            "case",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ],
+              [
+                "match",
+                [
+                  "get",
+                  "surface"
+                ],
+                [
+                  "gravel",
+                  "dirt",
+                  "ground",
+                  "unpaved",
+                  "sand",
+                  "grass",
+                  "mud",
+                  "compacted",
+                  "fine_gravel",
+                  "pebblestone",
+                  "earth",
+                  "dirt/sand",
+                  "cobblestone",
+                  "sett",
+                  "wood",
+                  "woodchips"
+                ],
+                true,
+                false
+              ]
+            ],
+            0.5,
+            0
+          ],
           12.5,
-          1
+          [
+            "case",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ],
+              [
+                "match",
+                [
+                  "get",
+                  "surface"
+                ],
+                [
+                  "gravel",
+                  "dirt",
+                  "ground",
+                  "unpaved",
+                  "sand",
+                  "grass",
+                  "mud",
+                  "compacted",
+                  "fine_gravel",
+                  "pebblestone",
+                  "earth",
+                  "dirt/sand",
+                  "cobblestone",
+                  "sett",
+                  "wood",
+                  "woodchips"
+                ],
+                true,
+                false
+              ]
+            ],
+            0.5,
+            1
+          ]
         ],
         "line-width": [
           "interpolate",
@@ -2569,6 +4550,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#a3a3a3",
@@ -2587,6 +4595,79 @@
           1.5,
           20,
           17
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -2669,6 +4750,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#a3a3a3",
@@ -2691,6 +4799,79 @@
           1.75,
           20,
           22
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -2755,6 +4936,82 @@
           1.75,
           20,
           22
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -2763,7 +5020,6 @@
       "type": "line",
       "source": "openmaptiles",
       "source-layer": "transportation",
-      "minzoom": 10,
       "filter": [
         "all",
         [
@@ -2891,7 +5147,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#8b6b47",
+        "line-color": "#a3a3a3",
         "line-dasharray": [
           1,
           0.7
@@ -2909,7 +5165,8 @@
           1,
           20,
           10
-        ]
+        ],
+        "line-opacity": 0.5
       }
     },
     {
@@ -2973,6 +5230,82 @@
           2.5,
           20,
           11.5
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -3051,6 +5384,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#d4d4d4",
@@ -3071,44 +5431,8 @@
           2,
           20,
           7.5
-        ]
-      }
-    },
-    {
-      "id": "road_track",
-      "type": "line",
-      "source": "openmaptiles",
-      "source-layer": "transportation",
-      "filter": [
-        "all",
-        [
-          "match",
-          [
-            "get",
-            "brunnel"
-          ],
-          [
-            "bridge",
-            "tunnel"
-          ],
-          false,
-          true
         ],
-        [
-          "==",
-          [
-            "get",
-            "class"
-          ],
-          "track"
-        ]
-      ],
-      "layout": {
-        "line-cap": "round",
-        "line-join": "round"
-      },
-      "paint": {
-        "line-color": [
+        "line-opacity": [
           "case",
           [
             "any",
@@ -3149,11 +5473,75 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
-          "#d4d4d4",
-          "#8fbf7a"
+          0.5,
+          1
+        ]
+      }
+    },
+    {
+      "id": "road_track",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "match",
+          [
+            "get",
+            "brunnel"
+          ],
+          [
+            "bridge",
+            "tunnel"
+          ],
+          false,
+          true
         ],
+        [
+          "==",
+          [
+            "get",
+            "class"
+          ],
+          "track"
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#d4d4d4",
         "line-width": [
           "interpolate",
           [
@@ -3173,7 +5561,8 @@
         "line-dasharray": [
           2,
           1.5
-        ]
+        ],
+        "line-opacity": 0.5
       }
     },
     {
@@ -3268,6 +5657,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#d4d4d4",
@@ -3290,6 +5706,79 @@
           2.5,
           20,
           11.5
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -3384,6 +5873,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#d4d4d4",
@@ -3404,6 +5920,79 @@
           2.5,
           20,
           18
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -3487,6 +6076,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#d4d4d4",
@@ -3507,6 +6123,79 @@
           0.5,
           20,
           13
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -3589,6 +6278,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#d4d4d4",
@@ -3609,6 +6325,79 @@
           1,
           20,
           18
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -3671,6 +6460,82 @@
           1,
           20,
           18
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -3971,6 +6836,82 @@
           4,
           20,
           15
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -4007,7 +6948,90 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#cfcdca",
+        "line-color": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ],
+            [
+              "==",
+              [
+                "get",
+                "class"
+              ],
+              "track"
+            ]
+          ],
+          "#a3a3a3",
+          "#cfcdca"
+        ],
         "line-width": [
           "interpolate",
           [
@@ -4023,6 +7047,90 @@
           4,
           20,
           11
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ],
+            [
+              "==",
+              [
+                "get",
+                "class"
+              ],
+              "track"
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -4095,6 +7203,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#a3a3a3",
@@ -4117,6 +7252,79 @@
           4,
           20,
           15
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -4194,6 +7402,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#a3a3a3",
@@ -4208,9 +7443,153 @@
             "zoom"
           ],
           12,
-          0,
+          [
+            "case",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ],
+              [
+                "match",
+                [
+                  "get",
+                  "surface"
+                ],
+                [
+                  "gravel",
+                  "dirt",
+                  "ground",
+                  "unpaved",
+                  "sand",
+                  "grass",
+                  "mud",
+                  "compacted",
+                  "fine_gravel",
+                  "pebblestone",
+                  "earth",
+                  "dirt/sand",
+                  "cobblestone",
+                  "sett",
+                  "wood",
+                  "woodchips"
+                ],
+                true,
+                false
+              ]
+            ],
+            0.5,
+            0
+          ],
           12.5,
-          1
+          [
+            "case",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ],
+              [
+                "match",
+                [
+                  "get",
+                  "surface"
+                ],
+                [
+                  "gravel",
+                  "dirt",
+                  "ground",
+                  "unpaved",
+                  "sand",
+                  "grass",
+                  "mud",
+                  "compacted",
+                  "fine_gravel",
+                  "pebblestone",
+                  "earth",
+                  "dirt/sand",
+                  "cobblestone",
+                  "sett",
+                  "wood",
+                  "woodchips"
+                ],
+                true,
+                false
+              ]
+            ],
+            0.5,
+            1
+          ]
         ],
         "line-width": [
           "interpolate",
@@ -4229,6 +7608,74 @@
           4,
           20,
           25
+        ]
+      }
+    },
+    {
+      "id": "bridge_cycleway",
+      "type": "line",
+      "source": "openmaptiles",
+      "source-layer": "transportation",
+      "filter": [
+        "all",
+        [
+          "match",
+          [
+            "geometry-type"
+          ],
+          [
+            "LineString",
+            "MultiLineString"
+          ],
+          true,
+          false
+        ],
+        [
+          "==",
+          [
+            "get",
+            "brunnel"
+          ],
+          "bridge"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "class"
+          ],
+          "path"
+        ],
+        [
+          "==",
+          [
+            "get",
+            "subclass"
+          ],
+          "cycleway"
+        ]
+      ],
+      "layout": {
+        "line-cap": "round",
+        "line-join": "round"
+      },
+      "paint": {
+        "line-color": "#0033cc",
+        "line-width": [
+          "interpolate",
+          [
+            "exponential",
+            1.2
+          ],
+          [
+            "zoom"
+          ],
+          10,
+          0.75,
+          14,
+          2,
+          20,
+          9
         ]
       }
     },
@@ -4274,7 +7721,7 @@
         ]
       ],
       "paint": {
-        "line-color": "hsl(35,6%,80%)",
+        "line-color": "#cfcdca",
         "line-dasharray": [
           1,
           0
@@ -4292,7 +7739,8 @@
           1.5,
           20,
           18
-        ]
+        ],
+        "line-opacity": 0.5
       }
     },
     {
@@ -4369,6 +7817,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#a3a3a3",
@@ -4387,6 +7862,79 @@
           1.5,
           20,
           17
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -4464,6 +8012,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#a3a3a3",
@@ -4486,6 +8061,79 @@
           1.75,
           20,
           22
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -4543,6 +8191,82 @@
           1.75,
           20,
           22
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -4596,7 +8320,7 @@
         ]
       ],
       "paint": {
-        "line-color": "#8b6b47",
+        "line-color": "#a3a3a3",
         "line-dasharray": [
           1,
           0.3
@@ -4614,7 +8338,8 @@
           0.5,
           20,
           10
-        ]
+        ],
+        "line-opacity": 0.5
       }
     },
     {
@@ -4671,6 +8396,82 @@
           2.5,
           20,
           11.5
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -4707,7 +8508,90 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#fff",
+        "line-color": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ],
+            [
+              "==",
+              [
+                "get",
+                "class"
+              ],
+              "track"
+            ]
+          ],
+          "#d4d4d4",
+          "#fff"
+        ],
         "line-width": [
           "interpolate",
           [
@@ -4723,6 +8607,90 @@
           2,
           20,
           7.5
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ],
+            [
+              "==",
+              [
+                "get",
+                "class"
+              ],
+              "track"
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -4795,6 +8763,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#d4d4d4",
@@ -4817,6 +8812,79 @@
           2.5,
           20,
           11.5
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -4893,6 +8961,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#d4d4d4",
@@ -4913,6 +9008,79 @@
           2.5,
           20,
           18
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -4990,6 +9158,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#d4d4d4",
@@ -5010,6 +9205,79 @@
           0.5,
           20,
           10
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -5087,6 +9355,33 @@
                   false
                 ]
               ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
             ]
           ],
           "#d4d4d4",
@@ -5107,6 +9402,79 @@
           1,
           20,
           18
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "==",
+              [
+                "get",
+                "bicycle"
+              ],
+              "no"
+            ],
+            [
+              "all",
+              [
+                "==",
+                [
+                  "get",
+                  "access"
+                ],
+                "no"
+              ],
+              [
+                "!",
+                [
+                  "match",
+                  [
+                    "get",
+                    "bicycle"
+                  ],
+                  [
+                    "yes",
+                    "designated",
+                    "permissive",
+                    "dismount",
+                    "customers"
+                  ],
+                  true,
+                  false
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
@@ -5162,6 +9530,82 @@
           1,
           20,
           18
+        ],
+        "line-opacity": [
+          "case",
+          [
+            "any",
+            [
+              "any",
+              [
+                "==",
+                [
+                  "get",
+                  "bicycle"
+                ],
+                "no"
+              ],
+              [
+                "all",
+                [
+                  "==",
+                  [
+                    "get",
+                    "access"
+                  ],
+                  "no"
+                ],
+                [
+                  "!",
+                  [
+                    "match",
+                    [
+                      "get",
+                      "bicycle"
+                    ],
+                    [
+                      "yes",
+                      "designated",
+                      "permissive",
+                      "dismount",
+                      "customers"
+                    ],
+                    true,
+                    false
+                  ]
+                ]
+              ]
+            ],
+            [
+              "match",
+              [
+                "get",
+                "surface"
+              ],
+              [
+                "gravel",
+                "dirt",
+                "ground",
+                "unpaved",
+                "sand",
+                "grass",
+                "mud",
+                "compacted",
+                "fine_gravel",
+                "pebblestone",
+                "earth",
+                "dirt/sand",
+                "cobblestone",
+                "sett",
+                "wood",
+                "woodchips"
+              ],
+              true,
+              false
+            ]
+          ],
+          0.5,
+          1
         ]
       }
     },
