@@ -1,4 +1,4 @@
-# waypointer
+# Sulla Via
 
 Adds waypoints to a GPX file before uploading it to your head unit.
 

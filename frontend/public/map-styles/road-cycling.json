@@ -21,7 +21,7 @@
       "id": "background",
       "type": "background",
       "paint": {
-        "background-color": "#f8f4f0"
+        "background-color": "rgba(236, 252, 203, 0.73)"
       }
     },
     {
@@ -85,19 +85,7 @@
         "residential"
       ],
       "paint": {
-        "fill-color": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          9,
-          "hsla(0,3%,85%,0.84)",
-          12,
-          "hsla(35,57%,88%,0.49)"
-        ]
+        "fill-color": "#fbfbf9"
       }
     },
     {
@@ -416,7 +404,7 @@
         "tunnel"
       ],
       "paint": {
-        "fill-color": "hsl(210, 67%, 85%)"
+        "fill-color": "rgba(147, 197, 253, 0.68)"
       }
     },
     {
@@ -1957,12 +1945,23 @@
           "path"
         ],
         [
-          "==",
+          "any",
           [
-            "get",
-            "subclass"
+            "==",
+            [
+              "get",
+              "subclass"
+            ],
+            "cycleway"
           ],
-          "cycleway"
+          [
+            "==",
+            [
+              "get",
+              "bicycle"
+            ],
+            "designated"
+          ]
         ]
       ],
       "layout": {
@@ -1970,7 +1969,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#0033cc",
+        "line-color": "#009966",
         "line-width": [
           "interpolate",
           [
@@ -2030,12 +2029,23 @@
           false
         ],
         [
-          "!=",
+          "all",
           [
-            "get",
-            "subclass"
+            "!=",
+            [
+              "get",
+              "subclass"
+            ],
+            "cycleway"
           ],
-          "cycleway"
+          [
+            "!=",
+            [
+              "get",
+              "bicycle"
+            ],
+            "designated"
+          ]
         ]
       ],
       "paint": {
@@ -3913,7 +3923,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#a3a3a3",
+        "line-color": "#a6a09b",
         "line-width": [
           "interpolate",
           [
@@ -4282,8 +4292,8 @@
               false
             ]
           ],
-          "#a3a3a3",
-          "#888888"
+          "#ffffff",
+          "#a39c90"
         ],
         "line-opacity": [
           "interpolate",
@@ -4580,7 +4590,7 @@
             ]
           ],
           "#a3a3a3",
-          "#b1bb5d"
+          "#c9a227"
         ],
         "line-width": [
           "interpolate",
@@ -4780,7 +4790,7 @@
             ]
           ],
           "#a3a3a3",
-          "#d8b267"
+          "#e8891f"
         ],
         "line-width": [
           "interpolate",
@@ -4918,7 +4928,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#a3a3a3",
+        "line-color": "#a6a09b",
         "line-width": [
           "interpolate",
           [
@@ -5056,12 +5066,23 @@
           "path"
         ],
         [
-          "==",
+          "any",
           [
-            "get",
-            "subclass"
+            "==",
+            [
+              "get",
+              "subclass"
+            ],
+            "cycleway"
           ],
-          "cycleway"
+          [
+            "==",
+            [
+              "get",
+              "bicycle"
+            ],
+            "designated"
+          ]
         ]
       ],
       "layout": {
@@ -5069,7 +5090,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#0033cc",
+        "line-color": "#009966",
         "line-width": [
           "interpolate",
           [
@@ -5135,19 +5156,30 @@
           false
         ],
         [
-          "!=",
+          "all",
           [
-            "get",
-            "subclass"
+            "!=",
+            [
+              "get",
+              "subclass"
+            ],
+            "cycleway"
           ],
-          "cycleway"
+          [
+            "!=",
+            [
+              "get",
+              "bicycle"
+            ],
+            "designated"
+          ]
         ]
       ],
       "layout": {
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#a3a3a3",
+        "line-color": "#a6a09b",
         "line-dasharray": [
           1,
           0.7
@@ -5541,7 +5573,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#d4d4d4",
+        "line-color": "#a6a09b",
         "line-width": [
           "interpolate",
           [
@@ -5902,8 +5934,8 @@
               false
             ]
           ],
-          "#d4d4d4",
-          "#f6f6f6"
+          "#abab9c",
+          "#ffffff"
         ],
         "line-width": [
           "interpolate",
@@ -6106,7 +6138,7 @@
             ]
           ],
           "#d4d4d4",
-          "#f6f8d2"
+          "#fbe9a0"
         ],
         "line-width": [
           "interpolate",
@@ -6307,8 +6339,8 @@
               false
             ]
           ],
-          "#d4d4d4",
-          "#f4dfc3"
+          "#d6d3d1",
+          "#fbd9a6"
         ],
         "line-width": [
           "interpolate",
@@ -7647,12 +7679,23 @@
           "path"
         ],
         [
-          "==",
+          "any",
           [
-            "get",
-            "subclass"
+            "==",
+            [
+              "get",
+              "subclass"
+            ],
+            "cycleway"
           ],
-          "cycleway"
+          [
+            "==",
+            [
+              "get",
+              "bicycle"
+            ],
+            "designated"
+          ]
         ]
       ],
       "layout": {
@@ -7660,7 +7703,7 @@
         "line-join": "round"
       },
       "paint": {
-        "line-color": "#0033cc",
+        "line-color": "#009966",
         "line-width": [
           "interpolate",
           [
@@ -8311,12 +8354,23 @@
           false
         ],
         [
-          "!=",
+          "all",
           [
-            "get",
-            "subclass"
+            "!=",
+            [
+              "get",
+              "subclass"
+            ],
+            "cycleway"
           ],
-          "cycleway"
+          [
+            "!=",
+            [
+              "get",
+              "bicycle"
+            ],
+            "designated"
+          ]
         ]
       ],
       "paint": {
@@ -9799,41 +9853,9 @@
       "source": "openmaptiles",
       "source-layer": "building",
       "minzoom": 13,
-      "maxzoom": 14,
       "paint": {
-        "fill-color": "hsl(35,8%,85%)",
-        "fill-outline-color": [
-          "interpolate",
-          [
-            "linear"
-          ],
-          [
-            "zoom"
-          ],
-          13,
-          "hsla(35,6%,79%,0.32)",
-          14,
-          "hsl(35,6%,79%)"
-        ]
-      }
-    },
-    {
-      "id": "building-3d",
-      "type": "fill-extrusion",
-      "source": "openmaptiles",
-      "source-layer": "building",
-      "minzoom": 14,
-      "paint": {
-        "fill-extrusion-base": [
-          "get",
-          "render_min_height"
-        ],
-        "fill-extrusion-color": "hsl(35,8%,85%)",
-        "fill-extrusion-height": [
-          "get",
-          "render_height"
-        ],
-        "fill-extrusion-opacity": 0.8
+        "fill-color": "#f4f4f0",
+        "fill-outline-color": "#d8d8d0"
       }
     },
     {
@@ -10435,7 +10457,7 @@
       "type": "symbol",
       "source": "openmaptiles",
       "source-layer": "poi",
-      "minzoom": 15,
+      "minzoom": 14,
       "filter": [
         "all",
         [
@@ -10526,14 +10548,17 @@
           0,
           0.6
         ],
-        "text-size": 12
+        "text-size": 0,
+        "icon-size": 0
       },
       "paint": {
         "text-color": "#666",
         "text-halo-blur": 0.5,
         "text-halo-color": "#ffffff",
-        "text-halo-width": 1
-      }
+        "text-halo-width": 1,
+        "text-opacity": 1
+      },
+      "maxzoom": 24
     },
     {
       "id": "poi_transit",
@@ -10562,7 +10587,7 @@
             "class"
           ]
         ],
-        "icon-size": 0.7,
+        "icon-size": 0,
         "text-anchor": "left",
         "text-field": [
           "case",
@@ -10676,9 +10701,9 @@
         ]
       },
       "paint": {
-        "text-color": "hsl(30,23%,62%)",
-        "text-halo-color": "#f8f4f0",
-        "text-halo-width": 0.5
+        "text-color": "#1a1a1a",
+        "text-halo-color": "#ffffff",
+        "text-halo-width": 1.2
       }
     },
     {
@@ -11925,5 +11950,6 @@
       }
     }
   ],
-  "name": "Waypointer Road Cycling"
+  "name": "Waypointer Road Cycling",
+  "id": "mv3v2o8"
 }
