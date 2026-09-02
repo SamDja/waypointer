@@ -1,0 +1,21 @@
+services:
+  waypointer:
+    build:
+      context: .
+      args:
+        # Non-secret build-time ids baked into the frontend bundle - see
+        # Dockerfile/CLAUDE.md. Leave unset to build without Wahoo/Tally
+        # integration.
+        VITE_WAHOO_CLIENT_ID: ${VITE_WAHOO_CLIENT_ID:-}
+        VITE_TALLY_FORM_ID: ${VITE_TALLY_FORM_ID:-}
+    ports:
+      - "${PORT:-443}:8000"
+    environment:
+      # Unset by default (plain HTTP). Set both, and point CERTS_DIR at the
+      # folder holding them, to enable HTTPS - see CLAUDE.md's "Local HTTPS"
+      # section for how to generate the cert.
+      - SSL_KEYFILE=${SSL_KEYFILE:-}
+      - SSL_CERTFILE=${SSL_CERTFILE:-}
+    volumes:
+      - ${CERTS_DIR:-./certs}:/certs:ro
+    restart: unless-stopped
