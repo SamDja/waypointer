@@ -38,23 +38,26 @@ docker run -p 8000:8000 waypointer
 ```
 Multi-stage: a `node` stage runs `npm ci && npm run build`, then the `python:3.11-slim` + `uv` stage copies that build output in. Deployed to Render via `render.yaml` (`dockerfilePath: ./Dockerfile`).
 
+For local (LAN) use, `docker-compose.yml` wraps the same image build — `docker compose up --build -d` (reads a `.env` file in the repo root for the vars below automatically).
+
 #### Local HTTPS (LAN deployment, e.g. Raspberry Pi)
 `uvicorn` terminates TLS directly (no reverse proxy) when `SSL_KEYFILE`/`SSL_CERTFILE` are set — both are unset on Render, where TLS terminates upstream, so this is opt-in and doesn't touch the production path. Generate a self-signed cert once on the host (SAN must match how you'll browse to it, e.g. an mDNS hostname):
 ```bash
 openssl req -x509 -nodes -newkey rsa:2048 \
   -keyout waypointer.key -out waypointer.crt -days 825 \
-  -subj "/CN=raspberrypi.local" \
-  -addext "subjectAltName=DNS:raspberrypi.local"
+  -subj "/CN=sampi.local" \
+  -addext "subjectAltName=DNS:sampi.local"
 ```
-Then bind-mount it in (never bake a private key into the image) and point the env vars at the in-container paths:
+`docker-compose.yml` publishes the container's internal port 8000 on host port **443** by default (`${PORT:-443}:8000`) — not 8000 — specifically so the browsed URL has no port suffix (`https://sampi.local/...`, not `https://sampi.local:8000/...`); this matters because the Wahoo OAuth redirect URI (see below) must match exactly, port included. Set the cert env vars via a `.env` file next to `docker-compose.yml` (never bake a private key into the image):
 ```bash
-docker run -p 8000:8000 \
-  -v ~/waypointer-certs:/certs:ro \
-  -e SSL_KEYFILE=/certs/waypointer.key \
-  -e SSL_CERTFILE=/certs/waypointer.crt \
-  waypointer
+# .env
+SSL_KEYFILE=/certs/waypointer.key
+SSL_CERTFILE=/certs/waypointer.crt
+CERTS_DIR=/home/pi/waypointer-certs   # host dir holding the cert/key generated above
 ```
-Each browser/device will show a one-time self-signed-cert trust warning on first visit. If the Wahoo "connect" feature is used from this address, `https://<host>:8000/wahoo-callback.html` also needs adding to the registered redirect URIs in the Wahoo developer dashboard — the redirect URI is derived from `window.location.origin` (`frontend/src/lib/wahooAuth.ts`), so switching `http://` → `https://` changes it.
+then `docker compose up --build -d`.
+
+Each browser/device will show a one-time self-signed-cert trust warning on first visit. If the Wahoo "connect" feature is used from this address, `https://<host>/wahoo-callback.html` (no port, matching the 443 mapping above) also needs adding to the registered redirect URIs in the Wahoo developer dashboard — the redirect URI is derived from `window.location.origin` (`frontend/src/lib/wahooAuth.ts`), and Wahoo requires an exact string match, so a registered URI missing the actual port (or carrying one that isn't actually there) fails with a misleading error (see [[project_wahoo_oauth_redirect_uri]]).
 
 ## Backend architecture (`src/waypointer/`)
 Two endpoints only, both stateless — no DB, no session, no server-side memory between requests. The frontend holds all state client-side and resubmits the original GPX file on every request.
