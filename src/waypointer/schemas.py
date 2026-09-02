@@ -39,11 +39,21 @@ class ExistingWaypoint(BaseModel):
     distance_from_start_m: float
 
 
+class FailedPoiType(BaseModel):
+    # One requested POI type whose Overpass call errored or timed out -
+    # /api/find-pois still returns 200 with results for the types that
+    # succeeded (see main.py's find_pois()), unless every requested type
+    # failed, in which case the whole request 502s instead.
+    poi_type: str
+    error: str
+
+
 class FindPoisResponse(BaseModel):
     candidates: list[Candidate]
     point_count: int
     existing_waypoints: list[ExistingWaypoint]
     route_coords: list[tuple[float, float]]
+    failed_poi_types: list[FailedPoiType] = []
 
 
 class WahooRoutePayload(BaseModel):

@@ -1,9 +1,13 @@
+import random
+
 import pytest
 
 from waypointer.geometry import (
+    build_polyline_index,
     haversine_m,
     point_to_polyline_distance_m,
     point_to_segment_distance_m,
+    project_onto_polyline_indexed_m,
     project_onto_polyline_m,
     simplify_rdp,
     total_distance_m,
@@ -112,3 +116,74 @@ def test_total_distance_sums_consecutive_segments():
 def test_total_distance_empty_or_single_point_is_zero():
     assert total_distance_m([]) == 0.0
     assert total_distance_m([(48.0, 2.0)]) == 0.0
+
+
+def _make_synthetic_route(num_points: int = 300) -> list[tuple[float, float]]:
+    """A zig-zagging route with corners, spanning a few km, deterministic."""
+    rng = random.Random(1234)
+    route = []
+    lat, lon = 48.0, 2.0
+    for i in range(num_points):
+        lat += 0.00003 + rng.uniform(-0.00001, 0.00001)
+        lon += (0.00004 if i % 7 < 3 else -0.00002) + rng.uniform(-0.00001, 0.00001)
+        route.append((lat, lon))
+    return route
+
+
+def test_polyline_index_matches_naive_projection_on_fixture_route():
+    route = _make_synthetic_route()
+    index = build_polyline_index(route, cell_size_m=200.0)
+    rng = random.Random(42)
+
+    query_points = []
+    # Points near the route.
+    for p in route[::5]:
+        query_points.append((p[0] + rng.uniform(-0.0002, 0.0002), p[1] + rng.uniform(-0.0002, 0.0002)))
+    # Points on vertices/shared segment endpoints exactly.
+    query_points.extend(route[::11])
+    # Points far outside the cell size, in an empty region.
+    query_points.append((49.5, 3.5))
+    query_points.append((46.0, 0.0))
+
+    for p in query_points:
+        naive = project_onto_polyline_m(p, route)
+        indexed = project_onto_polyline_indexed_m(p, index)
+        assert indexed[0] == pytest.approx(naive[0], abs=1e-6)
+        assert indexed[1] == pytest.approx(naive[1], abs=1e-6)
+
+
+def test_polyline_index_handles_query_far_outside_cell_size():
+    route = _make_synthetic_route(50)
+    # A large cell size relative to the route's own span, and a query point
+    # geographically far from every segment, exercises the ring-expansion
+    # safety-valve path rather than an early single-ring hit.
+    index = build_polyline_index(route, cell_size_m=5.0)
+    p = (60.0, 20.0)
+    naive = project_onto_polyline_m(p, route)
+    indexed = project_onto_polyline_indexed_m(p, index)
+    assert indexed[0] == pytest.approx(naive[0], abs=1e-6)
+    assert indexed[1] == pytest.approx(naive[1], abs=1e-6)
+
+
+def test_polyline_index_single_point_route():
+    route = [(48.0, 2.0)]
+    index = build_polyline_index(route)
+    p = (48.001, 2.001)
+    naive = project_onto_polyline_m(p, route)
+    indexed = project_onto_polyline_indexed_m(p, index)
+    assert indexed == naive
+
+
+def test_polyline_index_two_point_route():
+    route = [(48.0, 2.0), (48.001, 2.0005)]
+    index = build_polyline_index(route)
+    p = (48.0005, 2.0002)
+    naive = project_onto_polyline_m(p, route)
+    indexed = project_onto_polyline_indexed_m(p, index)
+    assert indexed[0] == pytest.approx(naive[0], abs=1e-6)
+    assert indexed[1] == pytest.approx(naive[1], abs=1e-6)
+
+
+def test_polyline_index_requires_points():
+    with pytest.raises(ValueError):
+        build_polyline_index([])

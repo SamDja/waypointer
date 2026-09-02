@@ -1,14 +1,18 @@
 """Overpass API query construction and HTTP client for OSM POI lookups."""
 
 import hashlib
+import os
 import threading
 import time
 from dataclasses import dataclass
 
 import requests
 
-# OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-OVERPASS_URL = "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+# Defaults to a public mirror; set OVERPASS_URL to point at a self-hosted
+# instance instead (e.g. http://overpass:80/api/interpreter in Docker Compose).
+OVERPASS_URL = os.environ.get(
+    "OVERPASS_URL", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+)
 
 CACHE_TTL_S = 600.0
 # Overpass's server rejects requests carrying the default python-requests

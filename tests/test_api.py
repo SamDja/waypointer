@@ -1,5 +1,6 @@
 import base64
 import json
+import time
 
 import gpxpy
 import pytest
@@ -54,6 +55,7 @@ def test_find_pois_defaults_to_default_visible_types(sample_route_bytes, overpas
     assert {c["poi_type"] for c in data["candidates"]} == set(poi_types.DEFAULT_VISIBLE_POI_TYPES)
     assert data["route_coords"]
     assert all(len(pt) == 2 for pt in data["route_coords"])
+    assert data["failed_poi_types"] == []
 
 
 def test_find_pois_rejects_invalid_gpx():
@@ -170,6 +172,102 @@ def test_find_pois_handles_multiple_poi_types(sample_route_bytes, overpass_respo
     assert len(responses.calls) == 2
     found_types = {c["poi_type"] for c in data["candidates"]}
     assert found_types == {"water", "bench"}
+
+
+def _register_fake_poi_types(monkeypatch, count: int) -> list[str]:
+    keys = [f"fake_type_{i}" for i in range(count)]
+    for key in keys:
+        monkeypatch.setitem(
+            poi_types.POI_TYPES,
+            key,
+            poi_types.PoiTypeConfig(
+                key=key,
+                label=key,
+                course_point_type=0,
+                tag_filter=f'node["fake"="{key}"]',
+                default_max_distance_m=20.0,
+                min_distance_m=10.0,
+                max_distance_m=500.0,
+                default_name=key,
+            ),
+        )
+    return keys
+
+
+@responses.activate
+def test_find_pois_calls_are_concurrent_not_sequential(sample_route_bytes, monkeypatch):
+    # Registers several fake POI types whose mocked Overpass calls each
+    # sleep briefly - if find_pois still called Overpass sequentially, total
+    # wall time would be roughly num_types * SLEEP_S; run concurrently via
+    # asyncio.to_thread, it should be much closer to a single SLEEP_S.
+    num_types = 4
+    sleep_s = 0.2
+    keys = _register_fake_poi_types(monkeypatch, num_types)
+
+    def _slow_callback(request):
+        time.sleep(sleep_s)
+        return 200, {}, json.dumps({"version": 0.6, "generator": "test", "elements": []})
+
+    responses.add_callback(responses.POST, OVERPASS_URL, callback=_slow_callback, content_type="application/json")
+
+    start = time.monotonic()
+    response = client.post(
+        "/api/find-pois",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"poi_config": json.dumps([{"poi_type": k, "max_distance_m": 20} for k in keys])},
+    )
+    elapsed = time.monotonic() - start
+
+    assert response.status_code == 200
+    assert len(responses.calls) == num_types
+    # Sequential would take >= num_types * sleep_s; concurrent should stay
+    # well under half that, with generous margin for test-environment noise.
+    assert elapsed < num_types * sleep_s * 0.6
+
+
+@responses.activate
+def test_find_pois_one_type_failure_does_not_block_others(sample_route_bytes, overpass_response_json, monkeypatch):
+    keys = _register_fake_poi_types(monkeypatch, 1)
+    failing_key = keys[0]
+
+    def _dispatch(request):
+        body = request.body.decode() if isinstance(request.body, bytes) else request.body
+        if failing_key in body:
+            return 500, {}, "overpass down"
+        return 200, {}, json.dumps(overpass_response_json)
+
+    responses.add_callback(responses.POST, OVERPASS_URL, callback=_dispatch, content_type="application/json")
+
+    response = client.post(
+        "/api/find-pois",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={
+            "poi_config": json.dumps(
+                [
+                    {"poi_type": "water", "max_distance_m": 10},
+                    {"poi_type": failing_key, "max_distance_m": 20},
+                ]
+            )
+        },
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert {c["poi_type"] for c in data["candidates"]} == {"water"}
+    assert [f["poi_type"] for f in data["failed_poi_types"]] == [failing_key]
+    assert data["failed_poi_types"][0]["error"]
+
+
+@responses.activate
+def test_find_pois_all_types_fail_returns_502(sample_route_bytes, monkeypatch):
+    keys = _register_fake_poi_types(monkeypatch, 2)
+    responses.add(responses.POST, OVERPASS_URL, status=500, body="overpass down")
+
+    response = client.post(
+        "/api/find-pois",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"poi_config": json.dumps([{"poi_type": k, "max_distance_m": 20} for k in keys])},
+    )
+    assert response.status_code == 502
 
 
 @responses.activate

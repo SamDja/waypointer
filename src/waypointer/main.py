@@ -7,6 +7,7 @@ visitor's data never touches another's and a second Overpass query isn't
 needed afterwards.
 """
 
+import asyncio
 import base64
 import math
 import os
@@ -24,7 +25,13 @@ from pydantic import TypeAdapter, ValidationError
 from waypointer.device_profiles import DEFAULT_DEVICE_KEY, DEVICE_PROFILES, OutputFormat
 from waypointer.fit_io import FitCoursePoint, build_course_fit_bytes
 from waypointer.fit_read import fit_route_to_gpx_bytes
-from waypointer.geometry import LatLon, project_onto_polyline_m, simplify_rdp, total_distance_m
+from waypointer.geometry import (
+    LatLon,
+    build_polyline_index,
+    project_onto_polyline_indexed_m,
+    simplify_rdp,
+    total_distance_m,
+)
 from waypointer.gpx_io import (
     add_waypoints,
     discard_waypoints,
@@ -43,6 +50,7 @@ from waypointer.rate_limit import rate_limit
 from waypointer.schemas import (
     Candidate,
     ExistingWaypoint,
+    FailedPoiType,
     FindPoisResponse,
     PoiSearchConfig,
     WahooRoutePayload,
@@ -107,8 +115,12 @@ async def find_pois(
             raise HTTPException(status_code=400, detail=f"Invalid poi_config: {exc}") from exc
 
     simplified = simplify_rdp(coords, tolerance_m=SIMPLIFY_TOLERANCE_M)
+    route_index = build_polyline_index(coords)
 
-    candidates: list[Candidate] = []
+    # Validate and build every query up front - bad poi_type/tag_filter
+    # input must still 400 before any Overpass call fires, matching the
+    # previous sequential behavior.
+    prepared: list[tuple[PoiSearchConfig, float, str]] = []
     for entry in requested:
         cfg = POI_TYPES.get(entry.poi_type)
         if cfg is None:
@@ -128,12 +140,38 @@ async def find_pois(
         # can't introduce false positives, only prevents false negatives.
         overpass_radius_m = radius_m + SIMPLIFY_TOLERANCE_M
         query = build_overpass_query(simplified, tag_filter=cfg.tag_filter, radius_m=math.ceil(overpass_radius_m))
+        prepared.append((entry, radius_m, query))
+
+    # Fire all Overpass calls concurrently instead of one-at-a-time - N
+    # requested POI types used to mean N sequential blocking HTTP round
+    # trips; asyncio.to_thread offloads each of query_overpass's blocking
+    # requests.post calls to a worker thread so they run in parallel and
+    # stop hogging the event loop. Errors are caught per-call so one type
+    # failing/timing out doesn't take the others down with it.
+    async def _fetch_one(
+        entry: PoiSearchConfig, query: str
+    ) -> tuple[PoiSearchConfig, list[OsmNode], OverpassError | None]:
         try:
-            nodes = query_overpass(query)
+            nodes = await asyncio.to_thread(query_overpass, query)
+            return entry, nodes, None
         except OverpassError as exc:
-            raise HTTPException(
-                status_code=502, detail=f"Failed to query OpenStreetMap: {exc}"
-            ) from exc
+            return entry, [], exc
+
+    fetch_results = await asyncio.gather(
+        *(_fetch_one(entry, query) for entry, _radius_m, query in prepared)
+    )
+
+    if prepared and all(error is not None for _entry, _nodes, error in fetch_results):
+        raise HTTPException(
+            status_code=502, detail=f"Failed to query OpenStreetMap: {fetch_results[0][2]}"
+        )
+
+    candidates: list[Candidate] = []
+    failed_poi_types: list[FailedPoiType] = []
+    for (entry, radius_m, _query), (_entry, nodes, error) in zip(prepared, fetch_results):
+        if error is not None:
+            failed_poi_types.append(FailedPoiType(poi_type=entry.poi_type, error=str(error)))
+            continue
 
         for node in nodes:
             if is_duplicate_candidate(node, gpx):
@@ -142,7 +180,9 @@ async def find_pois(
             # route, never the simplified one used only to build the
             # Overpass query - and against this type's own clamped radius,
             # not a global constant.
-            distance_m, distance_from_start_m = project_onto_polyline_m((node.lat, node.lon), coords)
+            distance_m, distance_from_start_m = project_onto_polyline_indexed_m(
+                (node.lat, node.lon), route_index
+            )
             if distance_m <= radius_m:
                 candidates.append(
                     Candidate(
@@ -159,7 +199,9 @@ async def find_pois(
     candidates.sort(key=lambda c: c.distance_m)
     existing_waypoints = []
     for i, w in enumerate(gpx.waypoints):
-        distance_from_route_m, distance_from_start_m = project_onto_polyline_m((w.latitude, w.longitude), coords)
+        distance_from_route_m, distance_from_start_m = project_onto_polyline_indexed_m(
+            (w.latitude, w.longitude), route_index
+        )
         existing_waypoints.append(
             ExistingWaypoint(
                 index=i,
@@ -176,6 +218,7 @@ async def find_pois(
         point_count=len(coords),
         existing_waypoints=existing_waypoints,
         route_coords=simplified,
+        failed_poi_types=failed_poi_types,
     )
 
 
