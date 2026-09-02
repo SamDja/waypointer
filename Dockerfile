@@ -36,5 +36,7 @@ COPY --from=frontend-build /app/frontend/dist ./frontend/dist
 EXPOSE 8000
 
 # Render (and most PaaS free tiers) inject $PORT at runtime; default to 8000
-# for local `docker run`.
-CMD ["sh", "-c", "uv run uvicorn waypointer.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+# for local `docker run`. SSL_KEYFILE/SSL_CERTFILE are unset on Render (TLS
+# terminates upstream there) - when set, they point at a bind-mounted cert
+# for local HTTPS (e.g. on a LAN Raspberry Pi deployment); see CLAUDE.md.
+CMD ["sh", "-c", "uv run uvicorn waypointer.main:app --host 0.0.0.0 --port ${PORT:-8000} ${SSL_KEYFILE:+--ssl-keyfile $SSL_KEYFILE --ssl-certfile $SSL_CERTFILE}"]

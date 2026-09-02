@@ -38,6 +38,24 @@ docker run -p 8000:8000 waypointer
 ```
 Multi-stage: a `node` stage runs `npm ci && npm run build`, then the `python:3.11-slim` + `uv` stage copies that build output in. Deployed to Render via `render.yaml` (`dockerfilePath: ./Dockerfile`).
 
+#### Local HTTPS (LAN deployment, e.g. Raspberry Pi)
+`uvicorn` terminates TLS directly (no reverse proxy) when `SSL_KEYFILE`/`SSL_CERTFILE` are set — both are unset on Render, where TLS terminates upstream, so this is opt-in and doesn't touch the production path. Generate a self-signed cert once on the host (SAN must match how you'll browse to it, e.g. an mDNS hostname):
+```bash
+openssl req -x509 -nodes -newkey rsa:2048 \
+  -keyout waypointer.key -out waypointer.crt -days 825 \
+  -subj "/CN=raspberrypi.local" \
+  -addext "subjectAltName=DNS:raspberrypi.local"
+```
+Then bind-mount it in (never bake a private key into the image) and point the env vars at the in-container paths:
+```bash
+docker run -p 8000:8000 \
+  -v ~/waypointer-certs:/certs:ro \
+  -e SSL_KEYFILE=/certs/waypointer.key \
+  -e SSL_CERTFILE=/certs/waypointer.crt \
+  waypointer
+```
+Each browser/device will show a one-time self-signed-cert trust warning on first visit. If the Wahoo "connect" feature is used from this address, `https://<host>:8000/wahoo-callback.html` also needs adding to the registered redirect URIs in the Wahoo developer dashboard — the redirect URI is derived from `window.location.origin` (`frontend/src/lib/wahooAuth.ts`), so switching `http://` → `https://` changes it.
+
 ## Backend architecture (`src/waypointer/`)
 Two endpoints only, both stateless — no DB, no session, no server-side memory between requests. The frontend holds all state client-side and resubmits the original GPX file on every request.
 
