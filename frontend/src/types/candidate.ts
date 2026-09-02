@@ -25,9 +25,15 @@ export interface ExistingWaypoint {
 
 export type HoveredPoi = { kind: "candidate"; id: number } | { kind: "waypoint"; id: number } | null
 
+export interface FailedPoiType {
+  poi_type: string
+  error: string
+}
+
 export interface FindPoisResponse {
   candidates: Candidate[]
   point_count: number
   existing_waypoints: ExistingWaypoint[]
   route_coords: [number, number][]
+  failed_poi_types: FailedPoiType[]
 }

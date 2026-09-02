@@ -25,7 +25,14 @@ import {
 } from "@/lib/settings"
 import { toast, updateToast } from "@/lib/toast"
 import { loadWahooTokens, type WahooTokens } from "@/lib/wahooSettings"
-import type { Candidate, ExistingWaypoint, FindPoisResponse, HoveredPoi, PoiSearchConfig } from "@/types/candidate"
+import type {
+  Candidate,
+  ExistingWaypoint,
+  FailedPoiType,
+  FindPoisResponse,
+  HoveredPoi,
+  PoiSearchConfig,
+} from "@/types/candidate"
 
 type Step = "import" | "find"
 
@@ -35,6 +42,7 @@ type Step = "import" | "find"
 // `findResult?.candidates ?? []` would otherwise produce a fresh array
 // literal each render.
 const EMPTY_CANDIDATES: Candidate[] = []
+const EMPTY_FAILED_POI_TYPES: FailedPoiType[] = []
 
 export default function App() {
   const [file, setFile] = useState<File | null>(null)
@@ -318,6 +326,7 @@ export default function App() {
                     onToggle={handleToggle}
                     onToggleAll={handleToggleAllCandidates}
                     searchedPoiTypes={searchedPoiTypes}
+                    failedPoiTypes={findResult?.failed_poi_types ?? EMPTY_FAILED_POI_TYPES}
                     onHoverCandidate={handleHoverCandidate}
                   />
                 </div>

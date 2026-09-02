@@ -1,10 +1,11 @@
 import { useState } from "react"
+import { TriangleAlert } from "lucide-react"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { PoiListItem } from "@/components/PoiListItem"
 import { POI_TYPES } from "@/lib/poiTypes"
 import { cn } from "@/lib/utils"
-import type { Candidate, PoiSearchConfig } from "@/types/candidate"
+import type { Candidate, FailedPoiType, PoiSearchConfig } from "@/types/candidate"
 
 export interface CandidateChecklistProps {
   candidates: Candidate[]
@@ -12,6 +13,7 @@ export interface CandidateChecklistProps {
   onToggle: (osmId: number) => void
   onToggleAll: (checked: boolean, osmIds: number[]) => void
   searchedPoiTypes: PoiSearchConfig[]
+  failedPoiTypes: FailedPoiType[]
   onHoverCandidate?: (osmId: number | null) => void
 }
 
@@ -21,20 +23,38 @@ export function CandidateChecklist({
   onToggle,
   onToggleAll,
   searchedPoiTypes,
+  failedPoiTypes,
   onHoverCandidate,
 }: CandidateChecklistProps) {
   const [filter, setFilter] = useState<string>("all")
 
+  const failedBanner =
+    failedPoiTypes.length > 0 ? (
+      <p className="flex items-start gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
+        <span>
+          Couldn't search{" "}
+          {failedPoiTypes
+            .map((f) => POI_TYPES.find((cfg) => cfg.key === f.poi_type)?.label ?? f.poi_type)
+            .join(", ")}{" "}
+          - other results below are unaffected. Try searching again.
+        </span>
+      </p>
+    ) : null
+
   if (candidates.length === 0) {
     if (searchedPoiTypes.length === 0) return null
     return (
-      <p className="text-sm text-muted-foreground">
-        No POIs found within your search settings (
-        {searchedPoiTypes
-          .map((s) => `${POI_TYPES.find((cfg) => cfg.key === s.poi_type)?.label ?? s.poi_type} within ${s.max_distance_m}m`)
-          .join(", ")}
-        ).
-      </p>
+      <div className="flex flex-col gap-2">
+        {failedBanner}
+        <p className="text-sm text-muted-foreground">
+          No POIs found within your search settings (
+          {searchedPoiTypes
+            .map((s) => `${POI_TYPES.find((cfg) => cfg.key === s.poi_type)?.label ?? s.poi_type} within ${s.max_distance_m}m`)
+            .join(", ")}
+          ).
+        </p>
+      </div>
     )
   }
 
@@ -56,7 +76,8 @@ export function CandidateChecklist({
   }
 
   return (
-    <div>
+    <div className="flex flex-col gap-2">
+      {failedBanner}
       <h3 className="text-base">Results</h3>
       <div className="flex flex-col rounded-md border p-4 gap-3">
         <div className="flex flex-wrap gap-1.5">
