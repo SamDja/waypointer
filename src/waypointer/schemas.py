@@ -16,6 +16,21 @@ class PoiSearchConfig(BaseModel):
     max_distance_m: float
 
 
+class SearchRange(BaseModel):
+    # An inclusive index range into the submitted route's coordinate list
+    # (gpx_io.route_coordinates order). When given, /api/find-pois builds its
+    # Overpass query from only this slice of the route - used by the route
+    # planner after extending a route, so re-searching costs a query covering
+    # the newly added stretch instead of the whole route.
+    #
+    # Deliberately scopes *only* the upstream query: every distance in the
+    # response is still measured against the full route, so there remains
+    # exactly one place (geometry.project_onto_polyline_indexed_m) that
+    # computes distance-from-route and distance-from-start.
+    start_index: int
+    end_index: int
+
+
 class ExistingWaypoint(BaseModel):
     # index is this waypoint's position in the uploaded GPX's <wpt> list,
     # in document order - stable within one find/save round trip since the
@@ -54,6 +69,15 @@ class FindPoisResponse(BaseModel):
     existing_waypoints: list[ExistingWaypoint]
     route_coords: list[tuple[float, float]]
     failed_poi_types: list[FailedPoiType] = []
+
+
+class RouteLegResponse(BaseModel):
+    # One road-snapped leg between two planner anchors. coords/elevations are
+    # index-parallel (see routing.RoutedLeg); elevations carries None where
+    # the routing engine gave a 2D point, matching route_elevations().
+    coords: list[tuple[float, float]]
+    elevations: list[float | None]
+    distance_m: float
 
 
 class WahooRoutePayload(BaseModel):

@@ -23,6 +23,20 @@ export interface ExistingWaypoint {
   distance_from_start_m: number
 }
 
+// Inclusive index range into the submitted route's coordinate list, scoping
+// /api/find-pois' Overpass query to part of the route (see schemas.py's
+// SearchRange - distances are still measured against the whole route).
+export interface SearchRange {
+  start_index: number
+  end_index: number
+}
+
+export interface RouteLegResponse {
+  coords: [number, number][]
+  elevations: (number | null)[]
+  distance_m: number
+}
+
 export type HoveredPoi = { kind: "candidate"; id: number } | { kind: "waypoint"; id: number } | null
 
 export interface FailedPoiType {

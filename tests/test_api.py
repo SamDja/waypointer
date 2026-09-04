@@ -15,7 +15,11 @@ from waypointer.fit_io import build_course_fit_bytes
 from waypointer.geometry import project_onto_polyline_m
 from waypointer.main import app
 from waypointer.osm import OVERPASS_URL
-from waypointer.rate_limit import REQUESTS_PER_WINDOW
+from waypointer.rate_limit import (
+    OVERPASS_REQUESTS_PER_WINDOW,
+    ROUTING_REQUESTS_PER_WINDOW,
+)
+from waypointer.routing import ROUTING_URL
 
 client = TestClient(app)
 
@@ -655,14 +659,180 @@ def test_wahoo_import_route_rejects_lookalike_host():
     assert response.status_code == 400
 
 
+def _route_leg_form(profile: str = "fastbike-lowtraffic") -> dict:
+    return {
+        "start_lat": 47.376899,
+        "start_lon": 8.541699,
+        "end_lat": 47.38,
+        "end_lon": 8.55,
+        "profile": profile,
+    }
+
+
+@responses.activate
+def test_route_leg_returns_polyline_with_elevations(brouter_response_json):
+    responses.add(responses.GET, ROUTING_URL, json=brouter_response_json, status=200)
+    response = client.post("/api/route-leg", data=_route_leg_form())
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["coords"][0] == pytest.approx([47.376899, 8.541699])
+    assert len(data["elevations"]) == len(data["coords"])
+    assert data["elevations"][0] == pytest.approx(407.75)
+    assert data["distance_m"] == pytest.approx(1840.0)
+
+
+def test_route_leg_rejects_unknown_profile():
+    response = client.post("/api/route-leg", data=_route_leg_form(profile="car-fast"))
+    assert response.status_code == 400
+
+
+@responses.activate
+def test_route_leg_maps_routing_failure_to_502():
+    responses.add(responses.GET, ROUTING_URL, body="upstream exploded", status=500)
+    response = client.post("/api/route-leg", data=_route_leg_form())
+    assert response.status_code == 502
+
+
+@responses.activate
+def test_find_pois_search_range_narrows_overpass_query_only(
+    sample_route_bytes, overpass_response_json
+):
+    """The whole point of search_range: the upstream query covers only the
+    requested slice, while every distance still comes from the full route.
+
+    Node 1001 sits by the route's *first* point, so a search_range covering
+    only the last two points must leave it out of the Overpass `around`
+    clause - yet the candidate that is returned must still report a
+    distance_from_start_m measured from the full route's start, not from the
+    slice's start.
+    """
+    responses.add(responses.POST, OVERPASS_URL, json=overpass_response_json, status=200)
+    response = client.post(
+        "/api/find-pois",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={
+            "poi_config": json.dumps([{"poi_type": "water", "max_distance_m": 100}]),
+            "search_range": json.dumps({"start_index": 1, "end_index": 2}),
+        },
+    )
+    assert response.status_code == 200
+
+    sent_query = responses.calls[0].request.body
+    if isinstance(sent_query, bytes):
+        sent_query = sent_query.decode()
+    # Only points 1 and 2 of the 3-point fixture route are in the around clause.
+    assert "48.857,2.353" in sent_query
+    assert "48.8575,2.354" in sent_query
+    assert "48.8566,2.3522" not in sent_query
+
+    # ...but distances are still measured against all 3 points. Node 1001 is
+    # nearest the route's first point, so a slice-relative distance_from_start_m
+    # would be 0 here; the full-route value is not.
+    full_route = [(48.8566, 2.3522), (48.857, 2.353), (48.8575, 2.354)]
+    _, expected_from_start = project_onto_polyline_m((48.8567, 2.3524), full_route)
+    candidate = next(c for c in response.json()["candidates"] if c["osm_id"] == 1001)
+    assert candidate["distance_from_start_m"] == pytest.approx(expected_from_start)
+
+
+@responses.activate
+def test_find_pois_search_range_still_returns_the_whole_route_coords(
+    sample_route_bytes, overpass_response_json
+):
+    """route_coords is what the frontend draws as *the route*, so a ranged
+    search must still describe the whole thing - returning the sub-range
+    here would visibly truncate the map's route line after a re-search."""
+    responses.add(responses.POST, OVERPASS_URL, json=overpass_response_json, status=200)
+    ranged = client.post(
+        "/api/find-pois",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"search_range": json.dumps({"start_index": 2, "end_index": 2})},
+    )
+    whole = client.post(
+        "/api/find-pois",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+    )
+    assert ranged.json()["route_coords"] == whole.json()["route_coords"]
+    assert ranged.json()["point_count"] == whole.json()["point_count"]
+
+
+@responses.activate
+def test_find_pois_without_search_range_queries_whole_route(
+    sample_route_bytes, overpass_response_json
+):
+    responses.add(responses.POST, OVERPASS_URL, json=overpass_response_json, status=200)
+    client.post(
+        "/api/find-pois",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"poi_config": json.dumps([{"poi_type": "water", "max_distance_m": 100}])},
+    )
+    sent_query = responses.calls[0].request.body
+    if isinstance(sent_query, bytes):
+        sent_query = sent_query.decode()
+    assert "48.8566,2.3522" in sent_query
+
+
+@pytest.mark.parametrize(
+    "bad_range",
+    [
+        {"start_index": 1, "end_index": 0},
+        {"start_index": -1, "end_index": 2},
+        {"start_index": 0, "end_index": 99},
+    ],
+)
+def test_find_pois_rejects_out_of_range_search_range(sample_route_bytes, bad_range):
+    response = client.post(
+        "/api/find-pois",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"search_range": json.dumps(bad_range)},
+    )
+    assert response.status_code == 400
+
+
+def test_find_pois_rejects_malformed_search_range(sample_route_bytes):
+    response = client.post(
+        "/api/find-pois",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"search_range": "not json"},
+    )
+    assert response.status_code == 400
+
+
 @responses.activate
 def test_rate_limit_blocks_after_threshold(sample_route_bytes):
     responses.add(responses.POST, OVERPASS_URL, json={"elements": []}, status=200)
     last_status = None
-    for _ in range(REQUESTS_PER_WINDOW + 1):
+    for _ in range(OVERPASS_REQUESTS_PER_WINDOW + 1):
         resp = client.post(
             "/api/find-pois",
             files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
         )
         last_status = resp.status_code
     assert last_status == 429
+
+
+@responses.activate
+def test_rate_limit_buckets_are_independent(sample_route_bytes, brouter_response_json):
+    """Exhausting the Overpass budget must leave route planning usable, and
+    vice versa - the whole reason rate_limit.py keys on (bucket, ip)."""
+    responses.add(responses.POST, OVERPASS_URL, json={"elements": []}, status=200)
+    responses.add(responses.GET, ROUTING_URL, json=brouter_response_json, status=200)
+
+    for _ in range(OVERPASS_REQUESTS_PER_WINDOW + 1):
+        client.post(
+            "/api/find-pois",
+            files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        )
+
+    routing_response = client.post(
+        "/api/route-leg",
+        data={
+            "start_lat": 47.376899,
+            "start_lon": 8.541699,
+            "end_lat": 47.38,
+            "end_lon": 8.55,
+            "profile": "fastbike-lowtraffic",
+        },
+    )
+    assert routing_response.status_code == 200
+    assert ROUTING_REQUESTS_PER_WINDOW > OVERPASS_REQUESTS_PER_WINDOW

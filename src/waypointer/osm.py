@@ -2,11 +2,11 @@
 
 import hashlib
 import os
-import threading
-import time
 from dataclasses import dataclass
 
 import requests
+
+from waypointer.ttl_cache import TTLCache
 
 # Defaults to a public mirror; set OVERPASS_URL to point at a self-hosted
 # instance instead (e.g. http://overpass:80/api/interpreter in Docker Compose).
@@ -52,29 +52,7 @@ def build_overpass_query(
     )
 
 
-class _TTLCache:
-    def __init__(self, ttl_s: float) -> None:
-        self._ttl_s = ttl_s
-        self._lock = threading.Lock()
-        self._store: dict[str, tuple[float, list[OsmNode]]] = {}
-
-    def get(self, key: str) -> list[OsmNode] | None:
-        with self._lock:
-            entry = self._store.get(key)
-            if entry is None:
-                return None
-            expires_at, value = entry
-            if expires_at < time.monotonic():
-                del self._store[key]
-                return None
-            return value
-
-    def set(self, key: str, value: list[OsmNode]) -> None:
-        with self._lock:
-            self._store[key] = (time.monotonic() + self._ttl_s, value)
-
-
-_cache = _TTLCache(CACHE_TTL_S)
+_cache: TTLCache[list[OsmNode]] = TTLCache(CACHE_TTL_S)
 
 
 def _cache_key(query: str, url: str) -> str:

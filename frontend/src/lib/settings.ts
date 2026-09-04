@@ -5,6 +5,7 @@ const SETTINGS_KEY = "waypointer.settings"
 const POI_SEARCH_KEY = "waypointer.poiSearch"
 const AVG_SPEED_KEY = "waypointer.avgSpeedKmh"
 const MAP_STYLE_KEY = "waypointer.mapStyle"
+const OFF_ROUTE_THRESHOLD_KEY = "waypointer.offRouteThreshold"
 
 export interface DeviceSettings {
   device: string
@@ -118,4 +119,25 @@ export function loadMapStyleKey(): string {
 
 export function saveMapStyleKey(key: string): void {
   localStorage.setItem(MAP_STYLE_KEY, key)
+}
+
+export const DEFAULT_OFF_ROUTE_THRESHOLD_M = 500
+
+// Distinct from the settings above: this is an edit-time concern. When a
+// route edit strands a waypoint or a selected POI this far from the route,
+// it gets auto-unchecked (never deleted) after an explicit confirmation -
+// see OffRouteDialog. Editable from inside that dialog, where its effect is
+// visible, rather than buried in a settings panel.
+export function loadOffRouteThresholdM(): number {
+  try {
+    const raw = localStorage.getItem(OFF_ROUTE_THRESHOLD_KEY)
+    const parsed = raw ? Number(raw) : NaN
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_OFF_ROUTE_THRESHOLD_M
+  } catch {
+    return DEFAULT_OFF_ROUTE_THRESHOLD_M
+  }
+}
+
+export function saveOffRouteThresholdM(thresholdM: number): void {
+  localStorage.setItem(OFF_ROUTE_THRESHOLD_KEY, String(thresholdM))
 }

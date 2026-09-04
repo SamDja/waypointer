@@ -49,6 +49,90 @@ function extractRouteCoords(doc: Document): [number, number][] {
   return coords
 }
 
+const GPX_NS = "http://www.topografix.com/GPX/1/1"
+
+// Retained by the route planner so an edited import can be re-serialized
+// from the original document (see buildGpx) rather than rebuilt from
+// scratch, which would drop everything that isn't the track. Returns null on
+// a parse failure, matching the other parsers' best-effort contract.
+export function parseGpxDocument(xmlText: string): Document | null {
+  try {
+    const doc = new DOMParser().parseFromString(xmlText, "application/xml")
+    if (doc.getElementsByTagName("parsererror").length > 0) return null
+    return doc
+  } catch {
+    return null
+  }
+}
+
+export interface BuildGpxOptions {
+  coords: [number, number][]
+  // Index-parallel to coords; a null entry emits no <ele>, so "unknown"
+  // stays distinguishable from a genuine 0m (see route_elevations()).
+  elevations: (number | null)[]
+  name: string
+  // The imported file's parsed document, when the route being written is an
+  // edited import. Its <trk>/<rte> elements are replaced and everything else
+  // - crucially the pre-existing <wpt> entries and their waypointer:
+  // extension markers, which backend dedup and type inference depend on - is
+  // carried through untouched. Waypoint document order is preserved, so
+  // ExistingWaypoint.index stays valid across an edit.
+  sourceDoc?: Document | null
+}
+
+/**
+ * Serializes a planned or edited route to GPX text.
+ *
+ * The route planner's whole integration strategy rests on this: every
+ * downstream consumer (find-pois, save, the Wahoo push) takes a GPX file, so
+ * a drawn route just becomes one, exactly as the Wahoo import converts FIT to
+ * GPX before re-entering the same pipeline.
+ */
+export function buildGpx({ coords, elevations, name, sourceDoc }: BuildGpxOptions): string {
+  const doc = sourceDoc
+    ? (sourceDoc.cloneNode(true) as Document)
+    : new DOMParser().parseFromString(
+        `<?xml version="1.0" encoding="UTF-8"?>\n<gpx xmlns="${GPX_NS}" version="1.1" creator="waypointer"></gpx>`,
+        "application/xml"
+      )
+
+  const root = doc.documentElement
+  // Replace whatever track/route geometry was there - <wpt> and metadata
+  // elements are deliberately left alone.
+  for (const tag of ["trk", "rte"]) {
+    const existing = [...root.getElementsByTagName(tag)]
+    for (const el of existing) el.parentNode?.removeChild(el)
+  }
+
+  const trk = doc.createElementNS(GPX_NS, "trk")
+  const trkName = doc.createElementNS(GPX_NS, "name")
+  trkName.textContent = name
+  trk.appendChild(trkName)
+
+  const trkseg = doc.createElementNS(GPX_NS, "trkseg")
+  coords.forEach(([lat, lon], i) => {
+    const trkpt = doc.createElementNS(GPX_NS, "trkpt")
+    trkpt.setAttribute("lat", String(lat))
+    trkpt.setAttribute("lon", String(lon))
+    const ele = elevations[i]
+    if (ele !== null && ele !== undefined && Number.isFinite(ele)) {
+      const eleEl = doc.createElementNS(GPX_NS, "ele")
+      eleEl.textContent = String(ele)
+      trkpt.appendChild(eleEl)
+    }
+    trkseg.appendChild(trkpt)
+  })
+  trk.appendChild(trkseg)
+  root.appendChild(trk)
+
+  return new XMLSerializer().serializeToString(doc)
+}
+
+/** Wraps buildGpx's output in a File, ready for handleFileChange. */
+export function buildGpxFile(options: BuildGpxOptions, filename: string): File {
+  return new File([buildGpx(options)], filename, { type: "application/gpx+xml" })
+}
+
 // Best-effort client-side parse for an instant map preview right after
 // import, before the backend has computed the authoritative route_coords.
 // Returns [] on any parse failure - this is not validation, the backend

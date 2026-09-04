@@ -1,4 +1,10 @@
-import type { Candidate, FindPoisResponse, PoiSearchConfig } from "@/types/candidate"
+import type {
+  Candidate,
+  FindPoisResponse,
+  PoiSearchConfig,
+  RouteLegResponse,
+  SearchRange,
+} from "@/types/candidate"
 
 export class ApiError extends Error {}
 
@@ -7,16 +13,44 @@ async function errorDetail(response: Response, fallback: string): Promise<string
   return data && typeof data.detail === "string" ? data.detail : fallback
 }
 
-export async function findPois(gpxFile: File, poiConfig: PoiSearchConfig[]): Promise<FindPoisResponse> {
+export async function findPois(
+  gpxFile: File,
+  poiConfig: PoiSearchConfig[],
+  // Narrows only which stretch of the route the Overpass query covers - the
+  // route planner passes the newly extended span so a re-search after an
+  // edit doesn't re-query the whole route. Every distance in the response is
+  // still measured against the full route (see schemas.SearchRange).
+  searchRange?: SearchRange,
+): Promise<FindPoisResponse> {
   const formData = new FormData()
   formData.append("gpx_file", gpxFile)
   formData.append("poi_config", JSON.stringify(poiConfig))
+  if (searchRange) formData.append("search_range", JSON.stringify(searchRange))
 
   const response = await fetch("/api/find-pois", { method: "POST", body: formData })
   if (!response.ok) {
     throw new ApiError(await errorDetail(response, "Request failed."))
   }
   return (await response.json()) as FindPoisResponse
+}
+
+export async function routeLeg(
+  start: [number, number],
+  end: [number, number],
+  profile: string,
+): Promise<RouteLegResponse> {
+  const formData = new FormData()
+  formData.append("start_lat", String(start[0]))
+  formData.append("start_lon", String(start[1]))
+  formData.append("end_lat", String(end[0]))
+  formData.append("end_lon", String(end[1]))
+  formData.append("profile", profile)
+
+  const response = await fetch("/api/route-leg", { method: "POST", body: formData })
+  if (!response.ok) {
+    throw new ApiError(await errorDetail(response, "Couldn't plan that stretch of route."))
+  }
+  return (await response.json()) as RouteLegResponse
 }
 
 export interface SaveParams {

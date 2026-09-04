@@ -46,13 +46,16 @@ from waypointer.gpx_io import (
 )
 from waypointer.osm import USER_AGENT, OsmNode, OverpassError, build_overpass_query, query_overpass
 from waypointer.poi_types import DEFAULT_VISIBLE_POI_TYPES, POI_TYPES, clamp_distance_m
-from waypointer.rate_limit import rate_limit
+from waypointer.rate_limit import rate_limit, routing_rate_limit
+from waypointer.routing import RoutingError, route_leg
 from waypointer.schemas import (
     Candidate,
     ExistingWaypoint,
     FailedPoiType,
     FindPoisResponse,
     PoiSearchConfig,
+    RouteLegResponse,
+    SearchRange,
     WahooRoutePayload,
 )
 
@@ -74,6 +77,7 @@ app = FastAPI(title="Waypointer")
 _selected_candidates_adapter = TypeAdapter(list[Candidate])
 _poi_config_adapter = TypeAdapter(list[PoiSearchConfig])
 _discarded_indices_adapter = TypeAdapter(list[int])
+_search_range_adapter = TypeAdapter(SearchRange)
 _existing_waypoint_types_adapter = TypeAdapter(dict[str, str])
 
 
@@ -103,6 +107,7 @@ def _default_poi_config() -> list[PoiSearchConfig]:
 async def find_pois(
     gpx_file: UploadFile,
     poi_config: str | None = Form(None),
+    search_range: str | None = Form(None),
 ) -> FindPoisResponse:
     gpx, coords = await _read_gpx_upload(gpx_file)
 
@@ -114,7 +119,38 @@ async def find_pois(
         except ValidationError as exc:
             raise HTTPException(status_code=400, detail=f"Invalid poi_config: {exc}") from exc
 
-    simplified = simplify_rdp(coords, tolerance_m=SIMPLIFY_TOLERANCE_M)
+    # search_range narrows only which part of the route the Overpass query
+    # covers (the route planner uses it to re-search just a newly appended
+    # stretch). Every distance below is still measured against the full
+    # route, and is_duplicate_candidate still sees the whole file, so a
+    # ranged search returns exactly the same values a whole-route search
+    # would for the POIs it does find.
+    search_coords = coords
+    if search_range is not None:
+        try:
+            parsed_range = _search_range_adapter.validate_json(search_range)
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid search_range: {exc}") from exc
+        if not 0 <= parsed_range.start_index <= parsed_range.end_index < len(coords):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"search_range must satisfy 0 <= start_index <= end_index < {len(coords)}."
+                ),
+            )
+        search_coords = coords[parsed_range.start_index : parsed_range.end_index + 1]
+
+    # Two separate simplifications when a range is given: the Overpass query
+    # covers only the requested stretch, but route_coords below is what the
+    # frontend draws as *the route*, so it must always describe the whole
+    # thing - feeding it the sub-range would visibly truncate the map's route
+    # line after a ranged re-search.
+    route_simplified = simplify_rdp(coords, tolerance_m=SIMPLIFY_TOLERANCE_M)
+    search_simplified = (
+        route_simplified
+        if search_coords is coords
+        else simplify_rdp(search_coords, tolerance_m=SIMPLIFY_TOLERANCE_M)
+    )
     route_index = build_polyline_index(coords)
 
     # Validate and build every query up front - bad poi_type/tag_filter
@@ -139,7 +175,9 @@ async def find_pois(
         # the exact radius_m against the full-resolution route, so this
         # can't introduce false positives, only prevents false negatives.
         overpass_radius_m = radius_m + SIMPLIFY_TOLERANCE_M
-        query = build_overpass_query(simplified, tag_filter=cfg.tag_filter, radius_m=math.ceil(overpass_radius_m))
+        query = build_overpass_query(
+            search_simplified, tag_filter=cfg.tag_filter, radius_m=math.ceil(overpass_radius_m)
+        )
         prepared.append((entry, radius_m, query))
 
     # Fire all Overpass calls concurrently instead of one-at-a-time - N
@@ -217,7 +255,7 @@ async def find_pois(
         candidates=candidates,
         point_count=len(coords),
         existing_waypoints=existing_waypoints,
-        route_coords=simplified,
+        route_coords=route_simplified,
         failed_poi_types=failed_poi_types,
     )
 
@@ -463,6 +501,40 @@ def wahoo_import_route(file_url: str = Form(...)) -> Response:
         content=gpx_bytes,
         media_type="application/gpx+xml",
         headers={"Content-Disposition": 'attachment; filename="wahoo_route.gpx"'},
+    )
+
+
+@app.post(
+    "/api/route-leg",
+    response_model=RouteLegResponse,
+    dependencies=[Depends(routing_rate_limit)],
+)
+async def route_leg_endpoint(
+    start_lat: float = Form(...),
+    start_lon: float = Form(...),
+    end_lat: float = Form(...),
+    end_lon: float = Form(...),
+    profile: str = Form(...),
+) -> RouteLegResponse:
+    """Road-snaps one leg between two route-planner anchors.
+
+    Proxied rather than called from the browser so the routing provider stays
+    swappable server-side (ROUTING_URL), the leg cache is shared across
+    visitors, and the per-IP budget in rate_limit.py actually applies - the
+    same reasons /api/find-pois fronts Overpass.
+    """
+    try:
+        # route_leg's requests.get blocks; offload it so a slow routing
+        # response doesn't stall the event loop, as find_pois does for
+        # query_overpass.
+        leg = await asyncio.to_thread(route_leg, (start_lat, start_lon), (end_lat, end_lon), profile)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RoutingError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to plan that leg: {exc}") from exc
+
+    return RouteLegResponse(
+        coords=leg.coords, elevations=leg.elevations, distance_m=leg.distance_m
     )
 
 

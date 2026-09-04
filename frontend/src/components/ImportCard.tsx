@@ -28,6 +28,7 @@ import {
   Clock,
   FileUp,
   FileText,
+  PencilLine,
   RulerDimensionLine,
   Trash2Icon,
   TrendingDown,
@@ -54,6 +55,11 @@ export interface ImportCardProps {
   wahooTokens: WahooTokens | null
   onWahooTokensChange: (tokens: WahooTokens | null) => void
   onHoverWaypoint?: (index: number | null) => void
+  // Route planning is a third way in alongside GPX upload and Wahoo import,
+  // and the same mode edits a route that's already loaded.
+  isPlanning: boolean
+  onStartPlanning: () => void
+  onStopPlanning: () => void
 }
 
 export function ImportCard({
@@ -75,6 +81,9 @@ export function ImportCard({
   wahooTokens,
   onWahooTokensChange,
   onHoverWaypoint,
+  isPlanning,
+  onStartPlanning,
+  onStopPlanning,
 }: ImportCardProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [isDragActive, setIsDragActive] = useState(false)
@@ -260,11 +269,27 @@ export function ImportCard({
             <Trash2Icon className="size-4" />
             Remove route
           </Button>
+          <Button
+            variant={isPlanning ? "default" : "secondary"}
+            className="w-fit"
+            onClick={isPlanning ? onStopPlanning : onStartPlanning}
+          >
+            <PencilLine className="size-4" />
+            {isPlanning ? "Done editing" : "Edit route"}
+          </Button>
           <Button className="w-fit grow" onClick={handleNext}>
             Next
             <ArrowRightIcon className="size-4" />
           </Button>
         </div>
+
+        {isPlanning && (
+          <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+            Click the map to add a point to the end of the route, or drag the route line to add one in the
+            middle. Drag any point to move it. Drag the start or end marker to move that end — or drop it
+            back onto the route to trim there.
+          </p>
+        )}
 
         <AlertDialog open={showRemoveConfirm} onOpenChange={setShowRemoveConfirm}>
           <AlertDialogContent>
@@ -337,6 +362,11 @@ export function ImportCard({
           {isConnectingWahoo ? "Connecting…" : "Connect Wahoo to import a route"}
         </Button>
       )}
+
+      <Button variant="secondary" className="w-full" onClick={onStartPlanning}>
+        <PencilLine className="size-4" />
+        Plan a route on the map
+      </Button>
 
       <WahooRoutesDialog
         open={showWahooImport}

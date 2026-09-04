@@ -21,6 +21,13 @@ export interface MapStyleConfig {
   key: string
   label: string
   styleUrl: string
+  // BRouter profile the route planner routes with while this style is
+  // active. Deliberately lives here rather than behind its own selector:
+  // this registry is already an activity list (see the commented-out gravel/
+  // MTB/hiking entries below), so enabling one of those brings its routing
+  // along in the same entry. Must be a member of routing.py's
+  // ALLOWED_PROFILES, which the backend checks before forwarding.
+  routingProfile: string
   // Road-color legend rows for this style. Omit to hide the "Road colors"
   // section for this style entirely - there's no separate boolean flag to
   // keep in sync with this.
@@ -78,6 +85,10 @@ export const MAP_STYLES: MapStyleConfig[] = [
     key: "road_cycling",
     label: "Road Cycling",
     styleUrl: "/map-styles/road-cycling.json",
+    // Road-bike oriented (prefers paved, avoids tracks) while explicitly
+    // penalizing high-traffic roads - the same judgement road-cycling.json
+    // makes visually by dimming unpaved and bike-prohibited ways.
+    routingProfile: "fastbike-lowtraffic",
     roadLegend: ROAD_CYCLING_LEGEND,
   },
   // { key: "gravel", label: "Gravel", styleUrl: "https://tiles.openfreemap.org/styles/bright" },
@@ -88,3 +99,7 @@ export const MAP_STYLES: MapStyleConfig[] = [
 ]
 
 export const DEFAULT_MAP_STYLE_KEY = "road_cycling"
+
+export function routingProfileForStyle(key: string): string {
+  return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).routingProfile
+}

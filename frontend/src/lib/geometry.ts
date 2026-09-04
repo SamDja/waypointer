@@ -47,20 +47,38 @@ function pointToSegmentProjection(
   return { distanceM: Math.hypot(px - closestX, py - closestY), t }
 }
 
+export interface PolylineProjection {
+  distanceFromRouteM: number
+  distanceFromStartM: number
+  // Index of the polyline segment (i, i+1) the projection landed on. Has no
+  // backend equivalent - it exists so the route planner can tell whether an
+  // edit could possibly have changed a cached distance without re-measuring
+  // against the whole route (see lib/routePlanner.ts's incremental updates).
+  // -1 for a degenerate polyline with fewer than 2 points.
+  nearestSegmentIndex: number
+}
+
 // Port of geometry.py's project_onto_polyline_m: p's perpendicular distance
 // to the nearest segment of polyline, and the cumulative distance along
 // polyline from its first point to that nearest projection.
 export function projectOntoPolylineM(
   p: [number, number],
   polyline: [number, number][]
-): { distanceFromRouteM: number; distanceFromStartM: number } {
-  if (polyline.length === 0) return { distanceFromRouteM: NaN, distanceFromStartM: NaN }
+): PolylineProjection {
+  if (polyline.length === 0) {
+    return { distanceFromRouteM: NaN, distanceFromStartM: NaN, nearestSegmentIndex: -1 }
+  }
   if (polyline.length === 1) {
-    return { distanceFromRouteM: haversineM(p[0], p[1], polyline[0][0], polyline[0][1]), distanceFromStartM: 0 }
+    return {
+      distanceFromRouteM: haversineM(p[0], p[1], polyline[0][0], polyline[0][1]),
+      distanceFromStartM: 0,
+      nearestSegmentIndex: -1,
+    }
   }
 
   let bestDistanceM = Infinity
   let bestDistanceFromStartM = 0
+  let bestSegmentIndex = 0
   let cumulativeM = 0
   for (let i = 0; i < polyline.length - 1; i++) {
     const a = polyline[i]
@@ -70,10 +88,55 @@ export function projectOntoPolylineM(
     if (distanceM < bestDistanceM) {
       bestDistanceM = distanceM
       bestDistanceFromStartM = cumulativeM + t * segmentLenM
+      bestSegmentIndex = i
     }
     cumulativeM += segmentLenM
   }
-  return { distanceFromRouteM: bestDistanceM, distanceFromStartM: bestDistanceFromStartM }
+  return {
+    distanceFromRouteM: bestDistanceM,
+    distanceFromStartM: bestDistanceFromStartM,
+    nearestSegmentIndex: bestSegmentIndex,
+  }
+}
+
+export interface Bbox {
+  minLat: number
+  minLon: number
+  maxLat: number
+  maxLon: number
+}
+
+// Bounding box of coords, grown by padM in every direction. Used as a cheap
+// prefilter before the exact distance check - a point outside the padded box
+// cannot be within padM of any point inside it. The longitude padding uses
+// the box's own latitude for the cos() term, deliberately taking whichever
+// bound is closer to the equator so the box is never under-padded.
+export function bboxOfCoords(coords: [number, number][], padM: number): Bbox | null {
+  if (coords.length === 0) return null
+  let minLat = Infinity
+  let minLon = Infinity
+  let maxLat = -Infinity
+  let maxLon = -Infinity
+  for (const [lat, lon] of coords) {
+    minLat = Math.min(minLat, lat)
+    minLon = Math.min(minLon, lon)
+    maxLat = Math.max(maxLat, lat)
+    maxLon = Math.max(maxLon, lon)
+  }
+  const latPad = (padM / EARTH_RADIUS_M) * (180 / Math.PI)
+  const widestLat = Math.min(Math.abs(minLat), Math.abs(maxLat))
+  const cosLat = Math.max(Math.cos((widestLat * Math.PI) / 180), 1e-6)
+  const lonPad = latPad / cosLat
+  return {
+    minLat: minLat - latPad,
+    minLon: minLon - lonPad,
+    maxLat: maxLat + latPad,
+    maxLon: maxLon + lonPad,
+  }
+}
+
+export function isInBbox([lat, lon]: [number, number], box: Bbox): boolean {
+  return lat >= box.minLat && lat <= box.maxLat && lon >= box.minLon && lon <= box.maxLon
 }
 
 // Shared display formatting for "from track"/"from start" distances in
