@@ -69,7 +69,7 @@ SIMPLIFY_TOLERANCE_M = 8.0
 # host suffix rather than fetching arbitrary URLs (SSRF guard).
 WAHOO_FILE_HOST_SUFFIX = ".wahooligan.com"
 
-app = FastAPI(title="Sullavia")
+app = FastAPI(title="Sulla Via")
 
 _selected_candidates_adapter = TypeAdapter(list[Candidate])
 _poi_config_adapter = TypeAdapter(list[PoiSearchConfig])

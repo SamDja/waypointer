@@ -255,7 +255,7 @@ export default function App() {
       <header className="flex shrink-0 items-center justify-between gap-1.5 border-b px-4 py-2">
         <div className="flex items-center gap-1.5">
           <img src="favicon.svg" className="w-6" />
-          <h1 className="text-lg font-semibold">Sullavia</h1>
+          <h1 className="text-lg font-semibold">Sulla Via</h1>
         </div>
         <WahooProfileMenu wahooTokens={wahooTokens} onWahooTokensChange={setWahooTokens} />
       </header>
