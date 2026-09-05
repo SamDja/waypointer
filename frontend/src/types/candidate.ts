@@ -13,6 +13,20 @@ export interface PoiSearchConfig {
   max_distance_m: number
 }
 
+// Resolves a basemap POI icon click to a real OSM node (see
+// schemas.py's PoiLookupResult) - carries the full raw tag dict, unlike
+// Candidate, so the map popup can show as much OSM info as exists plus an
+// edit link.
+export interface PoiLookupResult {
+  osm_id: number
+  osm_type: string
+  poi_type: string
+  name: string | null
+  lat: number
+  lon: number
+  tags: Record<string, string>
+}
+
 export interface ExistingWaypoint {
   index: number
   name: string | null

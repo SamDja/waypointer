@@ -3,13 +3,13 @@ import { CandidateChecklist } from "@/components/CandidateChecklist"
 import { FeedbackWidget } from "@/components/FeedbackWidget"
 import { FindPoisCard } from "@/components/FindPoisCard"
 import { ImportCard } from "@/components/ImportCard"
-import { RouteMap } from "@/components/RouteMap"
+import { RouteMap, type PendingPoiLookup } from "@/components/RouteMap"
 import { SaveCard } from "@/components/SaveCard"
 import { StepCard } from "@/components/StepCard"
 import { Toaster } from "@/components/Toaster"
 import { WahooProfileMenu } from "@/components/WahooProfileMenu"
-import { ApiError, findPois } from "@/lib/api"
-import { elevationGainLossM, totalDistanceM } from "@/lib/geometry"
+import { ApiError, findPois, lookupPoi } from "@/lib/api"
+import { elevationGainLossM, projectOntoPolylineM, totalDistanceM } from "@/lib/geometry"
 import { parseExistingWaypointsFromGpx, parseRouteCoordsFromGpx, parseRouteElevationsFromGpx } from "@/lib/gpx"
 import {
   loadAvgSpeedKmh,
@@ -51,6 +51,17 @@ export default function App() {
   const [previewExistingWaypoints, setPreviewExistingWaypoints] = useState<ExistingWaypoint[]>([])
   const [findResult, setFindResult] = useState<FindPoisResponse | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  // POIs added by clicking a basemap icon rather than via /api/find-pois -
+  // kept as a sibling to findResult (not merged into it) so a click works
+  // even before a search has run, or before a route is loaded at all. See
+  // allCandidates below, which is what everything downstream actually reads.
+  const [clickAddedCandidates, setClickAddedCandidates] = useState<Candidate[]>([])
+  // Raw OSM tags for click-added candidates, keyed by osm_id - not part of
+  // Candidate itself (which round-trips through /api/save), consumed only
+  // by RouteMap's marker popup so a reopened click-added marker still shows
+  // its tags/edit link.
+  const [clickAddedTags, setClickAddedTags] = useState<Record<number, Record<string, string>>>({})
+  const [pendingLookup, setPendingLookup] = useState<PendingPoiLookup | null>(null)
   const [searchedPoiTypes, setSearchedPoiTypes] = useState<PoiSearchConfig[]>([])
   const [keptWaypointIndices, setKeptWaypointIndices] = useState<Set<number>>(new Set())
   const [hoveredPoi, setHoveredPoi] = useState<HoveredPoi>(null)
@@ -172,6 +183,49 @@ export default function App() {
     setHoveredPoi(osmId === null ? null : { kind: "candidate", id: osmId })
   }
 
+  async function handleBasemapPoiClick(lat: number, lon: number, poiType: string) {
+    setPendingLookup({ lat, lon, poiType, status: "loading" })
+    try {
+      const result = await lookupPoi(lat, lon, poiType)
+      setPendingLookup({ lat, lon, poiType, status: "done", result })
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        setPendingLookup({ lat, lon, poiType, status: "not_found" })
+      } else {
+        setPendingLookup({ lat, lon, poiType, status: "error" })
+        toast(err instanceof ApiError ? err.message : "Couldn't look up that point of interest.", "error")
+      }
+    }
+  }
+
+  function handleConfirmPendingLookup() {
+    if (pendingLookup?.status !== "done" || !pendingLookup.result) return
+    const result = pendingLookup.result
+    const routeCoords = findResult?.route_coords ?? previewRouteCoords
+    const [distanceM, distanceFromStartM] = routeCoords.length
+      ? (() => {
+          const projected = projectOntoPolylineM([result.lat, result.lon], routeCoords)
+          return [projected.distanceFromRouteM, projected.distanceFromStartM]
+        })()
+      : [0, 0]
+
+    const candidate: Candidate = {
+      osm_id: result.osm_id,
+      poi_type: result.poi_type,
+      name: result.name,
+      lat: result.lat,
+      lon: result.lon,
+      distance_m: distanceM,
+      distance_from_start_m: distanceFromStartM,
+    }
+    setClickAddedCandidates((prev) =>
+      prev.some((c) => c.osm_id === result.osm_id) ? prev : [...prev, candidate],
+    )
+    setClickAddedTags((prev) => ({ ...prev, [result.osm_id]: result.tags }))
+    setSelectedIds((prev) => new Set(prev).add(result.osm_id))
+    setPendingLookup(null)
+  }
+
   function handleHoverWaypoint(index: number | null) {
     setHoveredPoi(index === null ? null : { kind: "waypoint", id: index })
   }
@@ -247,6 +301,19 @@ export default function App() {
       })),
     [findResult, previewExistingWaypoints, waypointTypeOverrides]
   )
+  // Search-found candidates plus anything added by clicking a basemap POI
+  // icon, deduped by osm_id (a search result wins if the same node also
+  // turns up there) - this, not findResult?.candidates directly, is what
+  // the map/checklist/save flow reads, so a click-added POI flows through
+  // the existing selection/export pipeline unchanged.
+  const allCandidates = useMemo(() => {
+    if (clickAddedCandidates.length === 0) return findResult?.candidates ?? EMPTY_CANDIDATES
+    const foundIds = new Set((findResult?.candidates ?? []).map((c) => c.osm_id))
+    return [
+      ...(findResult?.candidates ?? EMPTY_CANDIDATES),
+      ...clickAddedCandidates.filter((c) => !foundIds.has(c.osm_id)),
+    ]
+  }, [findResult, clickAddedCandidates])
 
   return (
     <div className="flex h-screen flex-col">
@@ -264,7 +331,7 @@ export default function App() {
         <div className="h-[50vh] shrink-0 md:h-auto md:flex-1">
           <RouteMap
             routeCoords={findResult?.route_coords ?? previewRouteCoords}
-            candidates={findResult?.candidates ?? EMPTY_CANDIDATES}
+            candidates={allCandidates}
             selectedIds={selectedIds}
             onToggle={handleToggle}
             existingWaypoints={existingWaypoints}
@@ -274,6 +341,11 @@ export default function App() {
             hoveredPoi={hoveredPoi}
             mapStyleKey={mapStyleKey}
             onMapStyleChange={handleMapStyleChange}
+            candidateTags={clickAddedTags}
+            onBasemapPoiClick={handleBasemapPoiClick}
+            pendingLookup={pendingLookup}
+            onConfirmPendingLookup={handleConfirmPendingLookup}
+            onDismissPendingLookup={() => setPendingLookup(null)}
           />
         </div>
 
@@ -321,7 +393,7 @@ export default function App() {
                     isFinding={isFinding}
                   />
                   <CandidateChecklist
-                    candidates={findResult?.candidates ?? EMPTY_CANDIDATES}
+                    candidates={allCandidates}
                     selectedIds={selectedIds}
                     onToggle={handleToggle}
                     onToggleAll={handleToggleAllCandidates}
@@ -336,7 +408,7 @@ export default function App() {
             {file && (
               <SaveCard
                 file={file}
-                candidates={findResult?.candidates ?? EMPTY_CANDIDATES}
+                candidates={allCandidates}
                 selectedIds={selectedIds}
                 existingWaypoints={existingWaypoints}
                 keptWaypointIndices={keptWaypointIndices}

@@ -8,11 +8,17 @@ from dataclasses import dataclass
 
 import requests
 
-# Defaults to a public mirror; set OVERPASS_URL to point at a self-hosted
-# instance instead (e.g. http://overpass:80/api/interpreter in Docker Compose).
-OVERPASS_URL = os.environ.get(
-    "OVERPASS_URL", "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
-)
+from waypointer.geometry import haversine_m
+
+# Defaults to the official public instance; set OVERPASS_URL to point at a
+# self-hosted one instead (e.g. http://overpass:80/api/interpreter in Docker
+# Compose). Previously defaulted to a third-party mirror
+# (maps.mail.ru/osm/tools/overpass/api/interpreter) which measured a
+# consistent 13-18s per query (sometimes timing out outright) against
+# identical requests that overpass-api.de answers in well under a second -
+# not a load/rate-limit artifact of this app, since a single ad-hoc query
+# from an idle connection showed the same gap.
+OVERPASS_URL = os.environ.get("OVERPASS_URL", "https://overpass-api.de/api/interpreter")
 
 CACHE_TTL_S = 600.0
 # Overpass's server rejects requests carrying the default python-requests
@@ -75,6 +81,13 @@ class _TTLCache:
 
 
 _cache = _TTLCache(CACHE_TTL_S)
+# A shared, process-wide session so repeated calls reuse one keep-alive HTTPS
+# connection instead of paying a fresh TCP+TLS handshake every time - real
+# savings once a query actually needs to reach Overpass (a cache hit skips
+# this either way). The bare `requests` module used as query_overpass's
+# default doesn't pool connections across separate top-level calls the way a
+# Session does.
+_session = requests.Session()
 
 
 def _cache_key(query: str, url: str) -> str:
@@ -101,7 +114,7 @@ def query_overpass(
         if cached is not None:
             return cached
 
-    http = session or requests
+    http = session or _session
     try:
         # Overpass expects the raw query text as the POST body, not a
         # `data=<query>` form field - the latter gets rejected (406) by
@@ -130,3 +143,12 @@ def query_overpass(
     if use_cache:
         _cache.set(key, nodes)
     return nodes
+
+
+def nearest_node(nodes: list[OsmNode], lat: float, lon: float) -> OsmNode | None:
+    """Picks the closest node to (lat, lon) from an Overpass result set -
+    used by /api/lookup-poi to resolve a basemap POI icon click (which only
+    has a click coordinate, not an OSM id) to the real node it represents."""
+    if not nodes:
+        return None
+    return min(nodes, key=lambda n: haversine_m(lat, lon, n.lat, n.lon))
