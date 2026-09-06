@@ -17,3 +17,8 @@ services:
       # build-arg forwarding as VITE_WAHOO_CLIENT_ID above (see Dockerfile).
       - key: VITE_TALLY_FORM_ID
         sync: false
+      # Not secret - a public Umami dashboard id. Same build-arg forwarding
+      # as VITE_WAHOO_CLIENT_ID above (see Dockerfile). Leaving it unset in
+      # the Render dashboard disables analytics entirely.
+      - key: VITE_UMAMI_WEBSITE_ID
+        sync: false

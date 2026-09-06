@@ -4,10 +4,12 @@ services:
       context: .
       args:
         # Non-secret build-time ids baked into the frontend bundle - see
-        # Dockerfile/CLAUDE.md. Leave unset to build without Wahoo/Tally
-        # integration.
+        # Dockerfile/CLAUDE.md. Leave unset to build without Wahoo/Tally/
+        # analytics integration.
         VITE_WAHOO_CLIENT_ID: ${VITE_WAHOO_CLIENT_ID:-}
         VITE_TALLY_FORM_ID: ${VITE_TALLY_FORM_ID:-}
+        # Leaving this unset ships this deployment with zero analytics.
+        VITE_UMAMI_WEBSITE_ID: ${VITE_UMAMI_WEBSITE_ID:-}
     ports:
       - "${PORT:-8000}:8000"
     environment:

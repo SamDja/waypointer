@@ -9,6 +9,7 @@ import { StepCard } from "@/components/StepCard"
 import { Toaster } from "@/components/Toaster"
 import { WahooProfileMenu } from "@/components/WahooProfileMenu"
 import { ApiError, findPois } from "@/lib/api"
+import { track } from "@/lib/analytics"
 import { elevationGainLossM, totalDistanceM } from "@/lib/geometry"
 import { parseExistingWaypointsFromGpx, parseRouteCoordsFromGpx, parseRouteElevationsFromGpx } from "@/lib/gpx"
 import {
@@ -68,14 +69,15 @@ export default function App() {
   const [avgSpeedKmh, setAvgSpeedKmh] = useState<number>(() => loadAvgSpeedKmh())
   const [mapStyleKey, setMapStyleKey] = useState<string>(() => loadMapStyleKey())
 
-  async function handleFileChange(newFile: File) {
+  async function handleFileChange(newFile: File, source: "drop" | "browse" | "wahoo") {
     setFile(newFile)
     setFindResult(null)
     setSelectedIds(new Set())
     setSearchedPoiTypes([])
 
     const text = await newFile.text()
-    setPreviewRouteCoords(parseRouteCoordsFromGpx(text))
+    const routeCoords = parseRouteCoordsFromGpx(text)
+    setPreviewRouteCoords(routeCoords)
     setPreviewElevations(parseRouteElevationsFromGpx(text))
     const waypoints = parseExistingWaypointsFromGpx(text)
     setPreviewExistingWaypoints(waypoints)
@@ -83,6 +85,16 @@ export default function App() {
     // post-search default in handleFind below.
     setKeptWaypointIndices(new Set(waypoints.map((w) => w.index)))
     setWaypointTypeOverrides({})
+
+    if (routeCoords.length === 0) {
+      track("gpx_parse_failed", { reason: "empty_or_invalid" })
+    } else {
+      track("route_imported", {
+        source,
+        point_count: routeCoords.length,
+        existing_waypoint_count: waypoints.length,
+      })
+    }
   }
 
   function handleRemoveRoute() {
@@ -218,9 +230,17 @@ export default function App() {
         ),
       )
       updateToast(toastId, `Found ${result.candidates.length} candidate(s).`, "success")
+      track("find_pois_run", {
+        poi_types: poiConfig.map((e) => e.poi_type).join(","),
+        max_distances_m: poiConfig.map((e) => e.max_distance_m).join(","),
+        candidate_count: result.candidates.length,
+        failed_poi_type_count: result.failed_poi_types.length,
+        point_count: result.point_count,
+      })
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Network error while contacting the server."
       updateToast(toastId, message, "error")
+      track("find_pois_failed", { reason: err instanceof ApiError ? "api_error" : "network_error" })
     } finally {
       setIsFinding(false)
     }
