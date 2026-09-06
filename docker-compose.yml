@@ -9,7 +9,7 @@ services:
         VITE_WAHOO_CLIENT_ID: ${VITE_WAHOO_CLIENT_ID:-}
         VITE_TALLY_FORM_ID: ${VITE_TALLY_FORM_ID:-}
     ports:
-      - "${PORT:-443}:8000"
+      - "${PORT:-8000}:8000"
     environment:
       # Unset by default (plain HTTP). Set both, and point CERTS_DIR at the
       # folder holding them, to enable HTTPS - see CLAUDE.md's "Local HTTPS"
