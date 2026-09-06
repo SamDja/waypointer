@@ -23,6 +23,7 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { RouteNameDialog } from "@/components/RouteNameDialog"
 import { ApiError, fetchWahooRoutePayload, saveRoute } from "@/lib/api"
+import { track } from "@/lib/analytics"
 import { POI_TYPES } from "@/lib/poiTypes"
 import type { DeviceSettings } from "@/lib/settings"
 import { toast, updateToast } from "@/lib/toast"
@@ -132,9 +133,19 @@ export function SaveCard({
       URL.revokeObjectURL(url)
 
       updateToast(toastId, `Saved ${filename}.`, "success")
+      track("route_saved", {
+        format: settings.device,
+        selected_candidate_count: selectedCandidates.length,
+        present_poi_types: presentPoiTypes.join(","),
+        discarded_waypoint_count: discardedWaypointIndices.length,
+      })
     } catch (err) {
       const message = err instanceof ApiError ? err.message : "Network error while contacting the server."
       updateToast(toastId, message, "error")
+      track("route_save_failed", {
+        reason: err instanceof ApiError ? "api_error" : "network_error",
+        format: settings.device,
+      })
     } finally {
       setIsSaving(false)
     }
@@ -143,13 +154,16 @@ export function SaveCard({
   async function handleConnectWahoo() {
     setIsConnectingWahoo(true)
     const toastId = toast("Connecting to Wahoo...", "loading")
+    track("wahoo_connect_initiated", { source: "save_card" })
     try {
       const tokens = await connectWahoo()
       onWahooTokensChange(tokens)
       const scopeWarning = missingWahooScopeWarning(tokens)
       updateToast(toastId, scopeWarning ?? "Connected to Wahoo.", scopeWarning !== null ? "error" : "success")
+      track("wahoo_connect_succeeded", { source: "save_card" })
     } catch (err) {
       updateToast(toastId, err instanceof Error ? err.message : "Failed to connect to Wahoo.", "error")
+      track("wahoo_connect_failed", { source: "save_card" })
     } finally {
       setIsConnectingWahoo(false)
     }
@@ -173,9 +187,14 @@ export function SaveCard({
       const accessToken = await getValidWahooAccessToken()
       await pushRouteToWahoo(payload, accessToken)
       updateToast(toastId, "Sent to Wahoo - it will sync to your app and head unit shortly.", "success")
+      track("route_sent_to_wahoo", {
+        selected_candidate_count: selectedCandidates.length,
+        present_poi_types: presentPoiTypes.join(","),
+      })
     } catch (err) {
       const message = err instanceof Error ? err.message : "Failed to send to Wahoo."
       updateToast(toastId, message, "error")
+      track("route_send_to_wahoo_failed", {})
     } finally {
       setIsSendingToWahoo(false)
     }
