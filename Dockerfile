@@ -14,6 +14,11 @@ ENV VITE_WAHOO_CLIENT_ID=$VITE_WAHOO_CLIENT_ID
 # frontend/src/lib/feedbackConfig.ts) - same build-arg reasoning as above.
 ARG VITE_TALLY_FORM_ID
 ENV VITE_TALLY_FORM_ID=$VITE_TALLY_FORM_ID
+# Not secret - a public Umami dashboard id (see
+# frontend/src/lib/analyticsConfig.ts) - same build-arg reasoning as above.
+# Leaving it unset disables analytics entirely (see lib/analytics.ts).
+ARG VITE_UMAMI_WEBSITE_ID
+ENV VITE_UMAMI_WEBSITE_ID=$VITE_UMAMI_WEBSITE_ID
 RUN npm run build
 
 # ---- python stage ----

@@ -19,6 +19,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { WahooRoutesDialog } from "@/components/WahooRoutesDialog"
 import { formatDurationHours } from "@/lib/geometry"
 import { toast, updateToast } from "@/lib/toast"
+import { track } from "@/lib/analytics"
 import { missingWahooScopeWarning } from "@/lib/wahooAuth"
 import { connectWahoo } from "@/lib/wahooConnect"
 import { type WahooTokens } from "@/lib/wahooSettings"
@@ -37,7 +38,7 @@ import type { ExistingWaypoint } from "@/types/candidate"
 
 export interface ImportCardProps {
   file: File | null
-  onFileChange: (file: File) => void
+  onFileChange: (file: File, source: "drop" | "browse" | "wahoo") => void
   onRemove: () => void
   onNext: () => void
   pointCount: number | null
@@ -99,19 +100,22 @@ export function ImportCard({
     e.preventDefault()
     setIsDragActive(false)
     const dropped = e.dataTransfer.files?.[0]
-    if (dropped) onFileChange(dropped)
+    if (dropped) onFileChange(dropped, "drop")
   }
 
   async function handleConnectWahoo() {
     setIsConnectingWahoo(true)
     const toastId = toast("Connecting to Wahoo...", "loading")
+    track("wahoo_connect_initiated", { source: "import_card" })
     try {
       const tokens = await connectWahoo()
       onWahooTokensChange(tokens)
       const scopeWarning = missingWahooScopeWarning(tokens)
       updateToast(toastId, scopeWarning ?? "Connected to Wahoo.", scopeWarning !== null ? "error" : "success")
+      track("wahoo_connect_succeeded", { source: "import_card" })
     } catch (err) {
       updateToast(toastId, err instanceof Error ? err.message : "Failed to connect to Wahoo.", "error")
+      track("wahoo_connect_failed", { source: "import_card" })
     } finally {
       setIsConnectingWahoo(false)
     }
@@ -312,7 +316,7 @@ export function ImportCard({
           className="hidden"
           onChange={(e) => {
             const selected = e.target.files?.[0]
-            if (selected) onFileChange(selected)
+            if (selected) onFileChange(selected, "browse")
           }}
         />
       </div>
@@ -342,7 +346,7 @@ export function ImportCard({
         open={showWahooImport}
         onOpenChange={setShowWahooImport}
         mode="import"
-        onImport={onFileChange}
+        onImport={(file) => onFileChange(file, "wahoo")}
       />
     </div>
   )
