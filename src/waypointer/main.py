@@ -20,6 +20,7 @@ from fastapi import Depends, FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from gpxpy.gpx import GPX, GPXException, GPXWaypoint
+from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import TypeAdapter, ValidationError
 
 from waypointer.device_profiles import DEFAULT_DEVICE_KEY, DEVICE_PROFILES, OutputFormat
@@ -78,6 +79,16 @@ SIMPLIFY_TOLERANCE_M = 8.0
 WAHOO_FILE_HOST_SUFFIX = ".wahooligan.com"
 
 app = FastAPI(title="Sulla Via")
+
+# Exposes GET /metrics (request count, latency histogram, in-progress gauge,
+# labeled by method/path/status) for the docker-compose Prometheus service to
+# scrape. Registered here, ahead of every route, though placement doesn't
+# actually matter for it - LAN-only, no auth on /metrics, matching this app's
+# existing trust model (self-signed TLS, no login anywhere else; see
+# CLAUDE.md's Telemetry section). Single uvicorn process, so the default
+# in-memory prometheus_client registry is fine - no multiprocess mode needed,
+# same reasoning as rate_limit.py's in-process design.
+Instrumentator().instrument(app).expose(app)
 
 _selected_candidates_adapter = TypeAdapter(list[Candidate])
 _poi_config_adapter = TypeAdapter(list[PoiSearchConfig])

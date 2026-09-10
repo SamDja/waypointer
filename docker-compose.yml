@@ -20,4 +20,68 @@ services:
       - SSL_CERTFILE=${SSL_CERTFILE:-}
     volumes:
       - ${CERTS_DIR:-./certs}:/certs:ro
+    networks:
+      - waypointer-net
     restart: unless-stopped
+
+  # Scrapes waypointer's /metrics and node-exporter's host metrics - see
+  # monitoring/prometheus.yml and CLAUDE.md's Telemetry section.
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - waypointer-net
+    restart: unless-stopped
+
+  # Dashboards over Prometheus data. The Prometheus datasource is
+  # auto-provisioned (monitoring/grafana/provisioning/) - only the admin
+  # login is a manual first-time step. Change GRAFANA_ADMIN_PASSWORD via the
+  # Pi's .env file - it's the only credential gate in this whole stack.
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    networks:
+      - waypointer-net
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # Host-level metrics (CPU, memory, disk, temperature via hwmon/thermal,
+  # automatic off the mounted /sys on the Pi). No published host port - only
+  # reachable from prometheus over waypointer-net. The /proc, /sys, /
+  # mounts + matching --path.* flags and pid: host are the standard
+  # node_exporter compose convention for accurate host (not container)
+  # metrics.
+  node-exporter:
+    image: prom/node-exporter:latest
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/host/root"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+    pid: host
+    networks:
+      - waypointer-net
+    restart: unless-stopped
+
+networks:
+  waypointer-net:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:

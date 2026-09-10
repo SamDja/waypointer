@@ -1,0 +1,27 @@
+# Scrape config for the docker-compose `prometheus` service. Targets are
+# addressed by compose service name, not localhost/host IP, since Prometheus
+# runs in its own container on the shared `waypointer-net` bridge network.
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  # The waypointer app's own /metrics (prometheus-fastapi-instrumentator,
+  # wired up in src/waypointer/main.py). This targets the container-internal
+  # port 8000, not the host-remapped ${PORT:-443}.
+  #
+  # NOTE: the app normally runs plain HTTP - TLS is terminated externally by
+  # the Cloudflare Tunnel (see CLAUDE.md's "Remote access & TLS" section).
+  # uvicorn can also terminate TLS itself when SSL_KEYFILE/SSL_CERTFILE are
+  # set, for LAN-direct access - this file can't react to that
+  # automatically, so if you enable it, change `scheme` below to `https`
+  # and keep `insecure_skip_verify: true` (self-signed cert).
+  - job_name: waypointer
+    scheme: http
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["waypointer:8000"]
+
+  # Host-level metrics (CPU, memory, disk, temperature) from node_exporter.
+  - job_name: node
+    static_configs:
+      - targets: ["node-exporter:9100"]
