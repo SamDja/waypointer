@@ -24,8 +24,8 @@ Vite dev server proxies `/api/*` requests to the backend on port 8000.
 
 ## Deployment
 
-Docker-based, deployable on [Render](https://render.com)'s free tier via the included
-`render.yaml` blueprint, or anywhere else that runs a Dockerfile:
+Docker-based, deployed to a Raspberry Pi 5 on the LAN via the included `docker-compose.yml`
+(see CLAUDE.md's "Docker (production shape)" section), or anywhere else that runs a Dockerfile:
 
 ```bash
 docker build -t waypointer .
