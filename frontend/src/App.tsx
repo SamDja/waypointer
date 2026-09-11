@@ -45,6 +45,18 @@ type Step = "import" | "find"
 const EMPTY_CANDIDATES: Candidate[] = []
 const EMPTY_FAILED_POI_TYPES: FailedPoiType[] = []
 
+// Firing every per-type /api/find-pois request at once seems to make the
+// public Overpass mirror more likely to time out / 502 (it may throttle
+// concurrent connections from our server's single shared IP) - staggering
+// each request's start by this much, smallest search radius first, gives
+// Overpass breathing room while still overlapping in flight rather than
+// waiting for one to fully finish before starting the next.
+const SEARCH_STAGGER_MS = 200
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 export default function App() {
   const [file, setFile] = useState<File | null>(null)
   const [previewRouteCoords, setPreviewRouteCoords] = useState<[number, number][]>([])
@@ -75,6 +87,14 @@ export default function App() {
   const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>(() => loadSettings())
   const [poiSearchEntries, setPoiSearchEntries] = useState<PoiSearchEntry[]>(() => loadPoiSearchConfig())
   const [isFinding, setIsFinding] = useState(false)
+  // Live per-type progress for the search kicked off in handleFind - null
+  // when no search is running. Drives FindPoisCard's button/row progress UI;
+  // findResult itself (not this) is what the map/candidate list render from.
+  const [searchProgress, setSearchProgress] = useState<{
+    total: number
+    doneTypes: Set<string>
+    erroredTypes: Set<string>
+  } | null>(null)
   const [openStep, setOpenStep] = useState<Step | null>("import")
   const [wahooTokens, setWahooTokens] = useState<WahooTokens | null>(() => loadWahooTokens())
   const [avgSpeedKmh, setAvgSpeedKmh] = useState<number>(() => loadAvgSpeedKmh())
@@ -260,45 +280,127 @@ export default function App() {
       ...previewExistingWaypoints.map((w) => w.index),
     ])
 
+    // A type is already satisfied - no need to re-hit Overpass for it - if
+    // the last completed search asked for the exact same radius and didn't
+    // fail for it. searchedPoiTypes is overwritten wholesale at the end of
+    // every search (below), so a removed type or a changed radius naturally
+    // falls out of this check with no extra bookkeeping.
+    const previousRadiusByType = new Map(searchedPoiTypes.map((s) => [s.poi_type, s.max_distance_m]))
+    const previouslyFailedTypes = new Set((findResult?.failed_poi_types ?? []).map((f) => f.poi_type))
+    function isAlreadySatisfied(entry: PoiSearchConfig): boolean {
+      return previousRadiusByType.get(entry.poi_type) === entry.max_distance_m && !previouslyFailedTypes.has(entry.poi_type)
+    }
+    const toSkip = poiConfig.filter(isAlreadySatisfied)
+    const toFetch = poiConfig.filter((entry) => !isAlreadySatisfied(entry))
+
+    if (toFetch.length === 0) {
+      // Nothing changed since the last search (same types, same radii, none
+      // previously failed) - every row already shows its checkmark, so
+      // there's nothing to do.
+      toast("Already up to date - no POI type changed since the last search.", "success")
+      return
+    }
+
     setIsFinding(true)
+    setSearchProgress({
+      total: poiConfig.length,
+      doneTypes: new Set(toSkip.map((e) => e.poi_type)),
+      erroredTypes: new Set(),
+    })
     const toastId = toast("Searching OpenStreetMap for nearby POIs...", "loading")
-    try {
-      const result = await findPois(file, poiConfig)
-      setFindResult(result)
-      // Preserve the visitor's selection for candidates seen in a prior
-      // search; default new ones to selected, matching first-search behavior.
-      setSelectedIds(
-        new Set(
-          result.candidates
-            .map((c) => c.osm_id)
-            .filter((id) => (previousCandidateIds.has(id) ? selectedIds.has(id) : true)),
-        ),
-      )
-      setSearchedPoiTypes(poiConfig)
-      // Preserve the visitor's keep/discard choice for waypoints seen in a
-      // prior search; default new ones to kept, matching first-search behavior.
-      setKeptWaypointIndices(
-        new Set(
-          result.existing_waypoints
-            .map((w) => w.index)
-            .filter((idx) => (previousWaypointIndices.has(idx) ? keptWaypointIndices.has(idx) : true)),
-        ),
-      )
-      updateToast(toastId, `Found ${result.candidates.length} candidate(s).`, "success")
+
+    // One /api/find-pois call per requested type instead of one call
+    // carrying every type, so the map/candidate list can fill in type-by-
+    // type as each resolves instead of only once the slowest type finishes.
+    // Starts are staggered (smallest search radius first - see
+    // SEARCH_STAGGER_MS) rather than all fired at once, since Overpass
+    // seems to time out more when hit with several simultaneous connections
+    // from our one server IP. `aggregate` is a plain, non-state mutable
+    // object (not React state) that each chunk appends to synchronously
+    // right after its own await resolves - setFindResult(aggregate) is
+    // called from there, so the map/list update live with no extra
+    // plumbing on their end. Skipped types' candidates are already valid
+    // (unchanged radius, no prior failure) and are carried over as-is
+    // rather than re-fetched.
+    const aggregate: FindPoisResponse = {
+      candidates: toSkip.length > 0 ? (findResult?.candidates.filter((c) => toSkip.some((e) => e.poi_type === c.poi_type)) ?? []) : [],
+      point_count: findResult?.point_count ?? 0,
+      existing_waypoints: findResult?.existing_waypoints ?? [],
+      route_coords: findResult?.route_coords ?? [],
+      failed_poi_types: [],
+    }
+    let hasSucceeded = toSkip.length > 0
+    if (toSkip.length > 0) setFindResult({ ...aggregate })
+
+    const staggeredConfig = [...toFetch].sort((a, b) => a.max_distance_m - b.max_distance_m)
+
+    await Promise.allSettled(
+      staggeredConfig.map(async (entry, index) => {
+        if (index > 0) await sleep(index * SEARCH_STAGGER_MS)
+        try {
+          const result = await findPois(file, [entry])
+          hasSucceeded = true
+          aggregate.candidates = [...aggregate.candidates, ...result.candidates]
+          aggregate.failed_poi_types = [...aggregate.failed_poi_types, ...result.failed_poi_types]
+          // point_count/existing_waypoints/route_coords are route-derived,
+          // not type-derived - identical across every per-type response for
+          // this same uploaded file, so whichever chunk lands is authoritative.
+          aggregate.point_count = result.point_count
+          aggregate.existing_waypoints = result.existing_waypoints
+          aggregate.route_coords = result.route_coords
+          setFindResult({ ...aggregate })
+
+          // Preserve the visitor's selection/keep choice for candidates and
+          // waypoints seen in a prior search; default newly-arrived ones to
+          // selected/kept, matching first-search behavior - applied per
+          // chunk now instead of once at the end.
+          setSelectedIds((prevSelected) => {
+            const next = new Set(prevSelected)
+            for (const c of result.candidates) {
+              if (!previousCandidateIds.has(c.osm_id) || prevSelected.has(c.osm_id)) next.add(c.osm_id)
+            }
+            return next
+          })
+          setKeptWaypointIndices((prevKept) => {
+            const next = new Set(prevKept)
+            for (const w of result.existing_waypoints) {
+              if (!previousWaypointIndices.has(w.index) || prevKept.has(w.index)) next.add(w.index)
+            }
+            return next
+          })
+          setSearchProgress((prev) => prev && { ...prev, doneTypes: new Set(prev.doneTypes).add(entry.poi_type) })
+        } catch (err) {
+          const message = err instanceof ApiError ? err.message : "Network error while contacting the server."
+          aggregate.failed_poi_types = [...aggregate.failed_poi_types, { poi_type: entry.poi_type, error: message }]
+          // Only flush into findResult once we have an authoritative
+          // point_count/route_coords from a successful chunk to build a
+          // valid FindPoisResponse with - otherwise this surfaces once the
+          // first success lands, or via the all-failed toast below if none do.
+          if (hasSucceeded) setFindResult({ ...aggregate })
+          setSearchProgress(
+            (prev) => prev && { ...prev, erroredTypes: new Set(prev.erroredTypes).add(entry.poi_type) },
+          )
+        }
+      }),
+    )
+
+    setSearchedPoiTypes(poiConfig)
+    const allFailed = aggregate.candidates.length === 0 && !hasSucceeded
+    if (allFailed) {
+      updateToast(toastId, "Failed to search OpenStreetMap for any POI type.", "error")
+      track("find_pois_failed", { reason: "api_error" })
+    } else {
+      updateToast(toastId, `Found ${aggregate.candidates.length} candidate(s).`, "success")
       track("find_pois_run", {
         poi_types: poiConfig.map((e) => e.poi_type).join(","),
         max_distances_m: poiConfig.map((e) => e.max_distance_m).join(","),
-        candidate_count: result.candidates.length,
-        failed_poi_type_count: result.failed_poi_types.length,
-        point_count: result.point_count,
+        candidate_count: aggregate.candidates.length,
+        failed_poi_type_count: aggregate.failed_poi_types.length,
+        point_count: aggregate.point_count,
       })
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Network error while contacting the server."
-      updateToast(toastId, message, "error")
-      track("find_pois_failed", { reason: err instanceof ApiError ? "api_error" : "network_error" })
-    } finally {
-      setIsFinding(false)
     }
+    setIsFinding(false)
+    setSearchProgress(null)
   }
 
   // No authoritative point count/distance exists client-side until
@@ -412,6 +514,7 @@ export default function App() {
                     onFind={handleFind}
                     disabled={!file || poiSearchEntries.length === 0}
                     isFinding={isFinding}
+                    progress={searchProgress}
                   />
                   <CandidateChecklist
                     candidates={allCandidates}
