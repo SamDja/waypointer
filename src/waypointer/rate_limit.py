@@ -5,6 +5,18 @@ to the Overpass API, so a burst of traffic (accidental or not) risks getting
 that IP rate-limited or banned upstream. This is a small in-memory sliding
 window log, not a distributed limiter - sufficient for a single free-tier
 instance and intentionally not backed by Redis/a database.
+
+The frontend now fans a single "Find POIs" click out into one
+/api/find-pois request per selected POI type (fired in parallel) rather than
+one request carrying every type, so progress/results can be shown per type
+instead of only once the slowest type finishes - see FindPoisCard.tsx /
+App.tsx's handleFind. That doesn't change how many Overpass calls actually
+happen (still one per type, same as before), just how many times this
+dependency gets checked for the same amount of real work - so the budget
+below is sized to comfortably cover a full-registry search (~40 searchable
+types) plus a couple of re-searches within the window. The real protection
+against hammering the shared Overpass IP remains osm.py's per-query TTL
+cache, not this counter.
 """
 
 import threading
@@ -13,7 +25,7 @@ from collections import defaultdict
 
 from fastapi import HTTPException, Request, status
 
-REQUESTS_PER_WINDOW = 10
+REQUESTS_PER_WINDOW = 60
 WINDOW_S = 60.0
 
 _lock = threading.Lock()
