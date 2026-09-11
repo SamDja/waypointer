@@ -5,7 +5,13 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
 import { POI_TYPES, type PoiTypeConfig } from "@/lib/poiTypes"
 import type { PoiSearchEntry } from "@/lib/settings"
-import { Info, Search, XIcon } from "lucide-react"
+import { CheckIcon, Info, Loader2, Search, TriangleAlert, XIcon } from "lucide-react"
+
+export interface FindPoisSearchProgress {
+  total: number
+  doneTypes: Set<string>
+  erroredTypes: Set<string>
+}
 
 export interface FindPoisCardProps {
   entries: PoiSearchEntry[]
@@ -13,9 +19,10 @@ export interface FindPoisCardProps {
   onFind: () => void
   disabled: boolean
   isFinding: boolean
+  progress: FindPoisSearchProgress | null
 }
 
-export function FindPoisCard({ entries, onChange, onFind, disabled, isFinding }: FindPoisCardProps) {
+export function FindPoisCard({ entries, onChange, onFind, disabled, isFinding, progress }: FindPoisCardProps) {
   function updateEntry(poiType: string, changes: Partial<PoiSearchEntry>) {
     onChange(entries.map((entry) => (entry.poiType === poiType ? { ...entry, ...changes } : entry)))
   }
@@ -60,16 +67,20 @@ export function FindPoisCard({ entries, onChange, onFind, disabled, isFinding }:
                   <span className="text-sm text-muted-foreground">m</span>
                   <span className="flex items-center gap-1">
                     <DistanceInfo cfg={cfg} />
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon-xs"
-                      disabled={isFinding}
-                      aria-label={`Remove ${cfg.label}`}
-                      onClick={() => removeEntry(cfg.key)}
-                    >
-                      <XIcon className="size-4" />
-                    </Button>
+                    {isFinding && progress ? (
+                      <RowSearchStatus poiType={cfg.key} label={cfg.label} progress={progress} />
+                    ) : (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-xs"
+                        disabled={isFinding}
+                        aria-label={`Remove ${cfg.label}`}
+                        onClick={() => removeEntry(cfg.key)}
+                      >
+                        <XIcon className="size-4" />
+                      </Button>
+                    )}
                   </span>
                 </li>
               )
@@ -91,12 +102,44 @@ export function FindPoisCard({ entries, onChange, onFind, disabled, isFinding }:
         </div>
         <div className="flex flex-col">
           <Button onClick={onFind} disabled={disabled} loading={isFinding}>
-            {isFinding ? "Finding POIs…" : "Find POIs"}
+            {isFinding && progress
+              ? `Finding POIs… (${progress.doneTypes.size + progress.erroredTypes.size}/${progress.total})`
+              : "Find POIs"}
             <Search className="size-4"></Search>
           </Button>
         </div>
       </div>
     </div>
+  )
+}
+
+function RowSearchStatus({
+  poiType,
+  label,
+  progress,
+}: {
+  poiType: string
+  label: string
+  progress: FindPoisSearchProgress
+}) {
+  if (progress.erroredTypes.has(poiType)) {
+    return (
+      <span aria-label={`Couldn't search ${label}`} title={`Couldn't search ${label}`}>
+        <TriangleAlert className="size-4 text-amber-600" />
+      </span>
+    )
+  }
+  if (progress.doneTypes.has(poiType)) {
+    return (
+      <span aria-label={`${label} found`} title={`${label} found`}>
+        <CheckIcon className="size-4 text-emerald-600" />
+      </span>
+    )
+  }
+  return (
+    <span aria-label={`Searching ${label}…`} title={`Searching ${label}…`}>
+      <Loader2 className="size-4 animate-spin text-muted-foreground" />
+    </span>
   )
 }
 
