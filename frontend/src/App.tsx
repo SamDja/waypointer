@@ -45,6 +45,18 @@ type Step = "import" | "find"
 const EMPTY_CANDIDATES: Candidate[] = []
 const EMPTY_FAILED_POI_TYPES: FailedPoiType[] = []
 
+// Firing every per-type /api/find-pois request at once seems to make the
+// public Overpass mirror more likely to time out / 502 (it may throttle
+// concurrent connections from our server's single shared IP) - staggering
+// each request's start by this much, smallest search radius first, gives
+// Overpass breathing room while still overlapping in flight rather than
+// waiting for one to fully finish before starting the next.
+const SEARCH_STAGGER_MS = 200
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
 export default function App() {
   const [file, setFile] = useState<File | null>(null)
   const [previewRouteCoords, setPreviewRouteCoords] = useState<[number, number][]>([])
@@ -218,13 +230,17 @@ export default function App() {
     setSearchProgress({ total: poiConfig.length, doneTypes: new Set(), erroredTypes: new Set() })
     const toastId = toast("Searching OpenStreetMap for nearby POIs...", "loading")
 
-    // One /api/find-pois call per requested type, fired in parallel, instead
-    // of one call carrying every type - so the map/candidate list can fill
-    // in type-by-type as each resolves instead of only once the slowest
-    // type finishes. `aggregate` is plain, non-state mutable object (not
-    // React state) that each chunk appends to synchronously right after its
-    // own await resolves - setFindResult(aggregate) is called from there,
-    // so the map/list update live with no extra plumbing on their end.
+    // One /api/find-pois call per requested type instead of one call
+    // carrying every type, so the map/candidate list can fill in type-by-
+    // type as each resolves instead of only once the slowest type finishes.
+    // Starts are staggered (smallest search radius first - see
+    // SEARCH_STAGGER_MS) rather than all fired at once, since Overpass
+    // seems to time out more when hit with several simultaneous connections
+    // from our one server IP. `aggregate` is a plain, non-state mutable
+    // object (not React state) that each chunk appends to synchronously
+    // right after its own await resolves - setFindResult(aggregate) is
+    // called from there, so the map/list update live with no extra
+    // plumbing on their end.
     const aggregate: FindPoisResponse = {
       candidates: [],
       point_count: 0,
@@ -234,8 +250,11 @@ export default function App() {
     }
     let hasSucceeded = false
 
+    const staggeredConfig = [...poiConfig].sort((a, b) => a.max_distance_m - b.max_distance_m)
+
     await Promise.allSettled(
-      poiConfig.map(async (entry) => {
+      staggeredConfig.map(async (entry, index) => {
+        if (index > 0) await sleep(index * SEARCH_STAGGER_MS)
         try {
           const result = await findPois(file, [entry])
           hasSucceeded = true
