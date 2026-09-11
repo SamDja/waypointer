@@ -191,9 +191,10 @@ export default function App() {
   async function handleFind() {
     if (!file) return
 
-    const poiConfig = poiSearchEntries
-      .filter((entry) => entry.enabled)
-      .map((entry) => ({ poi_type: entry.poiType, max_distance_m: entry.maxDistanceM }))
+    const poiConfig = poiSearchEntries.map((entry) => ({
+      poi_type: entry.poiType,
+      max_distance_m: entry.maxDistanceM,
+    }))
     if (poiConfig.length === 0) return
 
     const previousCandidateIds = new Set(findResult?.candidates.map((c) => c.osm_id) ?? [])
@@ -337,7 +338,7 @@ export default function App() {
                     entries={poiSearchEntries}
                     onChange={handlePoiSearchChange}
                     onFind={handleFind}
-                    disabled={!file || !poiSearchEntries.some((entry) => entry.enabled)}
+                    disabled={!file || poiSearchEntries.length === 0}
                     isFinding={isFinding}
                   />
                   <CandidateChecklist

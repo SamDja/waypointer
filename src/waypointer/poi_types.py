@@ -333,18 +333,12 @@ POI_TYPES: dict[str, PoiTypeConfig] = {
     ),
 }
 
-# Shown as checkable search options without the visitor needing to add
-# them first (frontend/src/lib/poiTypes.ts mirrors this list by hand) -
-# every other searchable type is only reachable via the "add a POI type"
-# picker. Order here is display order in FindPoisCard.
-DEFAULT_VISIBLE_POI_TYPES: tuple[str, ...] = (
-    "water",
-    "viewpoint",
-    "groceries",
-    "campsite",
-    "bike_parking",
-    "rest_area",
-)
+# Pre-populated on a visitor's first-ever visit (frontend/src/lib/poiTypes.ts
+# mirrors this by hand) - water is the app's core use case, so it's the only
+# type shown before the visitor asks for more via the "add a POI type"
+# picker. Also this endpoint's fallback default when a caller omits
+# poi_config entirely (see _default_poi_config below).
+DEFAULT_VISIBLE_POI_TYPES: tuple[str, ...] = ("water",)
 
 # Reverse of POI_TYPES' course_point_type - lets fit_read.py recover the
 # exact POI type of a FIT course point instead of guessing from <sym> text.
