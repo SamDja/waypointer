@@ -39,7 +39,7 @@ export function FindPoisCard({ entries, onChange, onFind, disabled, isFinding }:
       <h3 className="text-base">POI types</h3>
       <div className="flex flex-col rounded-md border p-4 gap-3">
         {entries.length > 0 &&
-          <ul className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-x-2 gap-y-2 border-b pb-8">
+          <ul className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-x-2 gap-y-2">
             {entries.map((entry) => {
               const cfg = POI_TYPES.find((c) => c.key === entry.poiType)
               if (!cfg) return null
@@ -76,7 +76,7 @@ export function FindPoisCard({ entries, onChange, onFind, disabled, isFinding }:
             })}
           </ul>
         }
-        <div className="flex flex-col gap-2">
+        <div className="flex flex-col border-b gap-2 pb-4">
           {addableTypes.length > 0 && (
             <PoiTypeCombobox
               value=""
@@ -84,9 +84,12 @@ export function FindPoisCard({ entries, onChange, onFind, disabled, isFinding }:
               placeholder="Add a POI type…"
               onChange={addEntry}
               disabled={isFinding}
+              className="w-full"
             />
           )}
 
+        </div>
+        <div className="flex flex-col">
           <Button onClick={onFind} disabled={disabled} loading={isFinding}>
             {isFinding ? "Finding POIs…" : "Find POIs"}
             <Search className="size-4"></Search>
