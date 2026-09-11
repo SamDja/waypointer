@@ -226,8 +226,33 @@ export default function App() {
       ...previewExistingWaypoints.map((w) => w.index),
     ])
 
+    // A type is already satisfied - no need to re-hit Overpass for it - if
+    // the last completed search asked for the exact same radius and didn't
+    // fail for it. searchedPoiTypes is overwritten wholesale at the end of
+    // every search (below), so a removed type or a changed radius naturally
+    // falls out of this check with no extra bookkeeping.
+    const previousRadiusByType = new Map(searchedPoiTypes.map((s) => [s.poi_type, s.max_distance_m]))
+    const previouslyFailedTypes = new Set((findResult?.failed_poi_types ?? []).map((f) => f.poi_type))
+    function isAlreadySatisfied(entry: PoiSearchConfig): boolean {
+      return previousRadiusByType.get(entry.poi_type) === entry.max_distance_m && !previouslyFailedTypes.has(entry.poi_type)
+    }
+    const toSkip = poiConfig.filter(isAlreadySatisfied)
+    const toFetch = poiConfig.filter((entry) => !isAlreadySatisfied(entry))
+
+    if (toFetch.length === 0) {
+      // Nothing changed since the last search (same types, same radii, none
+      // previously failed) - every row already shows its checkmark, so
+      // there's nothing to do.
+      toast("Already up to date - no POI type changed since the last search.", "success")
+      return
+    }
+
     setIsFinding(true)
-    setSearchProgress({ total: poiConfig.length, doneTypes: new Set(), erroredTypes: new Set() })
+    setSearchProgress({
+      total: poiConfig.length,
+      doneTypes: new Set(toSkip.map((e) => e.poi_type)),
+      erroredTypes: new Set(),
+    })
     const toastId = toast("Searching OpenStreetMap for nearby POIs...", "loading")
 
     // One /api/find-pois call per requested type instead of one call
@@ -240,17 +265,20 @@ export default function App() {
     // object (not React state) that each chunk appends to synchronously
     // right after its own await resolves - setFindResult(aggregate) is
     // called from there, so the map/list update live with no extra
-    // plumbing on their end.
+    // plumbing on their end. Skipped types' candidates are already valid
+    // (unchanged radius, no prior failure) and are carried over as-is
+    // rather than re-fetched.
     const aggregate: FindPoisResponse = {
-      candidates: [],
-      point_count: 0,
-      existing_waypoints: [],
-      route_coords: [],
+      candidates: toSkip.length > 0 ? (findResult?.candidates.filter((c) => toSkip.some((e) => e.poi_type === c.poi_type)) ?? []) : [],
+      point_count: findResult?.point_count ?? 0,
+      existing_waypoints: findResult?.existing_waypoints ?? [],
+      route_coords: findResult?.route_coords ?? [],
       failed_poi_types: [],
     }
-    let hasSucceeded = false
+    let hasSucceeded = toSkip.length > 0
+    if (toSkip.length > 0) setFindResult({ ...aggregate })
 
-    const staggeredConfig = [...poiConfig].sort((a, b) => a.max_distance_m - b.max_distance_m)
+    const staggeredConfig = [...toFetch].sort((a, b) => a.max_distance_m - b.max_distance_m)
 
     await Promise.allSettled(
       staggeredConfig.map(async (entry, index) => {
