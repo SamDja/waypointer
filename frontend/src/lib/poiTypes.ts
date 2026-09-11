@@ -147,20 +147,15 @@ export const POI_TYPES: PoiTypeConfig[] = [
   { key: "attraction", label: "Attraction", icon: FerrisWheel, color: colors.teal[600], symHints: ["attraction"], searchable: true, defaultMaxDistanceM: 50, minDistanceM: 1, maxDistanceM: 500 },
   { key: "for_kids", label: "Kid Friendly", icon: Baby, color: colors.teal[600], symHints: ["for kids", "kid friendly"], searchable: false },
   { key: "monument", label: "Monument", icon: Landmark, color: colors.teal[600], symHints: ["monument", "memorial"], searchable: true, defaultMaxDistanceM: 10, minDistanceM: 1, maxDistanceM: 500 },
-  { key: "viewpoint", label: "Viewpoint", icon: Eye, color: colors.teal[600], symHints: ["viewpoint", "scenic view", "overlook"], searchable: true, defaultMaxDistanceM: 10, minDistanceM: 1, maxDistanceM: 500 },
+  { key: "viewpoint", label: "Viewpoint", icon: Eye, color: colors.teal[600], symHints: ["viewpoint", "scenic view", "overlook"], searchable: true, defaultMaxDistanceM: 10, minDistanceM: 1, maxDistanceM: 200 },
   { key: "generic", label: "Other", icon: MapPin, color: colors.pink[500], symHints: [], searchable: false },
 ]
 
-// Shown as checkable search options without the visitor needing to add
-// them first (mirrors the backend's poi_types.py DEFAULT_VISIBLE_POI_TYPES
-// by hand) - every other searchable type is only reachable via the "add a
-// POI type" picker in FindPoisCard.tsx.
-export const DEFAULT_VISIBLE_POI_TYPES = [
-  "water",
-  "viewpoint",
-  "groceries",
-  "campsite",
-  "bike_parking",
-  "rest_area",
-]
+// Pre-populated on a visitor's first-ever visit (mirrors the backend's
+// poi_types.py DEFAULT_VISIBLE_POI_TYPES by hand) - water is the app's core
+// use case, so it's the only type shown before the visitor asks for more.
+// Every other searchable type is reachable via the "add a POI type" picker
+// in FindPoisCard.tsx, and once added, persists across visits via
+// savePoiSearchConfig/loadPoiSearchConfig in settings.ts (localStorage).
+export const DEFAULT_VISIBLE_POI_TYPES = ["water"]
 
