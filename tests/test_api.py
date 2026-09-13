@@ -76,6 +76,48 @@ def test_find_pois_rejects_unknown_poi_type(sample_route_bytes):
 
 
 @responses.activate
+def test_lookup_poi_returns_nearest_node(overpass_response_json):
+    responses.add(responses.POST, OVERPASS_URL, json=overpass_response_json, status=200)
+    response = client.post(
+        "/api/lookup-poi",
+        data={"lat": 48.8567, "lon": 2.3524, "poi_type": "water"},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["osm_id"] == 1001
+    assert data["osm_type"] == "node"
+    assert data["poi_type"] == "water"
+    assert data["name"] == "Fontaine Wallace"
+    assert data["tags"] == {"amenity": "drinking_water", "name": "Fontaine Wallace"}
+
+
+@responses.activate
+def test_lookup_poi_returns_404_when_nothing_found():
+    responses.add(responses.POST, OVERPASS_URL, json={"elements": []}, status=200)
+    response = client.post(
+        "/api/lookup-poi",
+        data={"lat": 48.8567, "lon": 2.3524, "poi_type": "water"},
+    )
+    assert response.status_code == 404
+
+
+def test_lookup_poi_rejects_non_searchable_poi_type():
+    response = client.post(
+        "/api/lookup-poi",
+        data={"lat": 48.8567, "lon": 2.3524, "poi_type": "warning"},
+    )
+    assert response.status_code == 400
+
+
+def test_lookup_poi_rejects_unknown_poi_type():
+    response = client.post(
+        "/api/lookup-poi",
+        data={"lat": 48.8567, "lon": 2.3524, "poi_type": "bogus"},
+    )
+    assert response.status_code == 400
+
+
+@responses.activate
 def test_find_pois_clamps_out_of_range_distance(sample_route_bytes, overpass_response_json):
     responses.add(responses.POST, OVERPASS_URL, json=overpass_response_json, status=200)
     response = client.post(

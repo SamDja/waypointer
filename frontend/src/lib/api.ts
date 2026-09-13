@@ -1,6 +1,13 @@
-import type { Candidate, FindPoisResponse, PoiSearchConfig } from "@/types/candidate"
+import type { Candidate, FindPoisResponse, PoiLookupResult, PoiSearchConfig } from "@/types/candidate"
 
-export class ApiError extends Error {}
+export class ApiError extends Error {
+  status?: number
+
+  constructor(message: string, status?: number) {
+    super(message)
+    this.status = status
+  }
+}
 
 async function errorDetail(response: Response, fallback: string): Promise<string> {
   const data = await response.json().catch(() => null)
@@ -17,6 +24,26 @@ export async function findPois(gpxFile: File, poiConfig: PoiSearchConfig[]): Pro
     throw new ApiError(await errorDetail(response, "Request failed."))
   }
   return (await response.json()) as FindPoisResponse
+}
+
+export async function lookupPoi(
+  lat: number,
+  lon: number,
+  poiType: string,
+): Promise<PoiLookupResult> {
+  const formData = new FormData()
+  formData.append("lat", String(lat))
+  formData.append("lon", String(lon))
+  formData.append("poi_type", poiType)
+
+  const response = await fetch("/api/lookup-poi", { method: "POST", body: formData })
+  if (!response.ok) {
+    throw new ApiError(
+      await errorDetail(response, "Couldn't look up that point of interest."),
+      response.status,
+    )
+  }
+  return (await response.json()) as PoiLookupResult
 }
 
 export interface SaveParams {

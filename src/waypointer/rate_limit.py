@@ -26,10 +26,12 @@ from collections import defaultdict
 from fastapi import HTTPException, Request, status
 
 REQUESTS_PER_WINDOW = 60
+LOOKUP_POI_REQUESTS_PER_WINDOW = 30
+
 WINDOW_S = 60.0
 
 _lock = threading.Lock()
-_requests_by_ip: dict[str, list[float]] = defaultdict(list)
+_requests_by_ip: dict[tuple[str, str], list[float]] = defaultdict(list)
 
 
 def _client_ip(request: Request) -> str:
@@ -39,19 +41,30 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "unknown"
 
 
-def rate_limit(request: Request) -> None:
-    """FastAPI dependency: raises 429 once an IP exceeds the request budget."""
-    ip = _client_ip(request)
-    now = time.monotonic()
-    cutoff = now - WINDOW_S
+def make_rate_limit(bucket: str, requests_per_window: int, window_s: float = WINDOW_S):
+    """Builds a FastAPI dependency that raises 429 once an IP exceeds the
+    request budget for this bucket - separate buckets so one endpoint's
+    traffic can't exhaust another's budget."""
 
-    with _lock:
-        timestamps = [t for t in _requests_by_ip[ip] if t > cutoff]
-        if len(timestamps) >= REQUESTS_PER_WINDOW:
-            _requests_by_ip[ip] = timestamps
-            raise HTTPException(
-                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail="Too many requests - please wait a moment and try again.",
-            )
-        timestamps.append(now)
-        _requests_by_ip[ip] = timestamps
+    def rate_limit_dependency(request: Request) -> None:
+        ip = _client_ip(request)
+        key = (bucket, ip)
+        now = time.monotonic()
+        cutoff = now - window_s
+
+        with _lock:
+            timestamps = [t for t in _requests_by_ip[key] if t > cutoff]
+            if len(timestamps) >= requests_per_window:
+                _requests_by_ip[key] = timestamps
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail="Too many requests - please wait a moment and try again.",
+                )
+            timestamps.append(now)
+            _requests_by_ip[key] = timestamps
+
+    return rate_limit_dependency
+
+
+rate_limit = make_rate_limit("overpass", REQUESTS_PER_WINDOW)
+lookup_poi_rate_limit = make_rate_limit("lookup_poi", LOOKUP_POI_REQUESTS_PER_WINDOW)

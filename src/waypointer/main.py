@@ -45,14 +45,22 @@ from waypointer.gpx_io import (
     to_xml_bytes,
     total_ascent_m,
 )
-from waypointer.osm import USER_AGENT, OsmNode, OverpassError, build_overpass_query, query_overpass
+from waypointer.osm import (
+    USER_AGENT,
+    OsmNode,
+    OverpassError,
+    build_overpass_query,
+    nearest_node,
+    query_overpass,
+)
 from waypointer.poi_types import DEFAULT_VISIBLE_POI_TYPES, POI_TYPES, clamp_distance_m
-from waypointer.rate_limit import rate_limit
+from waypointer.rate_limit import lookup_poi_rate_limit, rate_limit
 from waypointer.schemas import (
     Candidate,
     ExistingWaypoint,
     FailedPoiType,
     FindPoisResponse,
+    PoiLookupResult,
     PoiSearchConfig,
     WahooRoutePayload,
 )
@@ -484,6 +492,55 @@ def wahoo_import_route(file_url: str = Form(...)) -> Response:
         content=gpx_bytes,
         media_type="application/gpx+xml",
         headers={"Content-Disposition": 'attachment; filename="wahoo_route.gpx"'},
+    )
+
+
+# Resolves *this specific rendered basemap icon*, independent of the poi
+# type's own (usually much larger) find-pois search-distance bounds.
+LOOKUP_POI_RADIUS_M = 40
+
+
+@app.post(
+    "/api/lookup-poi",
+    response_model=PoiLookupResult,
+    dependencies=[Depends(lookup_poi_rate_limit)],
+)
+async def lookup_poi(
+    lat: float = Form(...), lon: float = Form(...), poi_type: str = Form(...)
+) -> PoiLookupResult:
+    """Resolves a click on one of the basemap's own POI icons to the real OSM
+    node behind it - those icons carry only a class/subclass/name, no OSM id
+    or tags, so the frontend can't build a Candidate (or show tags/an edit
+    link) without this round trip. Deliberately takes no gpx_file: this is
+    click-driven and must work before any route is loaded.
+    """
+    cfg = POI_TYPES.get(poi_type)
+    if cfg is None or cfg.tag_filter is None:
+        raise HTTPException(status_code=400, detail=f"{poi_type} is not searchable")
+
+    query = build_overpass_query(
+        [(lat, lon)], tag_filter=cfg.tag_filter, radius_m=LOOKUP_POI_RADIUS_M
+    )
+    try:
+        nodes = await asyncio.to_thread(query_overpass, query)
+    except OverpassError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Failed to query OpenStreetMap: {exc}"
+        ) from exc
+
+    node = nearest_node(nodes, lat, lon)
+    if node is None:
+        raise HTTPException(
+            status_code=404, detail="No matching OpenStreetMap node found near this point."
+        )
+
+    return PoiLookupResult(
+        osm_id=node.id,
+        poi_type=poi_type,
+        name=node.tags.get("name"),
+        lat=node.lat,
+        lon=node.lon,
+        tags=node.tags,
     )
 
 

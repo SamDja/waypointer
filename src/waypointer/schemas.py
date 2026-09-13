@@ -16,6 +16,21 @@ class PoiSearchConfig(BaseModel):
     max_distance_m: float
 
 
+class PoiLookupResult(BaseModel):
+    # Resolves a single basemap POI icon click (see main.py's /api/lookup-poi)
+    # to a real OSM node - carries the full raw tag dict, unlike Candidate,
+    # so the frontend can render "as much info as OSM has" plus an edit link.
+    # Kept separate from Candidate (rather than adding `tags` there) since
+    # Candidate round-trips through /api/save's request body.
+    osm_id: int
+    osm_type: str = "node"  # tag_filter is always a node[...] filter today
+    poi_type: str
+    name: str | None = None
+    lat: float
+    lon: float
+    tags: dict[str, str]
+
+
 class ExistingWaypoint(BaseModel):
     # index is this waypoint's position in the uploaded GPX's <wpt> list,
     # in document order - stable within one find/save round trip since the
