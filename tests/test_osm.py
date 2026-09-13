@@ -15,8 +15,8 @@ def test_build_overpass_query_contains_around_clause():
     coords = [(48.0, 2.0), (48.001, 2.001)]
     query = build_overpass_query(coords, radius_m=50)
     assert "around:50,48.0,2.0,48.001,2.001" in query
-    assert 'node["amenity"="drinking_water"]' in query
-    assert "out body;" in query
+    assert 'nwr["amenity"="drinking_water"]' in query
+    assert "out body geom;" in query
 
 
 def test_build_overpass_query_requires_coords():
@@ -31,6 +31,71 @@ def test_query_overpass_parses_nodes(overpass_response_json):
     assert len(nodes) == 2
     assert all(isinstance(n, OsmNode) for n in nodes)
     assert nodes[0].tags.get("amenity") == "drinking_water"
+
+
+@responses.activate
+def test_query_overpass_captures_way_geometry():
+    payload = {
+        "elements": [
+            {
+                "type": "way",
+                "id": 175901590,
+                "geometry": [
+                    {"lat": 45.9, "lon": 11.5},
+                    {"lat": 45.901, "lon": 11.501},
+                    {"lat": 45.9, "lon": 11.5},
+                ],
+                "tags": {"tourism": "alpine_hut", "name": "Malga Larici di Sotto"},
+            }
+        ]
+    }
+    responses.add(responses.POST, OVERPASS_URL, json=payload, status=200)
+    nodes = query_overpass("fake query", use_cache=False)
+    assert len(nodes) == 1
+    assert nodes[0].way_points == [(45.9, 11.5), (45.901, 11.501), (45.9, 11.5)]
+    assert (nodes[0].lat, nodes[0].lon) == (45.9, 11.5)
+    assert nodes[0].tags.get("name") == "Malga Larici di Sotto"
+
+
+@responses.activate
+def test_query_overpass_flattens_relation_member_geometry():
+    payload = {
+        "elements": [
+            {
+                "type": "relation",
+                "id": 99,
+                "tags": {"leisure": "park"},
+                "members": [
+                    {
+                        "type": "way",
+                        "role": "outer",
+                        "geometry": [{"lat": 45.9, "lon": 11.5}, {"lat": 45.91, "lon": 11.51}],
+                    },
+                    {"type": "node", "role": "label", "lat": 45.905, "lon": 11.505},
+                ],
+            }
+        ]
+    }
+    responses.add(responses.POST, OVERPASS_URL, json=payload, status=200)
+    nodes = query_overpass("fake query", use_cache=False)
+    assert len(nodes) == 1
+    assert nodes[0].way_points == [
+        (45.9, 11.5),
+        (45.91, 11.51),
+        (45.905, 11.505),
+    ]
+
+
+@responses.activate
+def test_query_overpass_skips_way_without_geometry():
+    payload = {
+        "elements": [
+            {"type": "way", "id": 2, "tags": {"tourism": "alpine_hut"}},
+        ]
+    }
+    responses.add(responses.POST, OVERPASS_URL, json=payload, status=200)
+    nodes = query_overpass("fake query", use_cache=False)
+    assert nodes == []
 
 
 @responses.activate

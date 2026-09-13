@@ -37,16 +37,29 @@ class OsmNode:
     lat: float
     lon: float
     tags: dict[str, str]
+    # Populated only for way/relation results: every vertex of the element's
+    # own geometry (its building outline, area boundary, or member ways), so
+    # the caller can pick whichever vertex sits closest to the route instead
+    # of relying on a single bounding-box centroid - see query_overpass.
+    # None for plain node results.
+    way_points: list[tuple[float, float]] | None = None
 
 
 def build_overpass_query(
     coords: list[tuple[float, float]],
-    tag_filter: str = 'node["amenity"="drinking_water"]',
+    tag_filter: str = 'nwr["amenity"="drinking_water"]',
     radius_m: int = 10,
     timeout_s: int = 90,
 ) -> str:
     """Builds an Overpass QL query matching tag_filter within radius_m of the
     polyline formed by coords, using the `around` distance-to-line operator.
+
+    tag_filter should select the `nwr` (node/way/relation) type where the
+    underlying OSM tag can genuinely appear on more than a node - many
+    real-world POIs (e.g. a mountain hut mapped as a building outline) are
+    tagged on a way or relation, not a point. `out body geom;` returns full
+    tags for every element, plus each way/relation's full vertex geometry
+    (nodes already carry their own lat/lon).
     """
     if not coords:
         raise ValueError("coords must contain at least one point")
@@ -54,7 +67,7 @@ def build_overpass_query(
     return (
         f"[out:json][timeout:{timeout_s}];\n"
         f"{tag_filter}(around:{radius_m},{coord_pairs});\n"
-        "out body;"
+        "out body geom;"
     )
 
 
@@ -92,6 +105,15 @@ _session = requests.Session()
 
 def _cache_key(query: str, url: str) -> str:
     return hashlib.sha256(f"{url}\n{query}".encode()).hexdigest()
+
+
+def _geometry_points(geometry: list[dict] | None) -> list[tuple[float, float]]:
+    """Extracts (lat, lon) tuples from an Overpass `out geom;` geometry
+    array, skipping any entry missing a coordinate (Overpass emits a null
+    placeholder for a way member it couldn't resolve)."""
+    if not geometry:
+        return []
+    return [(pt["lat"], pt["lon"]) for pt in geometry if pt and "lat" in pt and "lon" in pt]
 
 
 def query_overpass(
@@ -132,11 +154,46 @@ def query_overpass(
 
     try:
         payload = response.json()
-        nodes = [
-            OsmNode(id=el["id"], lat=el["lat"], lon=el["lon"], tags=el.get("tags", {}))
-            for el in payload["elements"]
-            if el.get("type") == "node"
-        ]
+        nodes = []
+        for el in payload["elements"]:
+            el_type = el.get("type")
+            if el_type == "node":
+                nodes.append(
+                    OsmNode(id=el["id"], lat=el["lat"], lon=el["lon"], tags=el.get("tags", {}))
+                )
+                continue
+
+            if el_type == "way":
+                way_points = _geometry_points(el.get("geometry"))
+            elif el_type == "relation":
+                # `out geom;` nests each member's own geometry rather than
+                # giving the relation one geometry list - flatten every
+                # member's points (way members' "geometry" arrays, plus any
+                # node members' own lat/lon) into one candidate list. Role
+                # (inner/outer) doesn't matter here: any vertex is a valid
+                # candidate position to test against the route.
+                way_points = []
+                for member in el.get("members", []):
+                    way_points.extend(_geometry_points(member.get("geometry")))
+                    if member.get("type") == "node" and "lat" in member and "lon" in member:
+                        way_points.append((member["lat"], member["lon"]))
+            else:
+                continue
+
+            if not way_points:
+                # No usable geometry at all (e.g. an unresolved relation
+                # member) - skip rather than error the whole query out over
+                # one malformed element.
+                continue
+            nodes.append(
+                OsmNode(
+                    id=el["id"],
+                    lat=way_points[0][0],
+                    lon=way_points[0][1],
+                    tags=el.get("tags", {}),
+                    way_points=way_points,
+                )
+            )
     except (ValueError, KeyError, TypeError) as exc:
         raise OverpassError(f"Overpass API returned malformed data: {exc}") from exc
 

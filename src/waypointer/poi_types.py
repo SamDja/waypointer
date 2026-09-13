@@ -47,7 +47,7 @@ POI_TYPES: dict[str, PoiTypeConfig] = {
         course_point_type=16,
         default_name="Water Fountain",
         sym_hints=("water", "fountain"),
-        tag_filter='node["amenity"="drinking_water"]',
+        tag_filter='nwr["amenity"="drinking_water"]',
         default_max_distance_m=50.0,
         min_distance_m=1.0,
         max_distance_m=200.0,
@@ -64,67 +64,67 @@ POI_TYPES: dict[str, PoiTypeConfig] = {
     "hospital": PoiTypeConfig(
         key="hospital", label="Hospital", course_point_type=46,
         default_name="Hospital", sym_hints=("hospital",),
-        tag_filter='node["amenity"="hospital"]',
+        tag_filter='nwr["amenity"="hospital"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "pharmacy": PoiTypeConfig(
         key="pharmacy", label="Pharmacy", course_point_type=56,
         default_name="Pharmacy", sym_hints=("pharmacy", "drug store", "drugstore"),
-        tag_filter='node["amenity"="pharmacy"]',
+        tag_filter='nwr["amenity"="pharmacy"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "bar": PoiTypeConfig(
         key="bar", label="Bar", course_point_type=30,
         default_name="Bar", sym_hints=("bar", "pub"),
-        tag_filter='node["amenity"="bar"]',
+        tag_filter='nwr["amenity"="bar"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "bike_shop": PoiTypeConfig(
         key="bike_shop", label="Bike Shop", course_point_type=34,
         default_name="Bike Shop", sym_hints=("bike shop", "bicycle shop"),
-        tag_filter='node["shop"="bicycle"]',
+        tag_filter='nwr["shop"="bicycle"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "coffee": PoiTypeConfig(
         key="coffee", label="Coffee", course_point_type=38,
         default_name="Coffee Shop", sym_hints=("coffee", "cafe"),
-        tag_filter='node["amenity"="cafe"]',
+        tag_filter='nwr["amenity"="cafe"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "food": PoiTypeConfig(
         key="food", label="Food", course_point_type=17,
         default_name="Restaurant", sym_hints=("food", "restaurant", "dining"),
-        tag_filter='node["amenity"="restaurant"]',
+        tag_filter='nwr["amenity"="restaurant"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "gas_station": PoiTypeConfig(
         key="gas_station", label="Gas Station", course_point_type=43,
         default_name="Gas Station", sym_hints=("gas station", "fuel", "petrol"),
-        tag_filter='node["amenity"="fuel"]',
+        tag_filter='nwr["amenity"="fuel"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "groceries": PoiTypeConfig(
         key="groceries", label="Groceries", course_point_type=45,
         default_name="Grocery Store", sym_hints=("grocery", "groceries", "supermarket"),
-        tag_filter='node["shop"~"^(supermarket|convenience|grocery)$"]',
+        tag_filter='nwr["shop"~"^(supermarket|convenience|grocery)$"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "shopping": PoiTypeConfig(
         key="shopping", label="Shopping", course_point_type=58,
         default_name="Shop", sym_hints=("shopping", "shop", "store"),
-        tag_filter='node["shop"]',
+        tag_filter='nwr["shop"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "winery": PoiTypeConfig(
         key="winery", label="Winery", course_point_type=65,
         default_name="Winery", sym_hints=("winery", "vineyard"),
-        tag_filter='node["shop"="wine"]',
+        tag_filter='nwr["shop"="wine"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "info": PoiTypeConfig(
         key="info", label="Info Point", course_point_type=47,
         default_name="Info Point", sym_hints=("info", "information"),
-        tag_filter='node["tourism"="information"]',
+        tag_filter='nwr["tourism"="information"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "internet": PoiTypeConfig(
@@ -138,55 +138,55 @@ POI_TYPES: dict[str, PoiTypeConfig] = {
     "lodging": PoiTypeConfig(
         key="lodging", label="Lodging", course_point_type=51,
         default_name="Lodging", sym_hints=("lodging", "hotel", "hostel", "motel", "alpine hut"),
-        tag_filter='node["tourism"~"^(hotel|hostel|guest_house|motel|alpine_hut)$"]',
+        tag_filter='nwr["tourism"~"^(hotel|hostel|guest_house|motel|alpine_hut)$"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "shower": PoiTypeConfig(
         key="shower", label="Shower", course_point_type=60,
         default_name="Shower", sym_hints=("shower",),
-        tag_filter='node["amenity"="shower"]',
+        tag_filter='nwr["amenity"="shower"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "toilet": PoiTypeConfig(
         key="toilet", label="Toilet", course_point_type=59,
         default_name="Toilet", sym_hints=("toilet", "restroom", "wc"),
-        tag_filter='node["amenity"="toilets"]',
+        tag_filter='nwr["amenity"="toilets"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "bike_parking": PoiTypeConfig(
         key="bike_parking", label="Bike Parking", course_point_type=32,
         default_name="Bike Parking", sym_hints=("bike parking", "bicycle parking"),
-        tag_filter='node["amenity"="bicycle_parking"]',
+        tag_filter='nwr["amenity"="bicycle_parking"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "bike_share": PoiTypeConfig(
         key="bike_share", label="Bike Share", course_point_type=33,
         default_name="Bike Share", sym_hints=("bike share", "bike sharing"),
-        tag_filter='node["amenity"="bicycle_rental"]',
+        tag_filter='nwr["amenity"="bicycle_rental"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "chairlift": PoiTypeConfig(
         key="chairlift", label="Chairlift", course_point_type=36,
         default_name="Chairlift", sym_hints=("chairlift", "chair lift"),
-        tag_filter='node["aerialway"="chair_lift"]',
+        tag_filter='way["aerialway"="chair_lift"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "e_bike_charging": PoiTypeConfig(
         key="e_bike_charging", label="E-Bike Charging", course_point_type=41,
         default_name="E-Bike Charging", sym_hints=("e-bike", "ebike charging", "charging"),
-        tag_filter='node["amenity"="charging_station"]["bicycle"="yes"]',
+        tag_filter='nwr["amenity"="charging_station"]["bicycle"="yes"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "ferry": PoiTypeConfig(
         key="ferry", label="Ferry", course_point_type=42,
         default_name="Ferry", sym_hints=("ferry",),
-        tag_filter='node["amenity"="ferry_terminal"]',
+        tag_filter='nwr["amenity"="ferry_terminal"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "parking": PoiTypeConfig(
         key="parking", label="Parking", course_point_type=55,
         default_name="Parking", sym_hints=("parking",),
-        tag_filter='node["amenity"="parking"]',
+        tag_filter='nwr["amenity"="parking"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "transit": PoiTypeConfig(
@@ -198,13 +198,13 @@ POI_TYPES: dict[str, PoiTypeConfig] = {
     "campsite": PoiTypeConfig(
         key="campsite", label="Campsite", course_point_type=35,
         default_name="Campsite", sym_hints=("campsite", "camping", "camp ground", "campground"),
-        tag_filter='node["tourism"="camp_site"]',
+        tag_filter='nwr["tourism"="camp_site"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "dog_park": PoiTypeConfig(
         key="dog_park", label="Dog Park", course_point_type=40,
         default_name="Dog Park", sym_hints=("dog park",),
-        tag_filter='node["leisure"="dog_park"]',
+        tag_filter='nwr["leisure"="dog_park"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "geocache": PoiTypeConfig(
@@ -214,13 +214,13 @@ POI_TYPES: dict[str, PoiTypeConfig] = {
     "park": PoiTypeConfig(
         key="park", label="Park", course_point_type=54,
         default_name="Park", sym_hints=("park",),
-        tag_filter='node["leisure"="park"]',
+        tag_filter='nwr["leisure"="park"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "rest_area": PoiTypeConfig(
         key="rest_area", label="Rest Area", course_point_type=57,
         default_name="Rest Area", sym_hints=("rest area", "picnic"),
-        tag_filter='node["highway"="rest_area"]',
+        tag_filter='nwr["highway"="rest_area"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "swimming": PoiTypeConfig(
@@ -228,7 +228,7 @@ POI_TYPES: dict[str, PoiTypeConfig] = {
         default_name="Swimming", sym_hints=("swimming", "swim", "pool"),
         # swimming_pool covers built pools; bathing_place is OSM's tag for
         # a designated/informal swimming spot at a lake, river, or coast.
-        tag_filter='node["leisure"~"^(swimming_pool|bathing_place)$"]',
+        tag_filter='nwr["leisure"~"^(swimming_pool|bathing_place)$"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "trailhead": PoiTypeConfig(
@@ -302,13 +302,13 @@ POI_TYPES: dict[str, PoiTypeConfig] = {
     "art": PoiTypeConfig(
         key="art", label="Art", course_point_type=28,
         default_name="Art", sym_hints=("art", "sculpture"),
-        tag_filter='node["tourism"="artwork"]',
+        tag_filter='nwr["tourism"="artwork"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "attraction": PoiTypeConfig(
         key="attraction", label="Attraction", course_point_type=29,
         default_name="Attraction", sym_hints=("attraction",),
-        tag_filter='node["tourism"="attraction"]',
+        tag_filter='nwr["tourism"="attraction"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "for_kids": PoiTypeConfig(
@@ -318,13 +318,13 @@ POI_TYPES: dict[str, PoiTypeConfig] = {
     "monument": PoiTypeConfig(
         key="monument", label="Monument", course_point_type=53,
         default_name="Monument", sym_hints=("monument", "memorial"),
-        tag_filter='node["historic"="monument"]',
+        tag_filter='nwr["historic"="monument"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "viewpoint": PoiTypeConfig(
         key="viewpoint", label="Viewpoint", course_point_type=64,
         default_name="Viewpoint", sym_hints=("viewpoint", "scenic view", "overlook"),
-        tag_filter='node["tourism"="viewpoint"]',
+        tag_filter='nwr["tourism"="viewpoint"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "generic": PoiTypeConfig(
