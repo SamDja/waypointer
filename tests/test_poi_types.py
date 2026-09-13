@@ -19,8 +19,15 @@ def test_registry_matches_wahoo_poi_mapping():
 def test_registry_has_water_type():
     water = POI_TYPES["water"]
     assert water.key == "water"
-    assert water.tag_filter == 'node["amenity"="drinking_water"]'
+    assert water.tag_filter == 'nwr["amenity"="drinking_water"]'
     assert water.min_distance_m <= water.default_max_distance_m <= water.max_distance_m
+
+
+def test_registry_chairlift_is_way_only():
+    # aerialway=chair_lift is mapped as a way (the cable route), never a
+    # node, per its OSM wiki page - node["aerialway"="chair_lift"] could
+    # never have matched a real chair lift.
+    assert POI_TYPES["chairlift"].tag_filter == 'way["aerialway"="chair_lift"]'
 
 
 def test_clamp_distance_m_bounds():
