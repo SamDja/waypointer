@@ -97,6 +97,39 @@ def test_find_pois_clamps_out_of_range_distance(sample_route_bytes, overpass_res
 
 
 @responses.activate
+def test_find_pois_uses_nearest_way_vertex_not_far_centroid(sample_route_bytes):
+    # Regression test for the "malga mapped as a way" bug: a way/relation's
+    # bounding-box centroid can sit far from the route even when one of its
+    # own vertices is genuinely close (e.g. a large park with just one
+    # corner near the route). The candidate must be positioned at the near
+    # vertex - the one within radius - not the far one.
+    near_point = {"lat": 48.857, "lon": 2.35301}  # a few meters from the route
+    far_point = {"lat": 49.5, "lon": 3.5}  # far outside any reasonable radius
+    payload = {
+        "elements": [
+            {
+                "type": "way",
+                "id": 175901590,
+                "tags": {"amenity": "drinking_water"},
+                "geometry": [far_point, near_point],
+            }
+        ]
+    }
+    responses.add(responses.POST, OVERPASS_URL, json=payload, status=200)
+    response = client.post(
+        "/api/find-pois",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"poi_config": json.dumps([{"poi_type": "water", "max_distance_m": 50}])},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert [c["osm_id"] for c in data["candidates"]] == [175901590]
+    candidate = data["candidates"][0]
+    assert candidate["lat"] == pytest.approx(near_point["lat"])
+    assert candidate["lon"] == pytest.approx(near_point["lon"])
+
+
+@responses.activate
 def test_find_pois_small_radius_still_finds_close_node(sample_route_bytes, overpass_response_json):
     # Regression test: at a small requested radius, the Overpass query must
     # still be built with enough padding (SIMPLIFY_TOLERANCE_M) over the

@@ -190,9 +190,19 @@ async def find_pois(
             # Authoritative distance check against the full-resolution
             # route, never the simplified one used only to build the
             # Overpass query - and against this type's own clamped radius,
-            # not a global constant.
-            distance_m, distance_from_start_m = project_onto_polyline_indexed_m(
-                (node.lat, node.lon), route_index
+            # not a global constant. For a way/relation result, way_points
+            # holds every vertex of its own geometry - check all of them and
+            # keep the one closest to the route, rather than a single
+            # bounding-box centroid that can sit far from the route even
+            # when an edge of a large element (a park, a parking lot) is
+            # genuinely nearby.
+            candidate_points = node.way_points or [(node.lat, node.lon)]
+            lat, lon, distance_m, distance_from_start_m = min(
+                (
+                    (pt[0], pt[1], *project_onto_polyline_indexed_m(pt, route_index))
+                    for pt in candidate_points
+                ),
+                key=lambda result: result[2],
             )
             if distance_m <= radius_m:
                 candidates.append(
@@ -200,8 +210,8 @@ async def find_pois(
                         osm_id=node.id,
                         poi_type=entry.poi_type,
                         name=node.tags.get("name"),
-                        lat=node.lat,
-                        lon=node.lon,
+                        lat=lat,
+                        lon=lon,
                         distance_m=distance_m,
                         distance_from_start_m=distance_from_start_m,
                     )
