@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { Layer, Map, Marker, Popup, Source, useMap, type MapRef } from "react-map-gl/maplibre"
 import "maplibre-gl/dist/maplibre-gl.css"
 import {
@@ -140,11 +140,21 @@ function FitBounds({
   existingWaypoints: ExistingWaypoint[]
 }) {
   const { current: map } = useMap()
+  // Tracks the last bounds actually applied, by value rather than by the
+  // candidates/routeCoords/existingWaypoints array *references* below -
+  // App.tsx hands this a freshly-built array on every render (e.g. after a
+  // click-added POI is included), so a reference-only dependency check
+  // would re-fit/re-zoom the map even when the computed bounds are
+  // identical to what's already applied.
+  const lastAppliedBoundsRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!map) return
     const bounds = getRouteBounds(routeCoords, candidates, existingWaypoints)
     if (!bounds) return
+    const key = JSON.stringify(bounds)
+    if (key === lastAppliedBoundsRef.current) return
+    lastAppliedBoundsRef.current = key
     map.fitBounds(bounds, { padding: 20, duration: 0 })
   }, [map, routeCoords, candidates, existingWaypoints])
 
@@ -481,6 +491,16 @@ export function RouteMap({
   const zoom = hasRoute ? 13 : DEFAULT_ZOOM
   const isHovering = hoveredPoi !== null
   const styleUrl = MAP_STYLES.find((s) => s.key === mapStyleKey)?.styleUrl ?? MAP_STYLES[0].styleUrl
+  // Click-added candidates (identified via candidateTags) are excluded from
+  // FitBounds's input - including one from its lookup popup shouldn't
+  // re-fit/re-zoom the map, since the visitor just clicked that exact spot
+  // and already has it in view. Memoized so this array's identity is stable
+  // across renders that don't actually change the search-found set (e.g.
+  // hover), matching FitBounds' own effect dependency.
+  const fitBoundsCandidates = useMemo(
+    () => candidates.filter((c) => !candidateTags[c.osm_id]),
+    [candidates, candidateTags]
+  )
 
   const pan = (dx: number, dy: number) => {
     mapRef.current?.getMap().panBy([dx, dy], { duration: 200 })
@@ -607,16 +627,18 @@ export function RouteMap({
                       {candidateTags[candidate.osm_id] && (
                         <OsmTagList tags={candidateTags[candidate.osm_id]} />
                       )}
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id={checkboxId}
-                          checked={isSelected}
-                          onCheckedChange={() => onToggle(candidate.osm_id)}
-                        />
-                        <Label htmlFor={checkboxId} className="font-normal">
-                          Include
-                        </Label>
-                      </div>
+                      {hasRoute && (
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            id={checkboxId}
+                            checked={isSelected}
+                            onCheckedChange={() => onToggle(candidate.osm_id)}
+                          />
+                          <Label htmlFor={checkboxId} className="font-normal">
+                            Include
+                          </Label>
+                        </div>
+                      )}
                       <a
                         href={osmEditNodeUrl(candidate.osm_id)}
                         target="_blank"
@@ -677,16 +699,18 @@ export function RouteMap({
                           </div>
                           <PoiTypeLabel name={result.name} label={poiType?.label} />
                           <OsmTagList tags={result.tags} />
-                          <div className="flex items-center gap-2">
-                            <Checkbox
-                              id="pending-lookup-include"
-                              checked={false}
-                              onCheckedChange={() => onConfirmPendingLookup?.()}
-                            />
-                            <Label htmlFor="pending-lookup-include" className="font-normal">
-                              Include
-                            </Label>
-                          </div>
+                          {hasRoute && (
+                            <div className="flex items-center gap-2">
+                              <Checkbox
+                                id="pending-lookup-include"
+                                checked={false}
+                                onCheckedChange={() => onConfirmPendingLookup?.()}
+                              />
+                              <Label htmlFor="pending-lookup-include" className="font-normal">
+                                Include
+                              </Label>
+                            </div>
+                          )}
                           <a
                             href={osmEditNodeUrl(result.osm_id)}
                             target="_blank"
@@ -774,7 +798,7 @@ export function RouteMap({
               <UserLocationMarker />
             </Marker>
           )}
-          <FitBounds routeCoords={routeCoords} candidates={candidates} existingWaypoints={existingWaypoints} />
+          <FitBounds routeCoords={routeCoords} candidates={fitBoundsCandidates} existingWaypoints={existingWaypoints} />
         </Map>
 
         <div className="absolute left-2 top-2 z-10">
