@@ -18,11 +18,69 @@ services:
       # section for how to generate the cert.
       - SSL_KEYFILE=${SSL_KEYFILE:-}
       - SSL_CERTFILE=${SSL_CERTFILE:-}
+      # Points at the postgis service below - see CLAUDE.md's "PostGIS POI
+      # database" section. No public-mirror fallback: POI lookups fail
+      # clearly (poi_db.PoiDbError) if this isn't reachable/populated.
+      - POSTGIS_URL=postgresql://waypointer:${POSTGIS_PASSWORD:-waypointer}@postgis:5432/pois
     volumes:
       - ${CERTS_DIR:-./certs}:/certs:ro
     networks:
       - waypointer-net
+    depends_on:
+      - postgis
     restart: unless-stopped
+
+  # Holds only the OSM nodes/ways/relations Waypointer actually searches
+  # for (see postgis/import_pois.lua), imported ahead of time via osm2pgsql
+  # instead of querying the public Overpass API live - see CLAUDE.md's
+  # "PostGIS POI database" section for the full rationale and the
+  # threshold-gated reimport script. Publishes POSTGIS_PORT so a backend
+  # running outside Docker (`uv run uvicorn`, for local frontend/backend
+  # dev - see README) can reach it at localhost too, not just waypointer/
+  # poi-import over waypointer-net; unset/leave the container-only default
+  # if you don't need that (e.g. the Pi, which only ever runs the app via
+  # compose).
+  postgis:
+    image: postgis/postgis:16-3.4
+    environment:
+      - POSTGRES_USER=waypointer
+      - POSTGRES_PASSWORD=${POSTGIS_PASSWORD:-waypointer}
+      - POSTGRES_DB=pois
+    ports:
+      - "${POSTGIS_PORT:-5432}:5432"
+    volumes:
+      - postgis-data:/var/lib/postgresql/data
+    networks:
+      - waypointer-net
+    restart: unless-stopped
+
+  # One-shot import job, not a long-running service - build+run explicitly
+  # via `docker compose run --rm poi-import` (postgis/update_check.sh does
+  # this on a threshold-gated schedule). The `import` profile keeps it out
+  # of a plain `docker compose up`. OSM_EXTRACT_URL (a Geofabrik regional
+  # .osm.pbf extract) has no usable default and must be set in .env before
+  # first bring-up.
+  poi-import:
+    build:
+      context: ./postgis
+    profiles:
+      - import
+    environment:
+      - OSM_EXTRACT_URL=${OSM_EXTRACT_URL}
+      - POSTGIS_URL=postgresql://waypointer:${POSTGIS_PASSWORD:-waypointer}@postgis:5432/pois
+      - IMPORT_STATE_FILE=/state/.last_import_state
+      # osm2pgsql tuning - see import.sh. Left unset by default (falls back
+      # to nproc / osm2pgsql's own 800MB default there); set on the Pi's
+      # .env if the container's default CPU/cache sizing doesn't fit its
+      # 4 cores / 4-8GB RAM well for the extract size in use.
+      - OSM2PGSQL_NUMBER_PROCESSES=${OSM2PGSQL_NUMBER_PROCESSES:-}
+      - OSM2PGSQL_CACHE_MB=${OSM2PGSQL_CACHE_MB:-}
+    volumes:
+      - ./postgis/state:/state
+    networks:
+      - waypointer-net
+    depends_on:
+      - postgis
 
   # Scrapes waypointer's /metrics and node-exporter's host metrics - see
   # monitoring/prometheus.yml and CLAUDE.md's Telemetry section.
@@ -85,3 +143,4 @@ networks:
 volumes:
   prometheus-data:
   grafana-data:
+  postgis-data:

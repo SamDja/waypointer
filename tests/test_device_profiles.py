@@ -3,7 +3,7 @@ from waypointer.device_profiles import (
     OutputFormat,
     build_waypoint,
 )
-from waypointer.osm import OsmNode
+from waypointer.poi_db import OsmNode
 
 
 def test_registry_has_expected_devices():

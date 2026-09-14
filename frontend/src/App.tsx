@@ -45,7 +45,7 @@ type Step = "import" | "find"
 const EMPTY_CANDIDATES: Candidate[] = []
 const EMPTY_FAILED_POI_TYPES: FailedPoiType[] = []
 
-// Firing every per-type /api/find-pois request at once seems to make the
+// Firing every per-type /api/find-pois/route request at once seems to make the
 // public Overpass mirror more likely to time out / 502 (it may throttle
 // concurrent connections from our server's single shared IP) - staggering
 // each request's start by this much, smallest search radius first, gives
@@ -64,7 +64,7 @@ export default function App() {
   const [previewExistingWaypoints, setPreviewExistingWaypoints] = useState<ExistingWaypoint[]>([])
   const [findResult, setFindResult] = useState<FindPoisResponse | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
-  // POIs added by clicking a basemap icon rather than via /api/find-pois -
+  // POIs added by clicking a basemap icon rather than via /api/find-pois/route -
   // kept as a sibling to findResult (not merged into it) so a click works
   // even before a search has run, or before a route is loaded at all. See
   // allCandidates below, which is what everything downstream actually reads.
@@ -81,7 +81,7 @@ export default function App() {
   // Visitor-chosen overrides of a pre-existing waypoint's suggested POI
   // type (see ImportCard's "Waypoints" tab), keyed by ExistingWaypoint.index
   // - applied on top of whatever existingWaypoints currently is (preview or
-  // backend-authoritative) so the choice survives a later /api/find-pois
+  // backend-authoritative) so the choice survives a later /api/find-pois/route
   // call, which recomputes its own suggestion from scratch.
   const [waypointTypeOverrides, setWaypointTypeOverrides] = useState<Record<number, string>>({})
   const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>(() => loadSettings())
@@ -309,7 +309,7 @@ export default function App() {
     })
     const toastId = toast("Searching OpenStreetMap for nearby POIs...", "loading")
 
-    // One /api/find-pois call per requested type instead of one call
+    // One /api/find-pois/route call per requested type instead of one call
     // carrying every type, so the map/candidate list can fill in type-by-
     // type as each resolves instead of only once the slowest type finishes.
     // Starts are staggered (smallest search radius first - see
@@ -404,7 +404,7 @@ export default function App() {
   }
 
   // No authoritative point count/distance exists client-side until
-  // /api/find-pois responds - previewRouteCoords (client-parsed GPX) is a
+  // /api/find-pois/route responds - previewRouteCoords (client-parsed GPX) is a
   // rough stand-in until findResult.point_count is available.
   const pointCount = findResult?.point_count ?? (previewRouteCoords.length || null)
   // Unlike pointCount, distance/elevation have no backend-authoritative
@@ -413,9 +413,9 @@ export default function App() {
   const distanceM = totalDistanceM(previewRouteCoords)
   const { gainM: elevationGainM, lossM: elevationLossM } = elevationGainLossM(previewElevations)
   // Same preview-then-authoritative pattern as routeCoords: client-parsed
-  // until /api/find-pois responds, then the backend's own parse wins - with
+  // until /api/find-pois/route responds, then the backend's own parse wins - with
   // any visitor override from ImportCard's "Waypoints" tab applied on top,
-  // since a fresh find-pois response would otherwise silently discard it.
+  // since a fresh find-pois/route response would otherwise silently discard it.
   const existingWaypoints = useMemo(
     () =>
       (findResult?.existing_waypoints ?? previewExistingWaypoints).map((w) => ({
