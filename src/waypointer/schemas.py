@@ -29,6 +29,11 @@ class PoiLookupResult(BaseModel):
     lat: float
     lon: float
     tags: dict[str, str]
+    # ISO 8601 timestamp of this node's last edit on OSM (from Overpass'
+    # `out meta`), None if unavailable - distinct from a `check_date`/
+    # `survey:date` tag, which is a mapper-set field in `tags` rather than
+    # OSM's own edit-history metadata.
+    last_edited: str | None = None
 
 
 class ExistingWaypoint(BaseModel):

@@ -89,6 +89,7 @@ def test_lookup_poi_returns_nearest_node(overpass_response_json):
     assert data["poi_type"] == "water"
     assert data["name"] == "Fontaine Wallace"
     assert data["tags"] == {"amenity": "drinking_water", "name": "Fontaine Wallace"}
+    assert data["last_edited"] == "2023-05-01T12:00:00Z"
 
 
 @responses.activate

@@ -143,3 +143,23 @@ body {
   line-height: 1;
   color: var(--muted-foreground);
 }
+
+/* RouteMap.tsx gives markers an explicit z-index (ROUTE_ENDPOINT_Z_INDEX =
+   500, HOVERED_Z_INDEX = 1000) but react-map-gl's <Popup> has no equivalent
+   prop, so without this an open popup - which should always read as "on
+   top" - can be covered by a hovered or endpoint marker rendered elsewhere
+   in the DOM. Set above the highest marker z-index used anywhere. */
+.maplibregl-popup {
+  z-index: 1500;
+  border-radius: var(--radius-xl);
+}
+
+/* shadcn/Radix Tooltip content (e.g. RouteMap.tsx's OsmTagLabel/"Last
+   edited on OSM" tooltips) portals to <body>, landing in the same
+   effective stacking context as .maplibregl-popup above rather than as a
+   descendant of it - without an explicit z-index higher than the popup's
+   1500, the open popup's own (opaque) background paints over the tooltip
+   instead of the tooltip showing on top of it. */
+[data-slot="tooltip-content"] {
+  z-index: 2000;
+}
