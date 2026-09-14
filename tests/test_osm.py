@@ -16,7 +16,7 @@ def test_build_overpass_query_contains_around_clause():
     query = build_overpass_query(coords, radius_m=50)
     assert "around:50,48.0,2.0,48.001,2.001" in query
     assert 'nwr["amenity"="drinking_water"]' in query
-    assert "out body geom;" in query
+    assert "out body meta geom;" in query
 
 
 def test_build_overpass_query_requires_coords():
@@ -31,6 +31,8 @@ def test_query_overpass_parses_nodes(overpass_response_json):
     assert len(nodes) == 2
     assert all(isinstance(n, OsmNode) for n in nodes)
     assert nodes[0].tags.get("amenity") == "drinking_water"
+    assert nodes[0].timestamp == "2023-05-01T12:00:00Z"
+    assert nodes[1].timestamp is None
 
 
 @responses.activate

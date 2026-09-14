@@ -7,6 +7,7 @@ import {
   ChevronRight,
   ChevronUp,
   Crosshair,
+  Info,
   Locate,
   MapPin,
   Navigation,
@@ -25,6 +26,13 @@ import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
 import { buildAddablePoiFilter, resolvePoiTypeFromFeatureProps } from "@/lib/basemapPoiMapping"
 import { CircleMarkerIcon, ROUTE_END_COLOR, ROUTE_START_COLOR, UserLocationMarker } from "@/lib/mapIcons"
 import { MAP_STYLES } from "@/lib/mapStyles"
+import {
+  formatExactDateTime,
+  formatOsmTag,
+  formatRelativeDate,
+  isExcludedOsmTag,
+  type FormattedOsmTag,
+} from "@/lib/osmTagLabels"
 import { POI_TYPES } from "@/lib/poiTypes"
 import { toast } from "@/lib/toast"
 import type { Candidate, ExistingWaypoint, HoveredPoi, PoiLookupResult } from "@/types/candidate"
@@ -73,6 +81,8 @@ const MAP_TILES_DIMMED_OPACITY = 0.6
 // wins over the endpoints.
 const ROUTE_ENDPOINT_Z_INDEX = 500
 const HOVERED_Z_INDEX = 1000
+// An open Popup has no z-index prop of its own - index.css's
+// `.maplibregl-popup` rule keeps it above both constants above.
 
 const ROUTE_SOURCE_ID = "route"
 const ARROW_IMAGE_ID = "route-arrow"
@@ -388,21 +398,81 @@ function osmEditNewNodeUrl(lat: number, lon: number): string {
   return `https://www.openstreetmap.org/edit#map=19/${lat}/${lon}`
 }
 
+// A tag's own label, with the wiki-link info icon and (for a date-like tag,
+// e.g. check_date/survey:date - see osmTagLabels' "Last verified" label) an
+// exact-timestamp tooltip on hover.
+function OsmTagLabel({ tag }: { tag: FormattedOsmTag }) {
+  const label = (
+    <span className="truncate">{tag.label}</span>
+  )
+  return (
+    <span className="inline-flex items-center gap-1 min-w-0">
+      {tag.isDate ? (
+        <Tooltip>
+          <TooltipTrigger asChild>{label}</TooltipTrigger>
+          <TooltipContent>{formatExactDateTime(tag.value)}</TooltipContent>
+        </Tooltip>
+      ) : (
+        label
+      )}
+      <a
+        href={tag.wikiUrl}
+        target="_blank"
+        rel="noreferrer"
+        title={`Learn more about "${tag.key}" on the OSM wiki`}
+        aria-label={`Learn more about ${tag.label} on the OSM wiki`}
+        className="shrink-0 text-muted-foreground/70 hover:text-primary"
+      >
+        <Info className="size-3" />
+      </a>
+    </span>
+  )
+}
+
 // Renders every OSM tag on a node except `name` (already shown as the
-// popup's header) - deliberately generic rather than a hardcoded field list,
-// since "as much info as OSM has" means whatever tags happen to be present.
+// popup's header) and the excluded pure-provenance keys (see
+// osmTagLabels.ts) - deliberately generic rather than a hardcoded field
+// list, since "as much info as OSM has" means whatever tags happen to be
+// present. A table (property name as each row's <th>) reads better than a
+// plain list once there are more than a couple of rows. Values are
+// truncated (see osmTagLabels.truncateOsmValue) rather than left to
+// wrap/overflow, since a long unbroken value (a URL) can force the popup
+// wider than its maxWidth.
 function OsmTagList({ tags }: { tags: Record<string, string> }) {
-  const entries = Object.entries(tags).filter(([key]) => key !== "name")
+  const entries = Object.entries(tags).filter(
+    ([key]) => key !== "name" && !isExcludedOsmTag(key)
+  )
   if (entries.length === 0) return null
   return (
-    <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
-      {entries.map(([key, value]) => (
-        <div key={key} className="contents">
-          <dt className="font-medium">{key}</dt>
-          <dd className="break-words">{value}</dd>
-        </div>
-      ))}
-    </dl>
+    <table className="w-full mt-1 text-xs text-muted-foreground">
+      <tbody>
+        {entries.map(([key, value]) => {
+          const tag = formatOsmTag(key, value)
+          return (
+            <tr key={key} className="border-1">
+              <th scope="row" className="bg-olive-100 pl-1 py-1.5 pr-3 text-left font-medium align-top whitespace-nowrap">
+                <OsmTagLabel tag={tag} />
+              </th>
+              <td className="pl-1 py-1.5 min-w-0 break-words align-top">
+                {tag.href ? (
+                  <a
+                    href={tag.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={tag.value}
+                    className="text-primary underline"
+                  >
+                    {tag.displayValue}
+                  </a>
+                ) : (
+                  <span title={tag.value}>{tag.displayValue}</span>
+                )}
+              </td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
   )
 }
 
@@ -615,9 +685,10 @@ export function RouteMap({
                     latitude={candidate.lat}
                     anchor="bottom"
                     offset={16}
+                    maxWidth="280px"
                     onClose={() => setOpenPopup(null)}
                   >
-                    <div className="flex flex-col gap-2 text-sm">
+                    <div className="flex flex-col gap-3 text-sm">
                       <div className="flex items-center gap-1 font-medium">
                         <Icon className="size-4" style={{ color }} />
                         {candidate.name || (poiType?.label ?? "Point of interest")}
@@ -660,9 +731,10 @@ export function RouteMap({
               latitude={pendingLookup.lat}
               anchor="bottom"
               offset={16}
+              maxWidth="280px"
               onClose={() => onDismissPendingLookup?.()}
             >
-              <div className="flex flex-col gap-2 text-sm">
+              <div className="flex flex-col gap-3 text-sm">
                 {pendingLookup.status === "loading" && (
                   <p className="text-muted-foreground">Looking up this point…</p>
                 )}
@@ -698,6 +770,16 @@ export function RouteMap({
                             {result.name || (poiType?.label ?? "Point of interest")}
                           </div>
                           <PoiTypeLabel name={result.name} label={poiType?.label} />
+                          {result.last_edited && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <p className="text-xs text-muted-foreground w-fit">
+                                  Last edited on OSM {formatRelativeDate(result.last_edited)}
+                                </p>
+                              </TooltipTrigger>
+                              <TooltipContent>{formatExactDateTime(result.last_edited)}</TooltipContent>
+                            </Tooltip>
+                          )}
                           <OsmTagList tags={result.tags} />
                           {hasRoute && (
                             <div className="flex items-center gap-2">
@@ -759,9 +841,10 @@ export function RouteMap({
                     latitude={waypoint.lat}
                     anchor="bottom"
                     offset={16}
+                    maxWidth="280px"
                     onClose={() => setOpenPopup(null)}
                   >
-                    <div className="flex flex-col gap-2 text-sm">
+                    <div className="flex flex-col gap-3 text-sm">
                       <div className="flex items-center gap-1 font-medium">
                         <Icon className="size-4" style={{ color }} />
                         {waypoint.name || "(unnamed)"}

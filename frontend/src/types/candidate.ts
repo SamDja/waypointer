@@ -25,6 +25,10 @@ export interface PoiLookupResult {
   lat: number
   lon: number
   tags: Record<string, string>
+  // ISO 8601 timestamp of this node's last edit on OSM, null if Overpass
+  // didn't return one - distinct from a check_date/survey:date tag inside
+  // `tags`, which a mapper sets by hand rather than OSM's own edit metadata.
+  last_edited: string | null
 }
 
 export interface ExistingWaypoint {

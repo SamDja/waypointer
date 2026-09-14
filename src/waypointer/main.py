@@ -541,6 +541,7 @@ async def lookup_poi(
         lat=node.lat,
         lon=node.lon,
         tags=node.tags,
+        last_edited=node.timestamp,
     )
 
 

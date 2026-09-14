@@ -10,7 +10,8 @@
       "tags": {
         "amenity": "drinking_water",
         "name": "Fontaine Wallace"
-      }
+      },
+      "timestamp": "2023-05-01T12:00:00Z"
     },
     {
       "type": "node",

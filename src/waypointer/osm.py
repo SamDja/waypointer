@@ -43,6 +43,11 @@ class OsmNode:
     # of relying on a single bounding-box centroid - see query_overpass.
     # None for plain node results.
     way_points: list[tuple[float, float]] | None = None
+    # ISO 8601 timestamp of this element's last edit on OSM, from `out meta`
+    # - not a tag, the actual edit-history metadata. None if the query didn't
+    # request meta or Overpass omitted it. Used by /api/lookup-poi to surface
+    # "last edited on OSM" alongside a POI's tags.
+    timestamp: str | None = None
 
 
 def build_overpass_query(
@@ -57,9 +62,10 @@ def build_overpass_query(
     tag_filter should select the `nwr` (node/way/relation) type where the
     underlying OSM tag can genuinely appear on more than a node - many
     real-world POIs (e.g. a mountain hut mapped as a building outline) are
-    tagged on a way or relation, not a point. `out body geom;` returns full
-    tags for every element, plus each way/relation's full vertex geometry
-    (nodes already carry their own lat/lon).
+    tagged on a way or relation, not a point. `out body meta geom;` returns
+    full tags for every element, plus each way/relation's full vertex
+    geometry (nodes already carry their own lat/lon) and edit metadata
+    (timestamp/version/changeset/user) - see OsmNode.timestamp.
     """
     if not coords:
         raise ValueError("coords must contain at least one point")
@@ -67,7 +73,7 @@ def build_overpass_query(
     return (
         f"[out:json][timeout:{timeout_s}];\n"
         f"{tag_filter}(around:{radius_m},{coord_pairs});\n"
-        "out body geom;"
+        "out body meta geom;"
     )
 
 
@@ -159,7 +165,13 @@ def query_overpass(
             el_type = el.get("type")
             if el_type == "node":
                 nodes.append(
-                    OsmNode(id=el["id"], lat=el["lat"], lon=el["lon"], tags=el.get("tags", {}))
+                    OsmNode(
+                        id=el["id"],
+                        lat=el["lat"],
+                        lon=el["lon"],
+                        tags=el.get("tags", {}),
+                        timestamp=el.get("timestamp"),
+                    )
                 )
                 continue
 
@@ -192,6 +204,7 @@ def query_overpass(
                     lon=way_points[0][1],
                     tags=el.get("tags", {}),
                     way_points=way_points,
+                    timestamp=el.get("timestamp"),
                 )
             )
     except (ValueError, KeyError, TypeError) as exc:
