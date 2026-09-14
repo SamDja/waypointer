@@ -225,3 +225,7 @@ __marimo__/
 .claude/*.md
 .claude/plans
 .claude/settings.local.json
+
+# postgis/update_check.sh's threshold-gated-reimport state (see postgis/import.sh)
+postgis/state/*
+!postgis/state/.gitkeep

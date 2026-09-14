@@ -11,7 +11,7 @@ import gpxpy.gpx
 
 from waypointer.device_profiles import build_waypoint
 from waypointer.geometry import LatLon, haversine_m
-from waypointer.osm import OsmNode
+from waypointer.poi_db import OsmNode
 from waypointer.poi_types import POI_TYPES
 
 WAYPOINTER_NS = "https://github.com/SamDja/waypointer"
@@ -37,8 +37,8 @@ def parse_gpx(content: bytes) -> gpxpy.gpx.GPX:
 
 def route_coordinates(gpx: gpxpy.gpx.GPX) -> list[LatLon]:
     """Flattens all track and route points, in document order, into one
-    polyline - used both for the Overpass query and the authoritative
-    50m distance check."""
+    polyline - used both for the PostGIS query and the authoritative
+    distance check."""
     coords: list[LatLon] = []
     for track in gpx.tracks:
         for segment in track.segments:

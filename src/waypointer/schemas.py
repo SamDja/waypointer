@@ -17,22 +17,23 @@ class PoiSearchConfig(BaseModel):
 
 
 class PoiLookupResult(BaseModel):
-    # Resolves a single basemap POI icon click (see main.py's /api/lookup-poi)
-    # to a real OSM node - carries the full raw tag dict, unlike Candidate,
-    # so the frontend can render "as much info as OSM has" plus an edit link.
-    # Kept separate from Candidate (rather than adding `tags` there) since
-    # Candidate round-trips through /api/save's request body.
+    # Resolves a single basemap POI icon click (see main.py's
+    # /api/find-pois/location) to a real OSM element - carries the full raw
+    # tag dict, unlike Candidate, so the frontend can render "as much info
+    # as OSM has" plus an edit link. Kept separate from Candidate (rather
+    # than adding `tags` there) since Candidate round-trips through
+    # /api/save's request body.
     osm_id: int
-    osm_type: str = "node"  # tag_filter is always a node[...] filter today
+    osm_type: str = "node"  # "node", "way", or "relation" - see poi_db.OsmNode
     poi_type: str
     name: str | None = None
     lat: float
     lon: float
     tags: dict[str, str]
-    # ISO 8601 timestamp of this node's last edit on OSM (from Overpass'
-    # `out meta`), None if unavailable - distinct from a `check_date`/
-    # `survey:date` tag, which is a mapper-set field in `tags` rather than
-    # OSM's own edit-history metadata.
+    # ISO 8601 timestamp of this element's last edit on OSM (imported via
+    # osm2pgsql's --extra-attributes - see poi_db.py), None if unavailable -
+    # distinct from a `check_date`/`survey:date` tag, which is a mapper-set
+    # field in `tags` rather than OSM's own edit-history metadata.
     last_edited: str | None = None
 
 
@@ -60,10 +61,10 @@ class ExistingWaypoint(BaseModel):
 
 
 class FailedPoiType(BaseModel):
-    # One requested POI type whose Overpass call errored or timed out -
-    # /api/find-pois still returns 200 with results for the types that
-    # succeeded (see main.py's find_pois()), unless every requested type
-    # failed, in which case the whole request 502s instead.
+    # One requested POI type whose PostGIS query errored - /api/find-pois/
+    # route still returns 200 with results for the types that succeeded
+    # (see main.py's find_pois()), unless every requested type failed, in
+    # which case the whole request 502s instead.
     poi_type: str
     error: str
 

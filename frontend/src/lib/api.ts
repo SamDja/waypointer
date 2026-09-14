@@ -19,7 +19,7 @@ export async function findPois(gpxFile: File, poiConfig: PoiSearchConfig[]): Pro
   formData.append("gpx_file", gpxFile)
   formData.append("poi_config", JSON.stringify(poiConfig))
 
-  const response = await fetch("/api/find-pois", { method: "POST", body: formData })
+  const response = await fetch("/api/find-pois/route", { method: "POST", body: formData })
   if (!response.ok) {
     throw new ApiError(await errorDetail(response, "Request failed."))
   }
@@ -36,7 +36,7 @@ export async function lookupPoi(
   formData.append("lon", String(lon))
   formData.append("poi_type", poiType)
 
-  const response = await fetch("/api/lookup-poi", { method: "POST", body: formData })
+  const response = await fetch("/api/find-pois/location", { method: "POST", body: formData })
   if (!response.ok) {
     throw new ApiError(
       await errorDetail(response, "Couldn't look up that point of interest."),
