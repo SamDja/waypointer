@@ -40,8 +40,16 @@ services:
   # poi-import over waypointer-net; unset/leave the container-only default
   # if you don't need that (e.g. the Pi, which only ever runs the app via
   # compose).
+  #
+  # Built from our own postgis/db.Dockerfile rather than pulled from
+  # postgis/postgis: that image is amd64-only (no arm64 build at all, for
+  # any tag) - a hard blocker on the Raspberry Pi. `docker compose build`
+  # already builds this like any other `build:` service, no extra step
+  # needed (unlike poi-import, which is profile-gated).
   postgis:
-    image: postgis/postgis:16-3.4
+    build:
+      context: ./postgis
+      dockerfile: db.Dockerfile
     environment:
       - POSTGRES_USER=waypointer
       - POSTGRES_PASSWORD=${POSTGIS_PASSWORD:-waypointer}

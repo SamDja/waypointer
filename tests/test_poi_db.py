@@ -34,7 +34,13 @@ def postgis_url():
     if PostgresContainer is None:
         pytest.skip("testcontainers is not installed")
     try:
-        container = PostgresContainer("postgis/postgis:16-3.4")
+        # postgis/postgis publishes amd64 only (no arm64 build at all) -
+        # would fail outright on an arm64 dev machine or CI runner.
+        # imresamu/postgis is a multi-arch alternative; its own docs call
+        # arm64 support "experimental", fine for a throwaway test
+        # container but not what postgis/db.Dockerfile (the real,
+        # self-built image used in docker-compose.yml) relies on.
+        container = PostgresContainer("imresamu/postgis:16-3.4")
         container.start()
     except Exception as exc:  # noqa: BLE001 - Docker unavailable in this environment
         pytest.skip(f"Docker/testcontainers unavailable: {exc}")
