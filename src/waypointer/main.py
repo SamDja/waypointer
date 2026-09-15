@@ -49,6 +49,7 @@ from waypointer.poi_types import DEFAULT_VISIBLE_POI_TYPES, POI_TYPES, clamp_dis
 from waypointer.rate_limit import lookup_poi_rate_limit, rate_limit
 from waypointer.schemas import (
     Candidate,
+    CandidateDetails,
     ExistingWaypoint,
     FailedPoiType,
     FindPoisResponse,
@@ -179,6 +180,7 @@ async def find_pois(
         )
 
     candidates: list[Candidate] = []
+    candidate_details: dict[int, CandidateDetails] = {}
     failed_poi_types: list[FailedPoiType] = []
     for (entry, radius_m), (_entry, nodes, error) in zip(prepared, fetch_results):
         if error is not None:
@@ -217,6 +219,9 @@ async def find_pois(
                         distance_from_start_m=distance_from_start_m,
                     )
                 )
+                candidate_details[node.id] = CandidateDetails(
+                    tags=node.tags, last_edited=node.timestamp
+                )
 
     candidates.sort(key=lambda c: c.distance_m)
     existing_waypoints = []
@@ -241,6 +246,7 @@ async def find_pois(
         existing_waypoints=existing_waypoints,
         route_coords=simplified,
         failed_poi_types=failed_poi_types,
+        candidate_details=candidate_details,
     )
 
 

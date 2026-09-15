@@ -139,6 +139,72 @@ export function formatOsmTag(key: string, value: string): FormattedOsmTag {
   }
 }
 
+// Rendered as one combined "Address" row rather than a separate row per
+// addr:* tag - a visitor cares about the address as a unit, and this order
+// (house number before street, postcode before city) matches how a
+// human-written address normally reads.
+const ADDRESS_TAG_ORDER = [
+  "addr:housenumber",
+  "addr:street",
+  "addr:postcode",
+  "addr:city",
+  "addr:country",
+]
+
+// check_date/survey:date are promoted out of the tag table entirely (see
+// RouteMap.tsx's PoiEditMeta, shown next to "Last edited") rather than
+// duplicated here - same treatment as `name`, which the table has always
+// excluded since it's already the popup's header.
+const PROMOTED_OSM_TAGS = new Set(["name", "check_date", "survey:date"])
+
+// Like formatOsmTag, but (1) groups every present addr:* tag into one
+// formatted row instead of one row each, (2) folds check_date:opening_hours
+// into the opening_hours row as a "verified ..." suffix instead of a
+// separate row, and (3) omits tags that are shown elsewhere in the popup
+// (see PROMOTED_OSM_TAGS). Used by OsmTagList in place of a plain
+// Object.entries(tags).map(formatOsmTag) call.
+export function groupOsmTags(tags: Record<string, string>): FormattedOsmTag[] {
+  const consumed = new Set(PROMOTED_OSM_TAGS)
+  const result: FormattedOsmTag[] = []
+
+  const addressParts = ADDRESS_TAG_ORDER.filter((key) => tags[key]).map((key) => tags[key])
+  if (addressParts.length > 0) {
+    for (const key of ADDRESS_TAG_ORDER) consumed.add(key)
+    const joined = addressParts.join(", ")
+    result.push({
+      key: "__address",
+      label: "Address",
+      value: joined,
+      displayValue: truncateOsmValue(joined),
+      isDate: false,
+      wikiUrl: "https://wiki.openstreetmap.org/wiki/Key:addr",
+    })
+  }
+
+  if (tags.opening_hours) {
+    consumed.add("opening_hours")
+    consumed.add("check_date:opening_hours")
+    const base = formatOsmTag("opening_hours", tags.opening_hours)
+    const checkDate = tags["check_date:opening_hours"]
+    result.push(
+      checkDate
+        ? {
+            ...base,
+            displayValue: `${base.displayValue} (verified ${formatRelativeDate(checkDate)})`,
+            value: `${base.value} — verified ${formatExactDateTime(checkDate)}`,
+          }
+        : base
+    )
+  }
+
+  for (const [key, value] of Object.entries(tags)) {
+    if (consumed.has(key) || isExcludedOsmTag(key)) continue
+    result.push(formatOsmTag(key, value))
+  }
+
+  return result
+}
+
 // Formats an ISO 8601 date/timestamp as e.g. "2 years ago". Falls back to
 // the raw string if it isn't parseable (a mapper's check_date isn't always
 // strictly ISO 8601).

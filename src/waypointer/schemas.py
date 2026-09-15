@@ -11,6 +11,17 @@ class Candidate(BaseModel):
     distance_from_start_m: float
 
 
+class CandidateDetails(BaseModel):
+    # Full OSM tags/edit-metadata for a Candidate, keyed by osm_id on
+    # FindPoisResponse.candidate_details rather than added to Candidate
+    # itself - Candidate round-trips through /api/save and
+    # /api/wahoo/route-payload's request bodies, so bloating it with tags
+    # would bloat every save/export round trip too, not just the search
+    # response. Same shape as PoiLookupResult's tags/last_edited fields.
+    tags: dict[str, str]
+    last_edited: str | None = None
+
+
 class PoiSearchConfig(BaseModel):
     poi_type: str
     max_distance_m: float
@@ -75,6 +86,7 @@ class FindPoisResponse(BaseModel):
     existing_waypoints: list[ExistingWaypoint]
     route_coords: list[tuple[float, float]]
     failed_poi_types: list[FailedPoiType] = []
+    candidate_details: dict[int, CandidateDetails] = {}
 
 
 class WahooRoutePayload(BaseModel):
