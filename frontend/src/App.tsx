@@ -28,6 +28,7 @@ import { toast, updateToast } from "@/lib/toast"
 import { loadWahooTokens, type WahooTokens } from "@/lib/wahooSettings"
 import type {
   Candidate,
+  CandidateDetails,
   ExistingWaypoint,
   FailedPoiType,
   FindPoisResponse,
@@ -69,11 +70,12 @@ export default function App() {
   // even before a search has run, or before a route is loaded at all. See
   // allCandidates below, which is what everything downstream actually reads.
   const [clickAddedCandidates, setClickAddedCandidates] = useState<Candidate[]>([])
-  // Raw OSM tags for click-added candidates, keyed by osm_id - not part of
-  // Candidate itself (which round-trips through /api/save), consumed only
-  // by RouteMap's marker popup so a reopened click-added marker still shows
-  // its tags/edit link.
-  const [clickAddedTags, setClickAddedTags] = useState<Record<number, Record<string, string>>>({})
+  // Tags/last-edited for click-added candidates, keyed by osm_id - not part
+  // of Candidate itself (which round-trips through /api/save), consumed
+  // only by RouteMap's marker popup so a reopened click-added marker still
+  // shows its tags/edit link. Merged with findResult.candidate_details (see
+  // candidateDetails below) into one map RouteMap actually reads from.
+  const [clickAddedDetails, setClickAddedDetails] = useState<Record<number, CandidateDetails>>({})
   const [pendingLookup, setPendingLookup] = useState<PendingPoiLookup | null>(null)
   const [searchedPoiTypes, setSearchedPoiTypes] = useState<PoiSearchConfig[]>([])
   const [keptWaypointIndices, setKeptWaypointIndices] = useState<Set<number>>(new Set())
@@ -253,7 +255,10 @@ export default function App() {
     setClickAddedCandidates((prev) =>
       prev.some((c) => c.osm_id === result.osm_id) ? prev : [...prev, candidate],
     )
-    setClickAddedTags((prev) => ({ ...prev, [result.osm_id]: result.tags }))
+    setClickAddedDetails((prev) => ({
+      ...prev,
+      [result.osm_id]: { tags: result.tags, last_edited: result.last_edited },
+    }))
     setSelectedIds((prev) => new Set(prev).add(result.osm_id))
     setPendingLookup(null)
   }
@@ -322,12 +327,18 @@ export default function App() {
     // plumbing on their end. Skipped types' candidates are already valid
     // (unchanged radius, no prior failure) and are carried over as-is
     // rather than re-fetched.
+    const carriedCandidates = toSkip.length > 0 ? (findResult?.candidates.filter((c) => toSkip.some((e) => e.poi_type === c.poi_type)) ?? []) : []
     const aggregate: FindPoisResponse = {
-      candidates: toSkip.length > 0 ? (findResult?.candidates.filter((c) => toSkip.some((e) => e.poi_type === c.poi_type)) ?? []) : [],
+      candidates: carriedCandidates,
       point_count: findResult?.point_count ?? 0,
       existing_waypoints: findResult?.existing_waypoints ?? [],
       route_coords: findResult?.route_coords ?? [],
       failed_poi_types: [],
+      candidate_details: Object.fromEntries(
+        carriedCandidates
+          .map((c) => [c.osm_id, findResult?.candidate_details[c.osm_id]] as const)
+          .filter((entry): entry is [number, CandidateDetails] => entry[1] !== undefined)
+      ),
     }
     let hasSucceeded = toSkip.length > 0
     if (toSkip.length > 0) setFindResult({ ...aggregate })
@@ -341,6 +352,7 @@ export default function App() {
           const result = await findPois(file, [entry])
           hasSucceeded = true
           aggregate.candidates = [...aggregate.candidates, ...result.candidates]
+          aggregate.candidate_details = { ...aggregate.candidate_details, ...result.candidate_details }
           aggregate.failed_poi_types = [...aggregate.failed_poi_types, ...result.failed_poi_types]
           // point_count/existing_waypoints/route_coords are route-derived,
           // not type-derived - identical across every per-type response for
@@ -437,6 +449,20 @@ export default function App() {
       ...clickAddedCandidates.filter((c) => !foundIds.has(c.osm_id)),
     ]
   }, [findResult, clickAddedCandidates])
+  // osm_ids added via a basemap click - used only to exclude those markers
+  // from RouteMap's FitBounds input (see RouteMapProps.clickAddedCandidateIds),
+  // not to decide what tag/edit info a popup shows (candidateDetails below).
+  const clickAddedCandidateIds = useMemo(
+    () => new Set(clickAddedCandidates.map((c) => c.osm_id)),
+    [clickAddedCandidates]
+  )
+  // Tags/last-edited for every candidate RouteMap can show a popup for -
+  // findResult.candidate_details covers search-found candidates, merged with
+  // clickAddedDetails for ones added by clicking a basemap icon.
+  const candidateDetails = useMemo(
+    () => ({ ...(findResult?.candidate_details ?? {}), ...clickAddedDetails }),
+    [findResult, clickAddedDetails]
+  )
 
   return (
     <div className="flex h-screen flex-col">
@@ -464,7 +490,8 @@ export default function App() {
             hoveredPoi={hoveredPoi}
             mapStyleKey={mapStyleKey}
             onMapStyleChange={handleMapStyleChange}
-            candidateTags={clickAddedTags}
+            candidateDetails={candidateDetails}
+            clickAddedCandidateIds={clickAddedCandidateIds}
             onBasemapPoiClick={handleBasemapPoiClick}
             pendingLookup={pendingLookup}
             onConfirmPendingLookup={handleConfirmPendingLookup}

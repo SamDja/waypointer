@@ -154,6 +154,46 @@ body {
   border-radius: var(--radius-xl);
 }
 
+/* Caps a POI popup's height relative to the map's own rendered height
+   (RouteMap.tsx sets --rm-map-height via a ResizeObserver on the map's
+   wrapper div) so a tag-heavy POI can't grow the popup to dominate the
+   screen. Width is set per-Popup via its own maxWidth prop (RouteMap.tsx),
+   not here. overflow: hidden here (not auto) is deliberate - this
+   container itself must never become the scrolling element, or the whole
+   popup (header/checkbox/edit-link included) scrolls as one unit instead
+   of just the tag table. flex column + min-height:0, threaded all the way
+   down through PoiPopupContent's and the pending-lookup wrapper's own
+   flex-1/min-h-0 (see RouteMap.tsx), lets OsmTagList's own overflow-y-auto
+   wrapper be the only region that actually scrolls. */
+.maplibregl-popup-content {
+  max-height: calc(var(--rm-map-height, 480px) * 0.7);
+  max-width: calc(var(--rm-map-width, 480px) * 0.5);
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* react-map-gl/maplibre's <Popup> portals its React children into a plain,
+   unstyled div it creates itself (see @vis.gl/react-maplibre's popup.ts:
+   `document.createElement('div')`, passed to maplibregl's setDOMContent) -
+   this div, not our own JSX root, is .maplibregl-popup-content's actual
+   direct child (the close button is its only sibling). Without this rule
+   that anonymous div is a plain block box with height:auto, so it always
+   grows to fit its content regardless of the max-height/overflow above,
+   and none of RouteMap.tsx's flex-1/min-h-0 classes on OUR content (nested
+   one level deeper) have a flex container to size themselves against.
+   Making it a shrinkable flex column here is what actually lets the popup
+   cap at max-height and makes OsmTagList's own overflow-y-auto wrapper the
+   thing that scrolls, instead of the popup growing unbounded. */
+.maplibregl-popup-content > div {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+}
+
 /* shadcn/Radix Tooltip content (e.g. RouteMap.tsx's OsmTagLabel/"Last
    edited on OSM" tooltips) portals to <body>, landing in the same
    effective stacking context as .maplibregl-popup above rather than as a

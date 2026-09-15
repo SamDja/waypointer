@@ -90,6 +90,27 @@ def test_find_pois_defaults_to_default_visible_types(sample_route_bytes, monkeyp
     assert data["failed_poi_types"] == []
 
 
+def test_find_pois_includes_candidate_details(sample_route_bytes, monkeypatch):
+    # candidate_details carries the same tags/last_edited the OsmNode already
+    # had (see poi_db.query_pois_near_route), keyed by osm_id - it's what
+    # lets a route-search-found candidate's map popup show the same info as
+    # a basemap-click lookup's (PoiLookupResult), rather than the bare
+    # osm_id/name/distance fields Candidate itself carries.
+    _stub_route_query(monkeypatch)
+    response = client.post(
+        "/api/find-pois/route",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert {c["osm_id"] for c in data["candidates"]} == {1001}
+    assert set(data["candidate_details"].keys()) == {"1001"}
+    assert data["candidate_details"]["1001"] == {
+        "tags": {"amenity": "drinking_water", "name": "Fontaine Wallace"},
+        "last_edited": "2023-05-01T12:00:00Z",
+    }
+
+
 def test_find_pois_rejects_invalid_gpx():
     response = client.post(
         "/api/find-pois/route",

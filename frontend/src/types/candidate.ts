@@ -13,6 +13,16 @@ export interface PoiSearchConfig {
   max_distance_m: number
 }
 
+// Sibling data for a Candidate, keyed by osm_id on
+// FindPoisResponse.candidate_details rather than added to Candidate itself -
+// Candidate round-trips through /api/save and /api/wahoo/route-payload's
+// request bodies, so bloating it with tags would bloat every save/export
+// round trip too, not just the search response.
+export interface CandidateDetails {
+  tags: Record<string, string>
+  last_edited: string | null
+}
+
 // Resolves a basemap POI icon click to a real OSM node (see
 // schemas.py's PoiLookupResult) - carries the full raw tag dict, unlike
 // Candidate, so the map popup can show as much OSM info as exists plus an
@@ -54,4 +64,5 @@ export interface FindPoisResponse {
   existing_waypoints: ExistingWaypoint[]
   route_coords: [number, number][]
   failed_poi_types: FailedPoiType[]
+  candidate_details: Record<number, CandidateDetails>
 }
