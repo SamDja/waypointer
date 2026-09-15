@@ -62,12 +62,16 @@ services:
       - waypointer-net
     restart: unless-stopped
 
-  # One-shot import job, not a long-running service - build+run explicitly
-  # via `docker compose run --rm poi-import` (postgis/update_check.sh does
-  # this on a threshold-gated schedule). The `import` profile keeps it out
-  # of a plain `docker compose up`. OSM_EXTRACT_URL (a Geofabrik regional
-  # .osm.pbf extract) has no usable default and must be set in .env before
-  # first bring-up.
+  # One-shot import job, not a long-running service. Always unconditionally
+  # drops and rebuilds the pois table, so only run it directly
+  # (`docker compose run --rm poi-import`) for first bring-up or a
+  # deliberate forced reimport - routine redeploys must NOT call this
+  # service directly; wire postgis/update_check.sh into a Pi-side cron
+  # entry instead, so reimports only happen once its size/time thresholds
+  # are actually met (see CLAUDE.md's "Threshold-gated reimports"). The
+  # `import` profile keeps it out of a plain `docker compose up`.
+  # OSM_EXTRACT_URL (a Geofabrik regional .osm.pbf extract) has no usable
+  # default and must be set in .env before first bring-up.
   poi-import:
     build:
       context: ./postgis

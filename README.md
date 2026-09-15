@@ -50,3 +50,15 @@ Docker-based, deployed to a Raspberry Pi 5 on the LAN via the included `docker-c
 docker build -t waypointer .
 docker run -p 8000:8000 waypointer
 ```
+
+`docker compose run --rm poi-import` is a **one-time first-bring-up step**, not something to run
+on every deploy - it always unconditionally rebuilds the whole `pois` table from a freshly
+re-downloaded extract. After first bring-up, wire `postgis/update_check.sh` into a Pi-side cron
+entry instead, so reimports only happen when they're actually warranted:
+
+```bash
+# crontab -e on the Pi
+0 3 * * * cd /path/to/waypointer && ./postgis/update_check.sh >> postgis/state/update_check.log 2>&1
+```
+
+See CLAUDE.md's "PostGIS POI database" section for the reimport thresholds this checks.
