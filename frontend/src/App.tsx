@@ -3,13 +3,14 @@ import { CandidateChecklist } from "@/components/CandidateChecklist"
 import { FeedbackWidget } from "@/components/FeedbackWidget"
 import { FindPoisCard } from "@/components/FindPoisCard"
 import { ImportCard } from "@/components/ImportCard"
-import { RouteMap } from "@/components/RouteMap"
+import { RouteMap, type PendingPoiLookup } from "@/components/RouteMap"
 import { SaveCard } from "@/components/SaveCard"
 import { StepCard } from "@/components/StepCard"
 import { Toaster } from "@/components/Toaster"
 import { WahooProfileMenu } from "@/components/WahooProfileMenu"
 import { OffRouteDialog, type OffRouteItem } from "@/components/OffRouteDialog"
-import { ApiError, findPois, routeLeg } from "@/lib/api"
+import { ApiError, findPois, lookupPoi, routeLeg } from "@/lib/api"
+import { track } from "@/lib/analytics"
 import { elevationGainLossM, projectOntoPolylineM, totalDistanceM } from "@/lib/geometry"
 import {
   buildGpxFile,
@@ -59,6 +60,7 @@ import { toast, updateToast } from "@/lib/toast"
 import { loadWahooTokens, type WahooTokens } from "@/lib/wahooSettings"
 import type {
   Candidate,
+  CandidateDetails,
   ExistingWaypoint,
   FailedPoiType,
   FindPoisResponse,
@@ -78,9 +80,21 @@ const EMPTY_CANDIDATES: Candidate[] = []
 const EMPTY_FAILED_POI_TYPES: FailedPoiType[] = []
 
 // Long enough that placing several anchors in a row collapses into one
-// Overpass call, short enough that the checklist catches up while the
-// visitor is still looking at the stretch they just added.
+// re-search, short enough that the checklist catches up while the visitor is
+// still looking at the stretch they just added.
 const RE_SEARCH_DEBOUNCE_MS = 1500
+
+// Staggers each per-type /api/find-pois/route request's start by this much,
+// smallest search radius first, so results stream in progressively per type
+// while still overlapping in flight rather than waiting for one to fully
+// finish before starting the next. (Originally added to give the public
+// Overpass mirror breathing room; kept after the move to PostGIS for the
+// progressive per-type streaming.)
+const SEARCH_STAGGER_MS = 200
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 export default function App() {
   const [file, setFile] = useState<File | null>(null)
@@ -89,18 +103,38 @@ export default function App() {
   const [previewExistingWaypoints, setPreviewExistingWaypoints] = useState<ExistingWaypoint[]>([])
   const [findResult, setFindResult] = useState<FindPoisResponse | null>(null)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  // POIs added by clicking a basemap icon rather than via /api/find-pois/route -
+  // kept as a sibling to findResult (not merged into it) so a click works
+  // even before a search has run, or before a route is loaded at all. See
+  // allCandidates below, which is what everything downstream actually reads.
+  const [clickAddedCandidates, setClickAddedCandidates] = useState<Candidate[]>([])
+  // Tags/last-edited for click-added candidates, keyed by osm_id - not part
+  // of Candidate itself (which round-trips through /api/save), consumed
+  // only by RouteMap's marker popup so a reopened click-added marker still
+  // shows its tags/edit link. Merged with findResult.candidate_details (see
+  // candidateDetails below) into one map RouteMap actually reads from.
+  const [clickAddedDetails, setClickAddedDetails] = useState<Record<number, CandidateDetails>>({})
+  const [pendingLookup, setPendingLookup] = useState<PendingPoiLookup | null>(null)
   const [searchedPoiTypes, setSearchedPoiTypes] = useState<PoiSearchConfig[]>([])
   const [keptWaypointIndices, setKeptWaypointIndices] = useState<Set<number>>(new Set())
   const [hoveredPoi, setHoveredPoi] = useState<HoveredPoi>(null)
   // Visitor-chosen overrides of a pre-existing waypoint's suggested POI
   // type (see ImportCard's "Waypoints" tab), keyed by ExistingWaypoint.index
   // - applied on top of whatever existingWaypoints currently is (preview or
-  // backend-authoritative) so the choice survives a later /api/find-pois
+  // backend-authoritative) so the choice survives a later /api/find-pois/route
   // call, which recomputes its own suggestion from scratch.
   const [waypointTypeOverrides, setWaypointTypeOverrides] = useState<Record<number, string>>({})
   const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>(() => loadSettings())
   const [poiSearchEntries, setPoiSearchEntries] = useState<PoiSearchEntry[]>(() => loadPoiSearchConfig())
   const [isFinding, setIsFinding] = useState(false)
+  // Live per-type progress for the search kicked off in handleFind - null
+  // when no search is running. Drives FindPoisCard's button/row progress UI;
+  // findResult itself (not this) is what the map/candidate list render from.
+  const [searchProgress, setSearchProgress] = useState<{
+    total: number
+    doneTypes: Set<string>
+    erroredTypes: Set<string>
+  } | null>(null)
   const [openStep, setOpenStep] = useState<Step | null>("import")
   const [wahooTokens, setWahooTokens] = useState<WahooTokens | null>(() => loadWahooTokens())
   const [avgSpeedKmh, setAvgSpeedKmh] = useState<number>(() => loadAvgSpeedKmh())
@@ -246,7 +280,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plannerState])
 
-  async function handleFileChange(newFile: File) {
+  async function handleFileChange(newFile: File, source: "drop" | "browse" | "wahoo") {
     setFile(newFile)
     setFindResult(null)
     setSelectedIds(new Set())
@@ -258,7 +292,8 @@ export default function App() {
 
     const text = await newFile.text()
     setSourceDoc(parseGpxDocument(text))
-    setPreviewRouteCoords(parseRouteCoordsFromGpx(text))
+    const routeCoords = parseRouteCoordsFromGpx(text)
+    setPreviewRouteCoords(routeCoords)
     setPreviewElevations(parseRouteElevationsFromGpx(text))
     const waypoints = parseExistingWaypointsFromGpx(text)
     setPreviewExistingWaypoints(waypoints)
@@ -266,6 +301,16 @@ export default function App() {
     // post-search default in handleFind below.
     setKeptWaypointIndices(new Set(waypoints.map((w) => w.index)))
     setWaypointTypeOverrides({})
+
+    if (routeCoords.length === 0) {
+      track("gpx_parse_failed", { reason: "empty_or_invalid" })
+    } else {
+      track("route_imported", {
+        source,
+        point_count: routeCoords.length,
+        existing_waypoint_count: waypoints.length,
+      })
+    }
   }
 
   function handleRemoveRoute() {
@@ -336,14 +381,14 @@ export default function App() {
     setTrackedPositions(tracked)
     // The file and map preview follow from the plannerState effect above.
     // Extending covers ground the POI search never saw. Trimming can't -
-    // the route only shrinks - so it deliberately fires no Overpass call.
+    // the route only shrinks - so it deliberately fires no re-search.
     if (unchangedPrefixLength !== null) scheduleReSearch(unchangedPrefixLength)
   }
 
   /**
    * Re-runs the POI search over just the stretch an edit added, once edits
-   * settle. The response still carries whole-route distances (search_range
-   * narrows only the Overpass query), so merging is the same
+   * settle. The responses still carry whole-route distances (search_range
+   * narrows only the PostGIS query), so merging is the same
    * selection-preserving logic runFind already uses.
    *
    * The range is resolved when the timer *fires*, not when it's scheduled:
@@ -354,7 +399,7 @@ export default function App() {
    * coordinates before it.
    *
    * Only fires once a search has actually been run: extending a route the
-   * visitor hasn't searched yet shouldn't silently start querying Overpass.
+   * visitor hasn't searched yet shouldn't silently start a POI search.
    */
   function scheduleReSearch(unchangedPrefixLength: number) {
     if (!findResult) return
@@ -662,6 +707,52 @@ export default function App() {
     setHoveredPoi(osmId === null ? null : { kind: "candidate", id: osmId })
   }
 
+  async function handleBasemapPoiClick(lat: number, lon: number, poiType: string) {
+    setPendingLookup({ lat, lon, poiType, status: "loading" })
+    try {
+      const result = await lookupPoi(lat, lon, poiType)
+      setPendingLookup({ lat, lon, poiType, status: "done", result })
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        setPendingLookup({ lat, lon, poiType, status: "not_found" })
+      } else {
+        setPendingLookup({ lat, lon, poiType, status: "error" })
+        toast(err instanceof ApiError ? err.message : "Couldn't look up that point of interest.", "error")
+      }
+    }
+  }
+
+  function handleConfirmPendingLookup() {
+    if (pendingLookup?.status !== "done" || !pendingLookup.result) return
+    const result = pendingLookup.result
+    const routeCoords = findResult?.route_coords ?? previewRouteCoords
+    const [distanceM, distanceFromStartM] = routeCoords.length
+      ? (() => {
+          const projected = projectOntoPolylineM([result.lat, result.lon], routeCoords)
+          return [projected.distanceFromRouteM, projected.distanceFromStartM]
+        })()
+      : [0, 0]
+
+    const candidate: Candidate = {
+      osm_id: result.osm_id,
+      poi_type: result.poi_type,
+      name: result.name,
+      lat: result.lat,
+      lon: result.lon,
+      distance_m: distanceM,
+      distance_from_start_m: distanceFromStartM,
+    }
+    setClickAddedCandidates((prev) =>
+      prev.some((c) => c.osm_id === result.osm_id) ? prev : [...prev, candidate],
+    )
+    setClickAddedDetails((prev) => ({
+      ...prev,
+      [result.osm_id]: { tags: result.tags, last_edited: result.last_edited },
+    }))
+    setSelectedIds((prev) => new Set(prev).add(result.osm_id))
+    setPendingLookup(null)
+  }
+
   function handleHoverWaypoint(index: number | null) {
     setHoveredPoi(index === null ? null : { kind: "waypoint", id: index })
   }
@@ -673,9 +764,16 @@ export default function App() {
   async function runFind(targetFile: File | null, searchRange: SearchRange | undefined) {
     if (!targetFile) return
 
-    const poiConfig = poiSearchEntries
-      .filter((entry) => entry.enabled)
-      .map((entry) => ({ poi_type: entry.poiType, max_distance_m: entry.maxDistanceM }))
+    // A ranged re-search extends the results already on screen, so it
+    // reuses the config those results came from rather than whatever step
+    // 2's inputs currently say - otherwise the new stretch could be searched
+    // at a different radius than the rest of the route.
+    const poiConfig = searchRange
+      ? searchedPoiTypes
+      : poiSearchEntries.map((entry) => ({
+          poi_type: entry.poiType,
+          max_distance_m: entry.maxDistanceM,
+        }))
     if (poiConfig.length === 0) return
 
     const previousCandidateIds = new Set(findResult?.candidates.map((c) => c.osm_id) ?? [])
@@ -687,63 +785,165 @@ export default function App() {
       ...previewExistingWaypoints.map((w) => w.index),
     ])
 
+    // A type is already satisfied - no need to re-query it - if the last
+    // completed search asked for the exact same radius and didn't fail for
+    // it. searchedPoiTypes is overwritten wholesale at the end of every
+    // search (below), so a removed type or a changed radius naturally falls
+    // out of this check with no extra bookkeeping. Never true for a ranged
+    // re-search: the route itself changed, so every type needs the new
+    // stretch searched.
+    const previousRadiusByType = new Map(searchedPoiTypes.map((s) => [s.poi_type, s.max_distance_m]))
+    const previouslyFailedTypes = new Set((findResult?.failed_poi_types ?? []).map((f) => f.poi_type))
+    function isAlreadySatisfied(entry: PoiSearchConfig): boolean {
+      if (searchRange) return false
+      return previousRadiusByType.get(entry.poi_type) === entry.max_distance_m && !previouslyFailedTypes.has(entry.poi_type)
+    }
+    const toSkip = poiConfig.filter(isAlreadySatisfied)
+    const toFetch = poiConfig.filter((entry) => !isAlreadySatisfied(entry))
+
+    if (toFetch.length === 0) {
+      // Nothing changed since the last search (same types, same radii, none
+      // previously failed) - every row already shows its checkmark, so
+      // there's nothing to do.
+      toast("Already up to date - no POI type changed since the last search.", "success")
+      return
+    }
+
     setIsFinding(true)
+    setSearchProgress({
+      total: poiConfig.length,
+      doneTypes: new Set(toSkip.map((e) => e.poi_type)),
+      erroredTypes: new Set(),
+    })
     const toastId = toast("Searching OpenStreetMap for nearby POIs...", "loading")
-    try {
-      const response = await findPois(targetFile, poiConfig, searchRange)
-      // A ranged search only looked at part of the route, so its candidate
-      // list covers only that stretch - union it with what earlier searches
-      // found instead of replacing them. Everything else in the response
-      // (route_coords, existing_waypoints, and every distance) was computed
-      // against the full route, so those are authoritative either way.
-      const result = searchRange
-        ? {
-            ...response,
-            candidates: [
-              ...(findResult?.candidates ?? []).filter(
-                (existing) => !response.candidates.some((c) => c.osm_id === existing.osm_id),
-              ),
-              ...response.candidates,
-            ].sort((a, b) => a.distance_m - b.distance_m),
-          }
-        : response
-      setFindResult(result)
-      // Preserve the visitor's selection for candidates seen in a prior
-      // search; default new ones to selected, matching first-search behavior.
-      setSelectedIds(
-        new Set(
-          result.candidates
-            .map((c) => c.osm_id)
-            .filter((id) => (previousCandidateIds.has(id) ? selectedIds.has(id) : true)),
-        ),
-      )
-      setSearchedPoiTypes(poiConfig)
-      // Preserve the visitor's keep/discard choice for waypoints seen in a
-      // prior search; default new ones to kept, matching first-search behavior.
-      setKeptWaypointIndices(
-        new Set(
-          result.existing_waypoints
-            .map((w) => w.index)
-            .filter((idx) => (previousWaypointIndices.has(idx) ? keptWaypointIndices.has(idx) : true)),
-        ),
-      )
+
+    // One /api/find-pois/route call per requested type instead of one call
+    // carrying every type, so the map/candidate list can fill in type-by-
+    // type as each resolves instead of only once the slowest type finishes.
+    // Starts are staggered (smallest search radius first - see
+    // SEARCH_STAGGER_MS) rather than all fired at once. `aggregate` is a plain, non-state mutable
+    // object (not React state) that each chunk appends to synchronously
+    // right after its own await resolves - setFindResult(aggregate) is
+    // called from there, so the map/list update live with no extra
+    // plumbing on their end. Skipped types' candidates are already valid
+    // (unchanged radius, no prior failure) and are carried over as-is
+    // rather than re-fetched.
+    //
+    // A ranged re-search only looks at the stretch an edit added, so its
+    // responses cover only that stretch - every existing candidate is
+    // carried over and the new ones are merged in, instead of replacing
+    // them. Everything else in each response (route_coords,
+    // existing_waypoints, and every distance) was computed against the full
+    // edited route, so those are authoritative either way.
+    const carriedCandidates = searchRange
+      ? (findResult?.candidates ?? [])
+      : toSkip.length > 0
+        ? (findResult?.candidates.filter((c) => toSkip.some((e) => e.poi_type === c.poi_type)) ?? [])
+        : []
+    const aggregate: FindPoisResponse = {
+      candidates: carriedCandidates,
+      point_count: findResult?.point_count ?? 0,
+      existing_waypoints: findResult?.existing_waypoints ?? [],
+      route_coords: findResult?.route_coords ?? [],
+      failed_poi_types: [],
+      candidate_details: Object.fromEntries(
+        carriedCandidates
+          .map((c) => [c.osm_id, findResult?.candidate_details[c.osm_id]] as const)
+          .filter((entry): entry is [number, CandidateDetails] => entry[1] !== undefined)
+      ),
+    }
+    let hasSucceeded = toSkip.length > 0
+    let newCandidateCount = 0
+    if (toSkip.length > 0) setFindResult({ ...aggregate })
+
+    const staggeredConfig = [...toFetch].sort((a, b) => a.max_distance_m - b.max_distance_m)
+
+    await Promise.allSettled(
+      staggeredConfig.map(async (entry, index) => {
+        if (index > 0) await sleep(index * SEARCH_STAGGER_MS)
+        try {
+          const result = await findPois(targetFile, [entry], searchRange)
+          hasSucceeded = true
+          // Same (osm_id, poi_type) as a carried-over candidate means a
+          // ranged re-search found it again - the fresh one wins, since its
+          // distances were measured against the edited route.
+          const isRefreshed = (c: Candidate) =>
+            c.poi_type === entry.poi_type && result.candidates.some((r) => r.osm_id === c.osm_id)
+          newCandidateCount += result.candidates.filter((c) => !previousCandidateIds.has(c.osm_id)).length
+          aggregate.candidates = [...aggregate.candidates.filter((c) => !isRefreshed(c)), ...result.candidates]
+          if (searchRange) aggregate.candidates.sort((x, y) => x.distance_m - y.distance_m)
+          aggregate.candidate_details = { ...aggregate.candidate_details, ...result.candidate_details }
+          aggregate.failed_poi_types = [...aggregate.failed_poi_types, ...result.failed_poi_types]
+          // point_count/existing_waypoints/route_coords are route-derived,
+          // not type-derived - identical across every per-type response for
+          // this same uploaded file, so whichever chunk lands is authoritative.
+          aggregate.point_count = result.point_count
+          aggregate.existing_waypoints = result.existing_waypoints
+          aggregate.route_coords = result.route_coords
+          setFindResult({ ...aggregate })
+
+          // Preserve the visitor's selection/keep choice for candidates and
+          // waypoints seen in a prior search; default newly-arrived ones to
+          // selected/kept, matching first-search behavior - applied per
+          // chunk now instead of once at the end.
+          setSelectedIds((prevSelected) => {
+            const next = new Set(prevSelected)
+            for (const c of result.candidates) {
+              if (!previousCandidateIds.has(c.osm_id) || prevSelected.has(c.osm_id)) next.add(c.osm_id)
+            }
+            return next
+          })
+          setKeptWaypointIndices((prevKept) => {
+            const next = new Set(prevKept)
+            for (const w of result.existing_waypoints) {
+              if (!previousWaypointIndices.has(w.index) || prevKept.has(w.index)) next.add(w.index)
+            }
+            return next
+          })
+          setSearchProgress((prev) => prev && { ...prev, doneTypes: new Set(prev.doneTypes).add(entry.poi_type) })
+        } catch (err) {
+          const message = err instanceof ApiError ? err.message : "Network error while contacting the server."
+          aggregate.failed_poi_types = [...aggregate.failed_poi_types, { poi_type: entry.poi_type, error: message }]
+          // Only flush into findResult once we have an authoritative
+          // point_count/route_coords from a successful chunk to build a
+          // valid FindPoisResponse with - otherwise this surfaces once the
+          // first success lands, or via the all-failed toast below if none do.
+          if (hasSucceeded) setFindResult({ ...aggregate })
+          setSearchProgress(
+            (prev) => prev && { ...prev, erroredTypes: new Set(prev.erroredTypes).add(entry.poi_type) },
+          )
+        }
+      }),
+    )
+
+    setSearchedPoiTypes(poiConfig)
+    const allFailed = aggregate.candidates.length === 0 && !hasSucceeded
+    if (allFailed) {
+      updateToast(toastId, "Failed to search OpenStreetMap for any POI type.", "error")
+      track("find_pois_failed", { reason: "api_error" })
+    } else {
       updateToast(
         toastId,
         searchRange
-          ? `Added ${response.candidates.length} candidate(s) along the new stretch.`
-          : `Found ${result.candidates.length} candidate(s).`,
+          ? `Added ${newCandidateCount} candidate(s) along the new stretch.`
+          : `Found ${aggregate.candidates.length} candidate(s).`,
         "success",
       )
-    } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Network error while contacting the server."
-      updateToast(toastId, message, "error")
-    } finally {
-      setIsFinding(false)
+      track("find_pois_run", {
+        ranged: Boolean(searchRange),
+        poi_types: poiConfig.map((e) => e.poi_type).join(","),
+        max_distances_m: poiConfig.map((e) => e.max_distance_m).join(","),
+        candidate_count: aggregate.candidates.length,
+        failed_poi_type_count: aggregate.failed_poi_types.length,
+        point_count: aggregate.point_count,
+      })
     }
+    setIsFinding(false)
+    setSearchProgress(null)
   }
 
   // No authoritative point count/distance exists client-side until
-  // /api/find-pois responds - previewRouteCoords (client-parsed GPX) is a
+  // /api/find-pois/route responds - previewRouteCoords (client-parsed GPX) is a
   // rough stand-in until findResult.point_count is available.
   const pointCount = findResult?.point_count ?? (previewRouteCoords.length || null)
   // Unlike pointCount, distance/elevation have no backend-authoritative
@@ -752,9 +952,9 @@ export default function App() {
   const distanceM = totalDistanceM(previewRouteCoords)
   const { gainM: elevationGainM, lossM: elevationLossM } = elevationGainLossM(previewElevations)
   // Same preview-then-authoritative pattern as routeCoords: client-parsed
-  // until /api/find-pois responds, then the backend's own parse wins - with
+  // until /api/find-pois/route responds, then the backend's own parse wins - with
   // any visitor override from ImportCard's "Waypoints" tab applied on top,
-  // since a fresh find-pois response would otherwise silently discard it.
+  // since a fresh find-pois/route response would otherwise silently discard it.
   const existingWaypoints = useMemo(
     () =>
       (findResult?.existing_waypoints ?? previewExistingWaypoints).map((w) => ({
@@ -762,6 +962,33 @@ export default function App() {
         poi_type: waypointTypeOverrides[w.index] ?? w.poi_type,
       })),
     [findResult, previewExistingWaypoints, waypointTypeOverrides]
+  )
+  // Search-found candidates plus anything added by clicking a basemap POI
+  // icon, deduped by osm_id (a search result wins if the same node also
+  // turns up there) - this, not findResult?.candidates directly, is what
+  // the map/checklist/save flow reads, so a click-added POI flows through
+  // the existing selection/export pipeline unchanged.
+  const allCandidates = useMemo(() => {
+    if (clickAddedCandidates.length === 0) return findResult?.candidates ?? EMPTY_CANDIDATES
+    const foundIds = new Set((findResult?.candidates ?? []).map((c) => c.osm_id))
+    return [
+      ...(findResult?.candidates ?? EMPTY_CANDIDATES),
+      ...clickAddedCandidates.filter((c) => !foundIds.has(c.osm_id)),
+    ]
+  }, [findResult, clickAddedCandidates])
+  // osm_ids added via a basemap click - used only to exclude those markers
+  // from RouteMap's FitBounds input (see RouteMapProps.clickAddedCandidateIds),
+  // not to decide what tag/edit info a popup shows (candidateDetails below).
+  const clickAddedCandidateIds = useMemo(
+    () => new Set(clickAddedCandidates.map((c) => c.osm_id)),
+    [clickAddedCandidates]
+  )
+  // Tags/last-edited for every candidate RouteMap can show a popup for -
+  // findResult.candidate_details covers search-found candidates, merged with
+  // clickAddedDetails for ones added by clicking a basemap icon.
+  const candidateDetails = useMemo(
+    () => ({ ...(findResult?.candidate_details ?? {}), ...clickAddedDetails }),
+    [findResult, clickAddedDetails]
   )
 
   return (
@@ -788,7 +1015,7 @@ export default function App() {
         <div className="h-[50vh] shrink-0 md:h-auto md:flex-1">
           <RouteMap
             routeCoords={findResult?.route_coords ?? previewRouteCoords}
-            candidates={findResult?.candidates ?? EMPTY_CANDIDATES}
+            candidates={allCandidates}
             selectedIds={selectedIds}
             onToggle={handleToggle}
             existingWaypoints={existingWaypoints}
@@ -798,6 +1025,12 @@ export default function App() {
             hoveredPoi={hoveredPoi}
             mapStyleKey={mapStyleKey}
             onMapStyleChange={handleMapStyleChange}
+            candidateDetails={candidateDetails}
+            clickAddedCandidateIds={clickAddedCandidateIds}
+            onBasemapPoiClick={handleBasemapPoiClick}
+            pendingLookup={pendingLookup}
+            onConfirmPendingLookup={handleConfirmPendingLookup}
+            onDismissPendingLookup={() => setPendingLookup(null)}
             planning={
               plannerState
                 ? {
@@ -856,11 +1089,12 @@ export default function App() {
                     entries={poiSearchEntries}
                     onChange={handlePoiSearchChange}
                     onFind={handleFind}
-                    disabled={!file || !poiSearchEntries.some((entry) => entry.enabled)}
+                    disabled={!file || poiSearchEntries.length === 0}
                     isFinding={isFinding}
+                    progress={searchProgress}
                   />
                   <CandidateChecklist
-                    candidates={findResult?.candidates ?? EMPTY_CANDIDATES}
+                    candidates={allCandidates}
                     selectedIds={selectedIds}
                     onToggle={handleToggle}
                     onToggleAll={handleToggleAllCandidates}
@@ -875,7 +1109,7 @@ export default function App() {
             {file && (
               <SaveCard
                 file={file}
-                candidates={findResult?.candidates ?? EMPTY_CANDIDATES}
+                candidates={allCandidates}
                 selectedIds={selectedIds}
                 existingWaypoints={existingWaypoints}
                 keptWaypointIndices={keptWaypointIndices}

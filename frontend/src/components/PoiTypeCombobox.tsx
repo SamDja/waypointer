@@ -22,6 +22,7 @@ export interface PoiTypeComboboxProps {
   // types) for its "add a POI type" picker.
   options?: PoiTypeConfig[]
   placeholder?: string
+  disabled?: boolean
 }
 
 // A searchable POI-type picker - the registry has ~55 entries, too many
@@ -35,6 +36,7 @@ export function PoiTypeCombobox({
   className,
   options = POI_TYPES,
   placeholder = "Select type…",
+  disabled = false,
 }: PoiTypeComboboxProps) {
   const [open, setOpen] = useState(false)
   const selected = POI_TYPES.find((cfg) => cfg.key === value)
@@ -47,6 +49,7 @@ export function PoiTypeCombobox({
           variant="outline"
           role="combobox"
           aria-expanded={open}
+          disabled={disabled}
           className={cn("w-48 justify-between font-normal", className)}
         >
           <span className="flex min-w-0 items-center gap-2">

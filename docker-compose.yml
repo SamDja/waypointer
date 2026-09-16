@@ -4,18 +4,155 @@ services:
       context: .
       args:
         # Non-secret build-time ids baked into the frontend bundle - see
-        # Dockerfile/CLAUDE.md. Leave unset to build without Wahoo/Tally
-        # integration.
+        # Dockerfile/CLAUDE.md. Leave unset to build without Wahoo/Tally/
+        # analytics integration.
         VITE_WAHOO_CLIENT_ID: ${VITE_WAHOO_CLIENT_ID:-}
         VITE_TALLY_FORM_ID: ${VITE_TALLY_FORM_ID:-}
+        # Leaving this unset ships this deployment with zero analytics.
+        VITE_UMAMI_WEBSITE_ID: ${VITE_UMAMI_WEBSITE_ID:-}
     ports:
-      - "${PORT:-443}:8000"
+      - "${PORT:-8000}:8000"
     environment:
       # Unset by default (plain HTTP). Set both, and point CERTS_DIR at the
       # folder holding them, to enable HTTPS - see CLAUDE.md's "Local HTTPS"
       # section for how to generate the cert.
       - SSL_KEYFILE=${SSL_KEYFILE:-}
       - SSL_CERTFILE=${SSL_CERTFILE:-}
+      # Points at the postgis service below - see CLAUDE.md's "PostGIS POI
+      # database" section. No public-mirror fallback: POI lookups fail
+      # clearly (poi_db.PoiDbError) if this isn't reachable/populated.
+      - POSTGIS_URL=postgresql://waypointer:${POSTGIS_PASSWORD:-waypointer}@postgis:5432/pois
     volumes:
       - ${CERTS_DIR:-./certs}:/certs:ro
+    networks:
+      - waypointer-net
+    depends_on:
+      - postgis
     restart: unless-stopped
+
+  # Holds only the OSM nodes/ways/relations Waypointer actually searches
+  # for (see postgis/import_pois.lua), imported ahead of time via osm2pgsql
+  # instead of querying the public Overpass API live - see CLAUDE.md's
+  # "PostGIS POI database" section for the full rationale and the
+  # threshold-gated reimport script. Publishes POSTGIS_PORT so a backend
+  # running outside Docker (`uv run uvicorn`, for local frontend/backend
+  # dev - see README) can reach it at localhost too, not just waypointer/
+  # poi-import over waypointer-net; unset/leave the container-only default
+  # if you don't need that (e.g. the Pi, which only ever runs the app via
+  # compose).
+  #
+  # Built from our own postgis/db.Dockerfile rather than pulled from
+  # postgis/postgis: that image is amd64-only (no arm64 build at all, for
+  # any tag) - a hard blocker on the Raspberry Pi. `docker compose build`
+  # already builds this like any other `build:` service, no extra step
+  # needed (unlike poi-import, which is profile-gated).
+  postgis:
+    build:
+      context: ./postgis
+      dockerfile: db.Dockerfile
+    environment:
+      - POSTGRES_USER=waypointer
+      - POSTGRES_PASSWORD=${POSTGIS_PASSWORD:-waypointer}
+      - POSTGRES_DB=pois
+    ports:
+      - "${POSTGIS_PORT:-5432}:5432"
+    volumes:
+      - postgis-data:/var/lib/postgresql/data
+    networks:
+      - waypointer-net
+    restart: unless-stopped
+
+  # One-shot import job, not a long-running service. Always unconditionally
+  # drops and rebuilds the pois table, so only run it directly
+  # (`docker compose run --rm poi-import`) for first bring-up or a
+  # deliberate forced reimport - routine redeploys must NOT call this
+  # service directly; wire postgis/update_check.sh into a Pi-side cron
+  # entry instead, so reimports only happen once its size/time thresholds
+  # are actually met (see CLAUDE.md's "Threshold-gated reimports"). The
+  # `import` profile keeps it out of a plain `docker compose up`.
+  # OSM_EXTRACT_URL (a Geofabrik regional .osm.pbf extract) has no usable
+  # default and must be set in .env before first bring-up.
+  poi-import:
+    build:
+      context: ./postgis
+    profiles:
+      - import
+    environment:
+      - OSM_EXTRACT_URL=${OSM_EXTRACT_URL}
+      - POSTGIS_URL=postgresql://waypointer:${POSTGIS_PASSWORD:-waypointer}@postgis:5432/pois
+      - IMPORT_STATE_FILE=/state/.last_import_state
+      # osm2pgsql tuning - see import.sh. Left unset by default (falls back
+      # to nproc / osm2pgsql's own 800MB default there); set on the Pi's
+      # .env if the container's default CPU/cache sizing doesn't fit its
+      # 4 cores / 4-8GB RAM well for the extract size in use.
+      - OSM2PGSQL_NUMBER_PROCESSES=${OSM2PGSQL_NUMBER_PROCESSES:-}
+      - OSM2PGSQL_CACHE_MB=${OSM2PGSQL_CACHE_MB:-}
+    volumes:
+      - ./postgis/state:/state
+    networks:
+      - waypointer-net
+    depends_on:
+      - postgis
+
+  # Scrapes waypointer's /metrics and node-exporter's host metrics - see
+  # monitoring/prometheus.yml and CLAUDE.md's Telemetry section.
+  prometheus:
+    image: prom/prometheus:latest
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    networks:
+      - waypointer-net
+    restart: unless-stopped
+
+  # Dashboards over Prometheus data. The Prometheus datasource is
+  # auto-provisioned (monitoring/grafana/provisioning/) - only the admin
+  # login is a manual first-time step. Change GRAFANA_ADMIN_PASSWORD via the
+  # Pi's .env file - it's the only credential gate in this whole stack.
+  grafana:
+    image: grafana/grafana:latest
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_ADMIN_PASSWORD:-admin}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    networks:
+      - waypointer-net
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+  # Host-level metrics (CPU, memory, disk, temperature via hwmon/thermal,
+  # automatic off the mounted /sys on the Pi). No published host port - only
+  # reachable from prometheus over waypointer-net. The /proc, /sys, /
+  # mounts + matching --path.* flags and pid: host are the standard
+  # node_exporter compose convention for accurate host (not container)
+  # metrics.
+  node-exporter:
+    image: prom/node-exporter:latest
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/host/root"
+      - "--collector.filesystem.mount-points-exclude=^/(sys|proc|dev|host|etc)($$|/)"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro
+    pid: host
+    networks:
+      - waypointer-net
+    restart: unless-stopped
+
+networks:
+  waypointer-net:
+    driver: bridge
+
+volumes:
+  prometheus-data:
+  grafana-data:
+  postgis-data:

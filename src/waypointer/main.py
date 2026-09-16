@@ -1,15 +1,14 @@
 """FastAPI app: stateless endpoints plus the static frontend.
 
 No server-side session/user state is kept between requests - the frontend
-holds candidate data from /api/find-pois and resubmits the selected ones
-(plus the original file) to /api/save or /api/wahoo/route-payload, so one
-visitor's data never touches another's and a second Overpass query isn't
+holds candidate data from /api/find-pois/route and resubmits the selected
+ones (plus the original file) to /api/save or /api/wahoo/route-payload, so
+one visitor's data never touches another's and a second PostGIS query isn't
 needed afterwards.
 """
 
 import asyncio
 import base64
-import math
 import os
 import re
 from pathlib import Path
@@ -20,6 +19,7 @@ from fastapi import Depends, FastAPI, Form, HTTPException, UploadFile
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from gpxpy.gpx import GPX, GPXException, GPXWaypoint
+from prometheus_fastapi_instrumentator import Instrumentator
 from pydantic import TypeAdapter, ValidationError
 
 from waypointer.device_profiles import DEFAULT_DEVICE_KEY, DEVICE_PROFILES, OutputFormat
@@ -44,15 +44,17 @@ from waypointer.gpx_io import (
     to_xml_bytes,
     total_ascent_m,
 )
-from waypointer.osm import USER_AGENT, OsmNode, OverpassError, build_overpass_query, query_overpass
+from waypointer.poi_db import OsmNode, PoiDbError, query_poi_near_point, query_pois_near_route
 from waypointer.poi_types import DEFAULT_VISIBLE_POI_TYPES, POI_TYPES, clamp_distance_m
-from waypointer.rate_limit import rate_limit, routing_rate_limit
-from waypointer.routing import RoutingError, route_leg
+from waypointer.rate_limit import lookup_poi_rate_limit, rate_limit, routing_rate_limit
+from waypointer.routing import USER_AGENT, RoutingError, route_leg
 from waypointer.schemas import (
     Candidate,
+    CandidateDetails,
     ExistingWaypoint,
     FailedPoiType,
     FindPoisResponse,
+    PoiLookupResult,
     PoiSearchConfig,
     RouteLegResponse,
     SearchRange,
@@ -64,8 +66,10 @@ from waypointer.schemas import (
 # guarded rather than assumed to exist for backend-only local dev.
 FRONTEND_DIST_DIR = Path(__file__).parent.parent.parent / "frontend" / "dist"
 # How far simplify_rdp is allowed to let the simplified route wander from
-# the true route - see the Overpass radius padding in find_pois() below,
-# which depends on this bound to avoid missing genuinely-in-range nodes.
+# the true route - only used for the response's route_coords (the map's
+# route line) and no longer for the PostGIS query itself (see
+# query_pois_near_route in find_pois() below, which queries the
+# full-resolution route directly).
 SIMPLIFY_TOLERANCE_M = 8.0
 # The Wahoo route FIT file lives on their CDN; /api/wahoo/import-route only
 # ever fetches from Wahoo, so it restricts the caller-supplied URL to this
@@ -73,6 +77,16 @@ SIMPLIFY_TOLERANCE_M = 8.0
 WAHOO_FILE_HOST_SUFFIX = ".wahooligan.com"
 
 app = FastAPI(title="Sulla Via")
+
+# Exposes GET /metrics (request count, latency histogram, in-progress gauge,
+# labeled by method/path/status) for the docker-compose Prometheus service to
+# scrape. Registered here, ahead of every route, though placement doesn't
+# actually matter for it - LAN-only, no auth on /metrics, matching this app's
+# existing trust model (self-signed TLS, no login anywhere else; see
+# CLAUDE.md's Telemetry section). Single uvicorn process, so the default
+# in-memory prometheus_client registry is fine - no multiprocess mode needed,
+# same reasoning as rate_limit.py's in-process design.
+Instrumentator().instrument(app).expose(app)
 
 _selected_candidates_adapter = TypeAdapter(list[Candidate])
 _poi_config_adapter = TypeAdapter(list[PoiSearchConfig])
@@ -103,7 +117,9 @@ def _default_poi_config() -> list[PoiSearchConfig]:
     ]
 
 
-@app.post("/api/find-pois", response_model=FindPoisResponse, dependencies=[Depends(rate_limit)])
+@app.post(
+    "/api/find-pois/route", response_model=FindPoisResponse, dependencies=[Depends(rate_limit)]
+)
 async def find_pois(
     gpx_file: UploadFile,
     poi_config: str | None = Form(None),
@@ -119,7 +135,7 @@ async def find_pois(
         except ValidationError as exc:
             raise HTTPException(status_code=400, detail=f"Invalid poi_config: {exc}") from exc
 
-    # search_range narrows only which part of the route the Overpass query
+    # search_range narrows only which part of the route the PostGIS query
     # covers (the route planner uses it to re-search just a newly appended
     # stretch). Every distance below is still measured against the full
     # route, and is_duplicate_candidate still sees the whole file, so a
@@ -140,23 +156,17 @@ async def find_pois(
             )
         search_coords = coords[parsed_range.start_index : parsed_range.end_index + 1]
 
-    # Two separate simplifications when a range is given: the Overpass query
-    # covers only the requested stretch, but route_coords below is what the
-    # frontend draws as *the route*, so it must always describe the whole
-    # thing - feeding it the sub-range would visibly truncate the map's route
-    # line after a ranged re-search.
+    # Always simplified from the whole route, never from search_coords:
+    # route_coords below is what the frontend draws as *the route*, so
+    # feeding it the sub-range would visibly truncate the map's route line
+    # after a ranged re-search.
     route_simplified = simplify_rdp(coords, tolerance_m=SIMPLIFY_TOLERANCE_M)
-    search_simplified = (
-        route_simplified
-        if search_coords is coords
-        else simplify_rdp(search_coords, tolerance_m=SIMPLIFY_TOLERANCE_M)
-    )
     route_index = build_polyline_index(coords)
 
-    # Validate and build every query up front - bad poi_type/tag_filter
-    # input must still 400 before any Overpass call fires, matching the
-    # previous sequential behavior.
-    prepared: list[tuple[PoiSearchConfig, float, str]] = []
+    # Validate every entry up front - bad poi_type/tag_filter input must
+    # still 400 before any PostGIS query fires, matching the previous
+    # sequential behavior.
+    prepared: list[tuple[PoiSearchConfig, float]] = []
     for entry in requested:
         cfg = POI_TYPES.get(entry.poi_type)
         if cfg is None:
@@ -164,49 +174,43 @@ async def find_pois(
         if cfg.tag_filter is None:
             raise HTTPException(status_code=400, detail=f"{entry.poi_type} is not searchable")
         radius_m = clamp_distance_m(entry.poi_type, entry.max_distance_m)
+        prepared.append((entry, radius_m))
 
-        # The Overpass query runs against the simplified route, which can
-        # sit up to SIMPLIFY_TOLERANCE_M away from the true route at any
-        # given point (that's the RDP tolerance). Searching Overpass at the
-        # exact requested radius would miss nodes that are genuinely within
-        # radius_m of the true route but happen to be farther than that from
-        # the simplified line - so the Overpass-side radius is padded by the
-        # simplification tolerance. The authoritative check below still uses
-        # the exact radius_m against the full-resolution route, so this
-        # can't introduce false positives, only prevents false negatives.
-        overpass_radius_m = radius_m + SIMPLIFY_TOLERANCE_M
-        query = build_overpass_query(
-            search_simplified, tag_filter=cfg.tag_filter, radius_m=math.ceil(overpass_radius_m)
-        )
-        prepared.append((entry, radius_m, query))
-
-    # Fire all Overpass calls concurrently instead of one-at-a-time - N
-    # requested POI types used to mean N sequential blocking HTTP round
-    # trips; asyncio.to_thread offloads each of query_overpass's blocking
-    # requests.post calls to a worker thread so they run in parallel and
-    # stop hogging the event loop. Errors are caught per-call so one type
-    # failing/timing out doesn't take the others down with it.
+    # Fire all PostGIS queries concurrently instead of one-at-a-time - N
+    # requested POI types used to mean N sequential blocking DB round trips;
+    # asyncio.to_thread offloads each of query_pois_near_route's blocking
+    # psycopg calls to a worker thread so they run in parallel and stop
+    # hogging the event loop. Errors are caught per-call so one type
+    # failing doesn't take the others down with it. Queried against the
+    # full-resolution route (or its search_range slice - not
+    # `route_simplified`, which is kept only for the map's route line) - no
+    # radius padding needed, unlike the old Overpass-based query, since a
+    # local DB query has no reason to run against a size-reduced route.
     async def _fetch_one(
-        entry: PoiSearchConfig, query: str
-    ) -> tuple[PoiSearchConfig, list[OsmNode], OverpassError | None]:
+        entry: PoiSearchConfig, radius_m: float
+    ) -> tuple[PoiSearchConfig, list[OsmNode], PoiDbError | None]:
+        cfg = POI_TYPES[entry.poi_type]
         try:
-            nodes = await asyncio.to_thread(query_overpass, query)
+            nodes = await asyncio.to_thread(
+                query_pois_near_route, cfg.key, search_coords, radius_m
+            )
             return entry, nodes, None
-        except OverpassError as exc:
+        except PoiDbError as exc:
             return entry, [], exc
 
     fetch_results = await asyncio.gather(
-        *(_fetch_one(entry, query) for entry, _radius_m, query in prepared)
+        *(_fetch_one(entry, radius_m) for entry, radius_m in prepared)
     )
 
     if prepared and all(error is not None for _entry, _nodes, error in fetch_results):
         raise HTTPException(
-            status_code=502, detail=f"Failed to query OpenStreetMap: {fetch_results[0][2]}"
+            status_code=502, detail=f"Failed to query the POI database: {fetch_results[0][2]}"
         )
 
     candidates: list[Candidate] = []
+    candidate_details: dict[int, CandidateDetails] = {}
     failed_poi_types: list[FailedPoiType] = []
-    for (entry, radius_m, _query), (_entry, nodes, error) in zip(prepared, fetch_results):
+    for (entry, radius_m), (_entry, nodes, error) in zip(prepared, fetch_results):
         if error is not None:
             failed_poi_types.append(FailedPoiType(poi_type=entry.poi_type, error=str(error)))
             continue
@@ -214,12 +218,22 @@ async def find_pois(
         for node in nodes:
             if is_duplicate_candidate(node, gpx):
                 continue
-            # Authoritative distance check against the full-resolution
-            # route, never the simplified one used only to build the
-            # Overpass query - and against this type's own clamped radius,
-            # not a global constant.
-            distance_m, distance_from_start_m = project_onto_polyline_indexed_m(
-                (node.lat, node.lon), route_index
+            # Computes the exact position/distance along the route for the
+            # response - query_pois_near_route already restricted nodes to
+            # within radius_m via PostGIS' own ST_DWithin, so the `<=
+            # radius_m` check below is a cheap safety net, not the primary
+            # filter. For a way/relation result, way_points holds every
+            # vertex of its own geometry - check all of them and keep the
+            # one closest to the route, rather than a single bounding-box
+            # centroid that can sit far from the route even when an edge of
+            # a large element (a park, a parking lot) is genuinely nearby.
+            candidate_points = node.way_points or [(node.lat, node.lon)]
+            lat, lon, distance_m, distance_from_start_m = min(
+                (
+                    (pt[0], pt[1], *project_onto_polyline_indexed_m(pt, route_index))
+                    for pt in candidate_points
+                ),
+                key=lambda result: result[2],
             )
             if distance_m <= radius_m:
                 candidates.append(
@@ -227,11 +241,14 @@ async def find_pois(
                         osm_id=node.id,
                         poi_type=entry.poi_type,
                         name=node.tags.get("name"),
-                        lat=node.lat,
-                        lon=node.lon,
+                        lat=lat,
+                        lon=lon,
                         distance_m=distance_m,
                         distance_from_start_m=distance_from_start_m,
                     )
+                )
+                candidate_details[node.id] = CandidateDetails(
+                    tags=node.tags, last_edited=node.timestamp
                 )
 
     candidates.sort(key=lambda c: c.distance_m)
@@ -257,6 +274,7 @@ async def find_pois(
         existing_waypoints=existing_waypoints,
         route_coords=route_simplified,
         failed_poi_types=failed_poi_types,
+        candidate_details=candidate_details,
     )
 
 
@@ -419,7 +437,7 @@ async def wahoo_route_payload(
     """Builds the FIT bytes + metadata needed for a browser-side push to
     Wahoo's POST /v1/routes. Distance and ascent are computed here rather
     than client-side because only the backend ever sees the full-resolution,
-    elevation-carrying route - /api/find-pois only ever sends the frontend a
+    elevation-carrying route - /api/find-pois/route only ever sends the frontend a
     simplified, elevation-stripped polyline for map rendering. Always
     produces FIT regardless of the visitor's local-download device
     selection, since Wahoo's route push has no GPX equivalent - and, like
@@ -504,6 +522,55 @@ def wahoo_import_route(file_url: str = Form(...)) -> Response:
     )
 
 
+# Resolves *this specific rendered basemap icon*, independent of the poi
+# type's own (usually much larger) find-pois search-distance bounds.
+LOOKUP_POI_RADIUS_M = 40
+
+
+@app.post(
+    "/api/find-pois/location",
+    response_model=PoiLookupResult,
+    dependencies=[Depends(lookup_poi_rate_limit)],
+)
+async def find_poi_at_location(
+    lat: float = Form(...), lon: float = Form(...), poi_type: str = Form(...)
+) -> PoiLookupResult:
+    """Resolves a click on one of the basemap's own POI icons to the real OSM
+    element behind it - those icons carry only a class/subclass/name, no OSM
+    id or tags, so the frontend can't build a Candidate (or show tags/an
+    edit link) without this round trip. Deliberately takes no gpx_file: this
+    is click-driven and must work before any route is loaded.
+    """
+    cfg = POI_TYPES.get(poi_type)
+    if cfg is None or cfg.tag_filter is None:
+        raise HTTPException(status_code=400, detail=f"{poi_type} is not searchable")
+
+    try:
+        node = await asyncio.to_thread(
+            query_poi_near_point, cfg.key, lat, lon, LOOKUP_POI_RADIUS_M
+        )
+    except PoiDbError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Failed to query the POI database: {exc}"
+        ) from exc
+
+    if node is None:
+        raise HTTPException(
+            status_code=404, detail="No matching OpenStreetMap element found near this point."
+        )
+
+    return PoiLookupResult(
+        osm_id=node.id,
+        osm_type=node.osm_type,
+        poi_type=poi_type,
+        name=node.tags.get("name"),
+        lat=node.lat,
+        lon=node.lon,
+        tags=node.tags,
+        last_edited=node.timestamp,
+    )
+
+
 @app.post(
     "/api/route-leg",
     response_model=RouteLegResponse,
@@ -520,13 +587,13 @@ async def route_leg_endpoint(
 
     Proxied rather than called from the browser so the routing provider stays
     swappable server-side (ROUTING_URL), the leg cache is shared across
-    visitors, and the per-IP budget in rate_limit.py actually applies - the
-    same reasons /api/find-pois fronts Overpass.
+    visitors, and the per-IP budget in rate_limit.py actually protects the
+    shared public BRouter instance from this server's one IP.
     """
     try:
         # route_leg's requests.get blocks; offload it so a slow routing
         # response doesn't stall the event loop, as find_pois does for
-        # query_overpass.
+        # query_pois_near_route.
         leg = await asyncio.to_thread(route_leg, (start_lat, start_lon), (end_lat, end_lon), profile)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

@@ -17,7 +17,7 @@ from enum import Enum
 
 import gpxpy.gpx
 
-from waypointer.osm import OsmNode
+from waypointer.poi_db import OsmNode
 
 
 class OutputFormat(Enum):

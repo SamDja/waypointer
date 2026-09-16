@@ -16,7 +16,7 @@ from waypointer.gpx_io import (
     to_xml_bytes,
     total_ascent_m,
 )
-from waypointer.osm import OsmNode
+from waypointer.poi_db import OsmNode
 
 
 def test_route_coordinates_flattens_track(sample_route_bytes):

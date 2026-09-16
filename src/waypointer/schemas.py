@@ -11,6 +11,17 @@ class Candidate(BaseModel):
     distance_from_start_m: float
 
 
+class CandidateDetails(BaseModel):
+    # Full OSM tags/edit-metadata for a Candidate, keyed by osm_id on
+    # FindPoisResponse.candidate_details rather than added to Candidate
+    # itself - Candidate round-trips through /api/save and
+    # /api/wahoo/route-payload's request bodies, so bloating it with tags
+    # would bloat every save/export round trip too, not just the search
+    # response. Same shape as PoiLookupResult's tags/last_edited fields.
+    tags: dict[str, str]
+    last_edited: str | None = None
+
+
 class PoiSearchConfig(BaseModel):
     poi_type: str
     max_distance_m: float
@@ -18,17 +29,39 @@ class PoiSearchConfig(BaseModel):
 
 class SearchRange(BaseModel):
     # An inclusive index range into the submitted route's coordinate list
-    # (gpx_io.route_coordinates order). When given, /api/find-pois builds its
-    # Overpass query from only this slice of the route - used by the route
-    # planner after extending a route, so re-searching costs a query covering
-    # the newly added stretch instead of the whole route.
+    # (gpx_io.route_coordinates order). When given, /api/find-pois/route runs
+    # its PostGIS query against only this slice of the route - used by the
+    # route planner after extending a route, so a re-search only returns POIs
+    # along the newly added stretch, which the frontend merges into what it
+    # already has.
     #
-    # Deliberately scopes *only* the upstream query: every distance in the
+    # Deliberately scopes *only* the database query: every distance in the
     # response is still measured against the full route, so there remains
     # exactly one place (geometry.project_onto_polyline_indexed_m) that
     # computes distance-from-route and distance-from-start.
     start_index: int
     end_index: int
+
+
+class PoiLookupResult(BaseModel):
+    # Resolves a single basemap POI icon click (see main.py's
+    # /api/find-pois/location) to a real OSM element - carries the full raw
+    # tag dict, unlike Candidate, so the frontend can render "as much info
+    # as OSM has" plus an edit link. Kept separate from Candidate (rather
+    # than adding `tags` there) since Candidate round-trips through
+    # /api/save's request body.
+    osm_id: int
+    osm_type: str = "node"  # "node", "way", or "relation" - see poi_db.OsmNode
+    poi_type: str
+    name: str | None = None
+    lat: float
+    lon: float
+    tags: dict[str, str]
+    # ISO 8601 timestamp of this element's last edit on OSM (imported via
+    # osm2pgsql's --extra-attributes - see poi_db.py), None if unavailable -
+    # distinct from a `check_date`/`survey:date` tag, which is a mapper-set
+    # field in `tags` rather than OSM's own edit-history metadata.
+    last_edited: str | None = None
 
 
 class ExistingWaypoint(BaseModel):
@@ -55,10 +88,10 @@ class ExistingWaypoint(BaseModel):
 
 
 class FailedPoiType(BaseModel):
-    # One requested POI type whose Overpass call errored or timed out -
-    # /api/find-pois still returns 200 with results for the types that
-    # succeeded (see main.py's find_pois()), unless every requested type
-    # failed, in which case the whole request 502s instead.
+    # One requested POI type whose PostGIS query errored - /api/find-pois/
+    # route still returns 200 with results for the types that succeeded
+    # (see main.py's find_pois()), unless every requested type failed, in
+    # which case the whole request 502s instead.
     poi_type: str
     error: str
 
@@ -69,6 +102,7 @@ class FindPoisResponse(BaseModel):
     existing_waypoints: list[ExistingWaypoint]
     route_coords: list[tuple[float, float]]
     failed_poi_types: list[FailedPoiType] = []
+    candidate_details: dict[int, CandidateDetails] = {}
 
 
 class RouteLegResponse(BaseModel):

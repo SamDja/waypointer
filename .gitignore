@@ -204,6 +204,9 @@ cython_debug/
 # Temporary file for partial code execution
 tempCodeRunnerFile.py
 
+# MacOS
+.DS_Store
+
 # Ruff stuff:
 .ruff_cache/
 
@@ -219,4 +222,10 @@ __marimo__/
 .streamlit/secrets.toml
 
 # Claude Code personal settings
-.claude/**
+.claude/*.md
+.claude/plans
+.claude/settings.local.json
+
+# postgis/update_check.sh's threshold-gated-reimport state (see postgis/import.sh)
+postgis/state/*
+!postgis/state/.gitkeep

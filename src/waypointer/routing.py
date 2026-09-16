@@ -8,9 +8,9 @@ GeoJSON response carries elevation inline - which matters because a FIT
 course with no altitude data renders as a flat black line on a Wahoo ELEMNT
 ROAM (see fit_io.py's _elevation_stats).
 
-Structured to mirror osm.py, the established pattern here for "external HTTP
-dependency with a cache": module-level env-overridable URL, a shared TTLCache,
-the same descriptive User-Agent, and one error type the caller maps to a 502.
+Structured as an "external HTTP dependency with a cache": module-level
+env-overridable URL, a shared TTLCache, a descriptive User-Agent, and one
+error type the caller maps to a 502.
 """
 
 import os
@@ -19,8 +19,11 @@ from dataclasses import dataclass
 import requests
 
 from waypointer.geometry import LatLon
-from waypointer.osm import USER_AGENT
 from waypointer.ttl_cache import TTLCache
+
+# BRouter's public instance is a shared community service - identify
+# ourselves rather than sending the default python-requests UA.
+USER_AGENT = "waypointer/0.1 (+https://github.com/SamDja/waypointer)"
 
 # Defaults to BRouter's public instance; set ROUTING_URL to point at a
 # self-hosted one instead. Self-hosting needs per-region .rd5 segment files

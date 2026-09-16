@@ -11,6 +11,9 @@ dependencies = [
     "fastapi>=0.139.0",
     "fit-tool>=0.9.15",
     "gpxpy>=1.6.2",
+    "prometheus-fastapi-instrumentator>=7.1.0",
+    "psycopg[binary]>=3.2.0",
+    "psycopg-pool>=3.2.0",
     "python-multipart>=0.0.32",
     "requests>=2.34.2",
     "uvicorn[standard]>=0.51.0",
@@ -26,4 +29,5 @@ dev = [
     "pytest>=9.1.1",
     "pytest-mock>=3.15.1",
     "responses>=0.26.2",
+    "testcontainers[postgres]>=4.9.0",
 ]

@@ -8,14 +8,13 @@ FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 @pytest.fixture(autouse=True)
 def _reset_shared_state():
-    """The Overpass and routing TTL caches and the rate limiter are
-    process-wide module state; reset them before every test so tests don't
-    leak into each other."""
-    from waypointer.osm import _cache as overpass_cache
+    """The routing TTL cache and the rate limiter are process-wide module
+    state; reset them before every test so tests don't leak into each other.
+    (poi_db.py has no equivalent cache to reset - see its module docstring
+    for why.)"""
     from waypointer.rate_limit import _requests_by_ip
     from waypointer.routing import _cache as routing_cache
 
-    overpass_cache.clear()
     routing_cache.clear()
     _requests_by_ip.clear()
     yield
@@ -29,11 +28,6 @@ def sample_route_path() -> Path:
 @pytest.fixture
 def sample_route_bytes(sample_route_path: Path) -> bytes:
     return sample_route_path.read_bytes()
-
-
-@pytest.fixture
-def overpass_response_json() -> dict:
-    return json.loads((FIXTURES_DIR / "overpass_response.json").read_text())
 
 
 @pytest.fixture

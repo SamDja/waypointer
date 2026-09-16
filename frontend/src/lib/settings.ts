@@ -38,7 +38,6 @@ export function saveSettings(settings: DeviceSettings): void {
 
 export interface PoiSearchEntry {
   poiType: string
-  enabled: boolean
   maxDistanceM: number
 }
 
@@ -78,7 +77,6 @@ export function loadPoiSearchConfig(): PoiSearchEntry[] {
       : cfg.defaultMaxDistanceM!
     return {
       poiType: key,
-      enabled: existing?.enabled ?? true,
       maxDistanceM,
     }
   })

@@ -1,10 +1,11 @@
-"""Small in-process TTL cache shared by the external-API clients.
+"""Small in-process TTL cache for the external-API clients.
 
-Both osm.py (Overpass) and routing.py (BRouter) talk to shared public
-instances that are rate-limit sensitive, and both see the same access
-pattern: a visitor repeating an identical request within a short window (a
-re-clicked search, an anchor dragged back to where it was). Single-process
-and deliberately not backed by Redis/a database, matching rate_limit.py.
+routing.py (BRouter) talks to a shared public instance that is rate-limit
+sensitive, and sees a visitor repeating an identical request within a short
+window (an anchor dragged back to where it was, an undone edit). Generic
+rather than routing-specific so any future external client can reuse it.
+Single-process and deliberately not backed by Redis/a database, matching
+rate_limit.py.
 """
 
 import threading

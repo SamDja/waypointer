@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Layer, Map, Marker, Popup, Source, useMap, type MapRef } from "react-map-gl/maplibre"
 import "maplibre-gl/dist/maplibre-gl.css"
 import type {
@@ -15,6 +15,7 @@ import {
   ChevronRight,
   ChevronUp,
   Crosshair,
+  Info,
   Locate,
   MapPin,
   Navigation,
@@ -22,6 +23,7 @@ import {
   Plus,
   Minus,
   Square,
+  type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -30,13 +32,31 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { MapLegend } from "@/components/MapLegend"
 import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
+import { buildAddablePoiFilter, resolvePoiTypeFromFeatureProps } from "@/lib/basemapPoiMapping"
 import { projectOntoPolylineM } from "@/lib/geometry"
 import { CircleMarkerIcon, ROUTE_END_COLOR, ROUTE_START_COLOR, UserLocationMarker } from "@/lib/mapIcons"
 import { MAP_STYLES } from "@/lib/mapStyles"
+import {
+  formatExactDateTime,
+  formatRelativeDate,
+  groupOsmTags,
+  type FormattedOsmTag,
+} from "@/lib/osmTagLabels"
 import { POI_TYPES } from "@/lib/poiTypes"
 import { toast } from "@/lib/toast"
-import type { Candidate, ExistingWaypoint, HoveredPoi } from "@/types/candidate"
+import type { Candidate, CandidateDetails, ExistingWaypoint, HoveredPoi, PoiLookupResult } from "@/types/candidate"
 import colors from "tailwindcss/colors"
+
+// A basemap POI icon the visitor clicked, mid-resolution or resolved -
+// rendered as its own Popup (not tied to a Marker, since "not found" has no
+// real OSM node to anchor one to). See App.tsx's handleBasemapPoiClick.
+export interface PendingPoiLookup {
+  lat: number
+  lon: number
+  poiType: string
+  status: "loading" | "error" | "not_found" | "done"
+  result?: PoiLookupResult
+}
 
 export interface RouteMapProps {
   routeCoords: [number, number][]
@@ -50,6 +70,18 @@ export interface RouteMapProps {
   hoveredPoi?: HoveredPoi
   mapStyleKey: string
   onMapStyleChange: (key: string) => void
+  // Tags/last-edited for every candidate with a popup, keyed by osm_id -
+  // covers both search-found candidates (via FindPoisResponse.candidate_details)
+  // and basemap-click-added ones (see App.tsx's candidateDetails).
+  candidateDetails?: Record<number, CandidateDetails>
+  // osm_ids added via a basemap click, used only to exclude those markers
+  // from FitBounds - not for deciding popup content (see candidateDetails).
+  clickAddedCandidateIds?: Set<number>
+  onBasemapPoiClick?: (lat: number, lon: number, poiType: string) => void
+  pendingLookup?: PendingPoiLookup | null
+  onConfirmPendingLookup?: () => void
+  onDismissPendingLookup?: () => void
+  // Present exactly while the route planner is active - see PlanningProps.
   planning?: PlanningProps
 }
 
@@ -74,6 +106,11 @@ export interface PlanningProps {
   onInsertAnchor: (grabDistanceM: number, dropPoint: [number, number]) => void
 }
 
+// Stable empty-Set default for clickAddedCandidateIds - a fresh `new Set()`
+// literal in the destructured default would change identity every render,
+// defeating fitBoundsCandidates' useMemo below.
+const EMPTY_ID_SET: Set<number> = new Set()
+
 const DEFAULT_CENTER: [number, number] = [46.06352, 11.12864]
 const DEFAULT_ZOOM = 14
 const EXISTING_WAYPOINT_COLOR = colors.pink[500]
@@ -84,6 +121,8 @@ const MAP_TILES_DIMMED_OPACITY = 0.6
 // wins over the endpoints.
 const ROUTE_ENDPOINT_Z_INDEX = 500
 const HOVERED_Z_INDEX = 1000
+// An open Popup has no z-index prop of its own - index.css's
+// `.maplibregl-popup` rule keeps it above both constants above.
 
 const ROUTE_SOURCE_ID = "route"
 const ARROW_IMAGE_ID = "route-arrow"
@@ -171,11 +210,21 @@ function FitBounds({
   disabled?: boolean
 }) {
   const { current: map } = useMap()
+  // Tracks the last bounds actually applied, by value rather than by the
+  // candidates/routeCoords/existingWaypoints array *references* below -
+  // App.tsx hands this a freshly-built array on every render (e.g. after a
+  // click-added POI is included), so a reference-only dependency check
+  // would re-fit/re-zoom the map even when the computed bounds are
+  // identical to what's already applied.
+  const lastAppliedBoundsRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!map || disabled) return
     const bounds = getRouteBounds(routeCoords, candidates, existingWaypoints)
     if (!bounds) return
+    const key = JSON.stringify(bounds)
+    if (key === lastAppliedBoundsRef.current) return
+    lastAppliedBoundsRef.current = key
     map.fitBounds(bounds, { padding: 20, duration: 0 })
   }, [map, routeCoords, candidates, existingWaypoints, disabled])
 
@@ -644,6 +693,243 @@ function PoiTypeLabel({ name, label }: { name: string | null; label: string | un
   return null
 }
 
+// The basemap's own POI icons (source-layer "poi" on road-cycling.json's
+// vector source) - filtered at runtime (see BasemapPoiFilter) down to only
+// our addable poi_types, and made clickable via interactiveLayerIds on
+// <Map>. poi_r1 is included even though its icon/text-size is already
+// zeroed in the style, for consistency should that ever change; poi_transit
+// (airport/rail/bus labels) is deliberately left unfiltered - those are
+// orientation landmarks, not "things you can add to your route".
+const BASEMAP_POI_LAYER_IDS = ["poi_r20", "poi_r7", "poi_r1"]
+
+function osmEditNodeUrl(osmId: number): string {
+  return `https://www.openstreetmap.org/edit?editor=id&node=${osmId}`
+}
+
+function osmEditNewNodeUrl(lat: number, lon: number): string {
+  return `https://www.openstreetmap.org/edit#map=19/${lat}/${lon}`
+}
+
+// A tag's own label, with the wiki-link info icon and (for a date-like tag,
+// e.g. check_date/survey:date - see osmTagLabels' "Last verified" label) an
+// exact-timestamp tooltip on hover.
+function OsmTagLabel({ tag }: { tag: FormattedOsmTag }) {
+  const label = (
+    <span className="truncate">{tag.label}</span>
+  )
+  return (
+    <span className="inline-flex items-center gap-1 min-w-0">
+      {tag.isDate ? (
+        <Tooltip>
+          <TooltipTrigger asChild>{label}</TooltipTrigger>
+          <TooltipContent>{formatExactDateTime(tag.value)}</TooltipContent>
+        </Tooltip>
+      ) : (
+        label
+      )}
+      <a
+        href={tag.wikiUrl}
+        target="_blank"
+        rel="noreferrer"
+        title={`Learn more about "${tag.key}" on the OSM wiki`}
+        aria-label={`Learn more about ${tag.label} on the OSM wiki`}
+        className="shrink-0 text-muted-foreground/70 hover:text-primary"
+      >
+        <Info className="size-3" />
+      </a>
+    </span>
+  )
+}
+
+// Renders every OSM tag on a node except `name` (already shown as the
+// popup's header), tags promoted elsewhere in the popup (see PoiEditMeta),
+// and the excluded pure-provenance keys - deliberately generic rather than
+// a hardcoded field list, since "as much info as OSM has" means whatever
+// tags happen to be present, grouped/paired where that reads better (see
+// osmTagLabels.groupOsmTags). A table (property name as each row's <th>)
+// reads better than a plain list once there are more than a couple of rows.
+// Values are truncated (see osmTagLabels.truncateOsmValue) rather than left
+// to wrap/overflow, since a long unbroken value (a URL) can force the popup
+// wider than its maxWidth. Wrapped in its own scroll container (rather than
+// the whole popup scrolling) so the header/checkbox/edit-link stay visible
+// once a tag-heavy POI's table exceeds the popup's own max-height (see
+// index.css's --rm-map-height-driven .maplibregl-popup-content rule).
+function OsmTagList({ tags }: { tags: Record<string, string> }) {
+  const entries = groupOsmTags(tags)
+  if (entries.length === 0) return null
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+      <table className="w-full mt-1 text-xs text-muted-foreground">
+        <tbody>
+          {entries.map((tag) => (
+            <tr key={tag.key} className="border-1">
+              <th scope="row" className="bg-olive-100 pl-1 py-1.5 pr-3 text-left font-medium align-top whitespace-nowrap">
+                <OsmTagLabel tag={tag} />
+              </th>
+              <td className="pl-1 py-1.5 min-w-0 break-words align-top">
+                {tag.href ? (
+                  <a
+                    href={tag.href}
+                    target="_blank"
+                    rel="noreferrer"
+                    title={tag.value}
+                    className="text-primary underline"
+                  >
+                    {tag.displayValue}
+                  </a>
+                ) : (
+                  <span title={tag.value}>{tag.displayValue}</span>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// "Last edited on OSM ..." / "Last verified ..." info lines shown above the
+// tag table - distinct from a mapper-set check_date/survey:date tag's own
+// exact-time tooltip inside the table (see OsmTagLabel), this pairs OSM's
+// own edit-history timestamp (PoiLookupResult.last_edited /
+// CandidateDetails.last_edited) with the same mapper-set verification date,
+// promoted out of OsmTagList (see osmTagLabels.groupOsmTags) so it isn't
+// shown twice.
+function PoiEditMeta({ lastEdited, tags }: { lastEdited: string | null; tags: Record<string, string> }) {
+  const lastVerified = tags.check_date ?? tags["survey:date"]
+  if (!lastEdited && !lastVerified) return null
+  return (
+    <>
+      {lastEdited && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <p className="text-xs text-muted-foreground w-fit">
+              Last edited on OSM {formatRelativeDate(lastEdited)}
+            </p>
+          </TooltipTrigger>
+          <TooltipContent>{formatExactDateTime(lastEdited)}</TooltipContent>
+        </Tooltip>
+      )}
+      {lastVerified && (
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <p className="text-xs text-muted-foreground w-fit">
+              Last verified {formatRelativeDate(lastVerified)}
+            </p>
+          </TooltipTrigger>
+          <TooltipContent>{formatExactDateTime(lastVerified)}</TooltipContent>
+        </Tooltip>
+      )}
+    </>
+  )
+}
+
+// Shared popup body for both a route-search candidate and a basemap-click
+// lookup result - the two are both real OSM nodes and were previously
+// rendered by two independently hand-written JSX blocks that had drifted
+// out of sync (a search-found candidate's popup showed no tags/edit info at
+// all). The existing-waypoint popup deliberately does NOT use this - an
+// ExistingWaypoint is parsed straight from the visitor's own GPX file, has
+// no osm_id/tags, so there's no OSM data here to show for it.
+function PoiPopupContent({
+  icon: Icon,
+  color,
+  name,
+  poiTypeLabel,
+  tags,
+  lastEdited,
+  osmEditUrl,
+  metaLine,
+  footer,
+}: {
+  icon: LucideIcon
+  color: string
+  name: string | null
+  poiTypeLabel: string | undefined
+  tags: Record<string, string>
+  lastEdited: string | null
+  osmEditUrl: string
+  metaLine?: ReactNode
+  footer?: ReactNode
+}) {
+  return (
+    <>
+      <div className="shrink-0">
+        <div className="flex items-center gap-1 font-medium">
+          <Icon className="size-4" style={{ color }} />
+          {name || (poiTypeLabel ?? "Point of interest")}
+        </div>
+        <PoiTypeLabel name={name} label={poiTypeLabel} />
+        <PoiEditMeta lastEdited={lastEdited} tags={tags} />
+        {metaLine}
+      </div>
+      <OsmTagList tags={tags} />
+      <div className="shrink-0">
+        {footer}
+        <a href={osmEditUrl} target="_blank" rel="noreferrer" className="text-xs text-primary underline">
+          Edit on OpenStreetMap
+        </a>
+      </div>
+    </>
+  )
+}
+
+// Applies the addable-types filter to the basemap's own POI layers via
+// map.setFilter, ANDed with each layer's existing filter - re-applied on
+// every styledata event since a full style reload wipes setFilter calls,
+// same as RouteDirectionArrows' custom image. Keeps the static style JSON
+// untouched: the class/subclass mapping lives in one place
+// (basemapPoiMapping.ts), not duplicated into the style file.
+//
+// setFilter itself fires another styledata event, so apply() re-running
+// naively against whatever getFilter() *currently* returns would nest
+// ["all", ["all", ["all", ...]]] one level deeper every time - an infinite
+// loop of style mutations that pegs the render thread and blanks the map.
+// Each layer's original filter is captured once (before this component ever
+// touches it) and reused as the base on every reapplication; setFilter is
+// only called when the computed target actually differs from the current
+// filter, which is what breaks the loop.
+function BasemapPoiFilter() {
+  const { current: mapRef } = useMap()
+  // A plain object, not a JS Map - `Map` in this file's scope is
+  // react-map-gl's <Map> component.
+  const baseFiltersRef = useRef<Record<string, unknown>>({})
+
+  useEffect(() => {
+    if (!mapRef) return
+    // setFilter/getFilter are handler methods on the underlying maplibre Map,
+    // not proxied by react-map-gl's MapRef (same reason dragPan needs
+    // getMap() elsewhere in this file).
+    const map = mapRef.getMap()
+    const addable = buildAddablePoiFilter()
+    const apply = () => {
+      for (const id of BASEMAP_POI_LAYER_IDS) {
+        if (!map.getLayer(id)) continue
+        if (!(id in baseFiltersRef.current)) {
+          baseFiltersRef.current[id] = map.getFilter(id)
+        }
+        const base = baseFiltersRef.current[id]
+        const target = base ? ["all", base, addable] : addable
+        const current = map.getFilter(id)
+        if (JSON.stringify(current) === JSON.stringify(target)) continue
+        // MapLibre's FilterSpecification type doesn't model dynamically
+        // built expressions well - these are valid runtime filter
+        // expressions, just not statically typed as such.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        map.setFilter(id, target as any)
+      }
+    }
+    map.on("styledata", apply)
+    apply()
+    return () => {
+      map.off("styledata", apply)
+    }
+  }, [mapRef])
+
+  return null
+}
+
 export function RouteMap({
   routeCoords,
   candidates,
@@ -656,6 +942,12 @@ export function RouteMap({
   hoveredPoi = null,
   mapStyleKey,
   onMapStyleChange,
+  candidateDetails = {},
+  clickAddedCandidateIds = EMPTY_ID_SET,
+  onBasemapPoiClick,
+  pendingLookup = null,
+  onConfirmPendingLookup,
+  onDismissPendingLookup,
   planning,
 }: RouteMapProps) {
   const [openPopup, setOpenPopup] = useState<{ kind: "candidate" | "waypoint"; id: number } | null>(null)
@@ -665,11 +957,42 @@ export function RouteMap({
   // is stored ready for direct use as a <Marker>'s longitude/latitude props.
   const [userLocation, setUserLocation] = useState<[number, number] | null>(null)
   const mapRef = useRef<MapRef>(null)
+  // Whether the pointer is over a clickable basemap POI icon - one of
+  // interactiveLayerIds (BASEMAP_POI_LAYER_IDS), i.e. the elements whose
+  // onClick triggers a POI lookup around that location. Drives the cursor
+  // prop below so hovering one of these (and only these) shows a pointer,
+  // like any other clickable element.
+  const [hoveringPoiLayer, setHoveringPoiLayer] = useState(false)
+  // Observed so index.css's popup max-height and max-width rule can cap
+  // a POI popup relative to the map's actual rendered size instead of a
+  // fixed pixel guess - MapLibre's popup DOM is a descendant of this
+  // wrapper, so the variable cascades to it with no prop plumbing.
+  const mapWrapperRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = mapWrapperRef.current
+    if (!el) return
+    const observer = new ResizeObserver(([entry]) => {
+      el.style.setProperty("--rm-map-height", `${entry.contentRect.height}px`)
+      el.style.setProperty("--rm-map-width", `${entry.contentRect.width}px`)
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
   const hasRoute = routeCoords.length > 0
   const center = hasRoute ? routeCoords[0] : DEFAULT_CENTER
   const zoom = hasRoute ? 13 : DEFAULT_ZOOM
   const isHovering = hoveredPoi !== null
   const styleUrl = MAP_STYLES.find((s) => s.key === mapStyleKey)?.styleUrl ?? MAP_STYLES[0].styleUrl
+  // Click-added candidates are excluded from FitBounds's input - including
+  // one from its lookup popup shouldn't re-fit/re-zoom the map, since the
+  // visitor just clicked that exact spot and already has it in view.
+  // Memoized so this array's identity is stable across renders that don't
+  // actually change the search-found set (e.g. hover), matching FitBounds'
+  // own effect dependency.
+  const fitBoundsCandidates = useMemo(
+    () => candidates.filter((c) => !clickAddedCandidateIds.has(c.osm_id)),
+    [candidates, clickAddedCandidateIds]
+  )
 
   const pan = (dx: number, dy: number) => {
     mapRef.current?.getMap().panBy([dx, dy], { duration: 200 })
@@ -710,28 +1033,53 @@ export function RouteMap({
 
   return (
     <TooltipProvider>
-      <div className="relative h-full w-full">
+      <div ref={mapWrapperRef} className="relative h-full w-full">
         <Map
           ref={mapRef}
           initialViewState={{ longitude: center[1], latitude: center[0], zoom }}
           mapStyle={styleUrl}
           style={{ width: "100%", height: "100%" }}
-          onClick={
-            planning
-              ? (e) => {
-                  // Clicking the route itself does nothing - that gesture is
-                  // reserved for dragging a new point out of the line, and
-                  // appending to the far end is never what a click on the
-                  // middle of the route meant.
-                  if (isOnRouteLine(e.target, e.point)) return
-                  planning.onAppendAnchor([e.lngLat.lat, e.lngLat.lng])
-                }
-              : undefined
-          }
+          // Basemap POI icons stop being clickable while planning: a click
+          // on the map there means "add a point", and a POI icon sitting
+          // where the visitor wants the route to go must not swallow it.
+          interactiveLayerIds={planning ? undefined : BASEMAP_POI_LAYER_IDS}
+          cursor={!planning && hoveringPoiLayer ? "pointer" : undefined}
+          onMouseEnter={() => setHoveringPoiLayer(true)}
+          onMouseLeave={() => setHoveringPoiLayer(false)}
+          onClick={(e) => {
+            if (planning) {
+              // Clicking the route itself does nothing - that gesture is
+              // reserved for dragging a new point out of the line, and
+              // appending to the far end is never what a click on the
+              // middle of the route meant.
+              if (isOnRouteLine(e.target, e.point)) return
+              planning.onAppendAnchor([e.lngLat.lat, e.lngLat.lng])
+              return
+            }
+            if (e.features && e.features.length > 0) {
+              const feature = e.features[0]
+              const props = feature.properties as { class?: string; subclass?: string }
+              const poiType = resolvePoiTypeFromFeatureProps(props)
+              // Use the feature's own point geometry, not the click/tap
+              // position - a basemap POI's clickable footprint includes its
+              // text label (rendered below the icon, "text-anchor: top"),
+              // so a click anywhere on a long name can land many metres from
+              // the actual node. The lookup radius is a tight 40m (see
+              // main.py's LOOKUP_POI_RADIUS_M), so searching around the
+              // click point instead of the real node position is what was
+              // causing this to 404 even for real, present POIs.
+              const geometry = feature.geometry as { type: string; coordinates?: [number, number] }
+              if (poiType && geometry.type === "Point" && geometry.coordinates) {
+                const [lng, lat] = geometry.coordinates
+                onBasemapPoiClick?.(lat, lng, poiType)
+              }
+            }
+          }}
         >
           <MapHoverDim dimmed={isHovering} />
           <BearingSync onBearingChange={setBearing} />
           <PlanningCursor active={planning !== undefined} />
+          <BasemapPoiFilter />
 
           {hasRoute && (
             <Source id={ROUTE_SOURCE_ID} type="geojson" data={toRouteLineGeoJson(routeCoords)}>
@@ -782,31 +1130,110 @@ export function RouteMap({
                     latitude={candidate.lat}
                     anchor="bottom"
                     offset={16}
+                    maxWidth="360px"
                     onClose={() => setOpenPopup(null)}
                   >
-                    <div className="flex flex-col gap-2 text-sm">
-                      <div className="flex items-center gap-1 font-medium">
-                        <Icon className="size-4" style={{ color }} />
-                        {candidate.name || (poiType?.label ?? "Point of interest")}
-                      </div>
-                      <PoiTypeLabel name={candidate.name} label={poiType?.label}></PoiTypeLabel>
-                      <p className="text-muted-foreground">{candidate.distance_m.toFixed(0)}m from route</p>
-                      <div className="flex items-center gap-2">
-                        <Checkbox
-                          id={checkboxId}
-                          checked={isSelected}
-                          onCheckedChange={() => onToggle(candidate.osm_id)}
-                        />
-                        <Label htmlFor={checkboxId} className="font-normal">
-                          Include
-                        </Label>
-                      </div>
-                    </div>
+                    <PoiPopupContent
+                      icon={Icon}
+                      color={color}
+                      name={candidate.name}
+                      poiTypeLabel={poiType?.label}
+                      tags={candidateDetails[candidate.osm_id]?.tags ?? {}}
+                      lastEdited={candidateDetails[candidate.osm_id]?.last_edited ?? null}
+                      osmEditUrl={osmEditNodeUrl(candidate.osm_id)}
+                      metaLine={
+                        <p className="text-muted-foreground">{candidate.distance_m.toFixed(0)}m from route</p>
+                      }
+                      footer={
+                        hasRoute && (
+                          <div className="flex items-center gap-2">
+                            <Checkbox
+                              id={checkboxId}
+                              checked={isSelected}
+                              onCheckedChange={() => onToggle(candidate.osm_id)}
+                            />
+                            <Label htmlFor={checkboxId} className="font-normal">
+                              Include
+                            </Label>
+                          </div>
+                        )
+                      }
+                    />
                   </Popup>
                 )}
               </Marker>
             )
           })}
+
+          {pendingLookup && (
+            <Popup
+              longitude={pendingLookup.lon}
+              latitude={pendingLookup.lat}
+              anchor="bottom"
+              offset={16}
+              maxWidth="360px"
+              onClose={() => onDismissPendingLookup?.()}
+            >
+              <div className="flex flex-1 min-h-0 flex-col gap-3 text-sm">
+                {pendingLookup.status === "loading" && (
+                  <p className="text-muted-foreground">Looking up this point…</p>
+                )}
+                {pendingLookup.status === "error" && (
+                  <p className="text-muted-foreground">Couldn't look up this point of interest.</p>
+                )}
+                {pendingLookup.status === "not_found" && (
+                  <>
+                    <p className="text-muted-foreground">
+                      No OpenStreetMap data found here.
+                    </p>
+                    <a
+                      href={osmEditNewNodeUrl(pendingLookup.lat, pendingLookup.lon)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-primary underline"
+                    >
+                      Add it on OpenStreetMap
+                    </a>
+                  </>
+                )}
+                {pendingLookup.status === "done" && pendingLookup.result && (
+                  <>
+                    {(() => {
+                      const result = pendingLookup.result
+                      const poiType = POI_TYPES.find((p) => p.key === result.poi_type)
+                      const Icon = poiType?.icon ?? POI_TYPES[0].icon
+                      const color = poiType?.color ?? POI_TYPES[0].color
+                      return (
+                        <PoiPopupContent
+                          icon={Icon}
+                          color={color}
+                          name={result.name}
+                          poiTypeLabel={poiType?.label}
+                          tags={result.tags}
+                          lastEdited={result.last_edited}
+                          osmEditUrl={osmEditNodeUrl(result.osm_id)}
+                          footer={
+                            hasRoute && (
+                              <div className="flex items-center gap-2">
+                                <Checkbox
+                                  id="pending-lookup-include"
+                                  checked={false}
+                                  onCheckedChange={() => onConfirmPendingLookup?.()}
+                                />
+                                <Label htmlFor="pending-lookup-include" className="font-normal">
+                                  Include
+                                </Label>
+                              </div>
+                            )
+                          }
+                        />
+                      )
+                    })()}
+                  </>
+                )}
+              </div>
+            </Popup>
+          )}
 
           {existingWaypoints.map((waypoint) => {
             const isKept = keptWaypointIndices.has(waypoint.index)
@@ -839,9 +1266,10 @@ export function RouteMap({
                     latitude={waypoint.lat}
                     anchor="bottom"
                     offset={16}
+                    maxWidth="360px"
                     onClose={() => setOpenPopup(null)}
                   >
-                    <div className="flex flex-col gap-2 text-sm">
+                    <div className="flex flex-col gap-3 text-sm">
                       <div className="flex items-center gap-1 font-medium">
                         <Icon className="size-4" style={{ color }} />
                         {waypoint.name || "(unnamed)"}
@@ -913,7 +1341,7 @@ export function RouteMap({
           )}
           <FitBounds
             routeCoords={routeCoords}
-            candidates={candidates}
+            candidates={fitBoundsCandidates}
             existingWaypoints={existingWaypoints}
             disabled={planning !== undefined}
           />

@@ -171,13 +171,13 @@ export function parseRouteElevationsFromGpx(xmlText: string): (number | null)[] 
 }
 
 // Best-effort client-side parse of the uploaded file's pre-existing <wpt>
-// entries, for instant display before /api/find-pois has run. index is the
+// entries, for instant display before /api/find-pois/route has run. index is the
 // position in document order among top-level <wpt> elements, matching the
 // backend's enumerate(gpx.waypoints) in main.py - gpxpy, like this DOM
 // walk, only ever treats top-level <wpt> elements as waypoints, so the two
 // orderings agree for the same uploaded file. That agreement is what makes
 // it safe to send discarded indices computed from this preview straight to
-// /api/save without ever having called /api/find-pois.
+// /api/save without ever having called /api/find-pois/route.
 export function parseExistingWaypointsFromGpx(xmlText: string): ExistingWaypoint[] {
   try {
     const doc = new DOMParser().parseFromString(xmlText, "application/xml")

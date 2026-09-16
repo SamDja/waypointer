@@ -1,12 +1,20 @@
 import type {
   Candidate,
   FindPoisResponse,
+  PoiLookupResult,
   PoiSearchConfig,
   RouteLegResponse,
   SearchRange,
 } from "@/types/candidate"
 
-export class ApiError extends Error {}
+export class ApiError extends Error {
+  status?: number
+
+  constructor(message: string, status?: number) {
+    super(message)
+    this.status = status
+  }
+}
 
 async function errorDetail(response: Response, fallback: string): Promise<string> {
   const data = await response.json().catch(() => null)
@@ -16,9 +24,9 @@ async function errorDetail(response: Response, fallback: string): Promise<string
 export async function findPois(
   gpxFile: File,
   poiConfig: PoiSearchConfig[],
-  // Narrows only which stretch of the route the Overpass query covers - the
+  // Narrows only which stretch of the route the PostGIS query covers - the
   // route planner passes the newly extended span so a re-search after an
-  // edit doesn't re-query the whole route. Every distance in the response is
+  // edit only returns POIs along it. Every distance in the response is
   // still measured against the full route (see schemas.SearchRange).
   searchRange?: SearchRange,
 ): Promise<FindPoisResponse> {
@@ -27,7 +35,7 @@ export async function findPois(
   formData.append("poi_config", JSON.stringify(poiConfig))
   if (searchRange) formData.append("search_range", JSON.stringify(searchRange))
 
-  const response = await fetch("/api/find-pois", { method: "POST", body: formData })
+  const response = await fetch("/api/find-pois/route", { method: "POST", body: formData })
   if (!response.ok) {
     throw new ApiError(await errorDetail(response, "Request failed."))
   }
@@ -51,6 +59,26 @@ export async function routeLeg(
     throw new ApiError(await errorDetail(response, "Couldn't plan that stretch of route."))
   }
   return (await response.json()) as RouteLegResponse
+}
+
+export async function lookupPoi(
+  lat: number,
+  lon: number,
+  poiType: string,
+): Promise<PoiLookupResult> {
+  const formData = new FormData()
+  formData.append("lat", String(lat))
+  formData.append("lon", String(lon))
+  formData.append("poi_type", poiType)
+
+  const response = await fetch("/api/find-pois/location", { method: "POST", body: formData })
+  if (!response.ok) {
+    throw new ApiError(
+      await errorDetail(response, "Couldn't look up that point of interest."),
+      response.status,
+    )
+  }
+  return (await response.json()) as PoiLookupResult
 }
 
 export interface SaveParams {

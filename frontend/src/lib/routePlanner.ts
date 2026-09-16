@@ -64,7 +64,7 @@ export interface PlannerState {
 }
 
 // Guardrails on a hand-drawn route: each anchor costs a routing request, and
-// the whole polyline eventually becomes an Overpass `around` clause.
+// the whole polyline is resubmitted to every POI search and export.
 export const MAX_ANCHORS = 50
 export const MAX_ROUTE_DISTANCE_M = 300_000
 

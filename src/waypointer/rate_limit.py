@@ -1,15 +1,31 @@
-"""Minimal per-IP rate limiting for the endpoints backed by external APIs.
+"""Minimal per-IP rate limiting for the POI-database- and routing-backed
+endpoints.
 
-A public deployment shares one server IP across all visitors when it talks to
-the Overpass and BRouter APIs, so a burst of traffic (accidental or not)
-risks getting that IP rate-limited or banned upstream. This is a small
-in-memory sliding window log, not a distributed limiter - sufficient for a
-single free-tier instance and intentionally not backed by Redis/a database.
+Now that POI lookups hit a local PostGIS database (see poi_db.py) instead
+of a shared, rate-limit-sensitive public Overpass mirror, the POI buckets'
+job is just guarding this app's own DB/CPU usage against a burst of
+traffic (accidental or not) from one IP - not protecting a third party's
+quota. Route planning is different: /api/route-leg still proxies BRouter's
+shared public instance (see routing.py), so a burst there does risk getting
+this server's one IP throttled upstream. Still a small in-memory sliding
+window log, not a distributed limiter - sufficient for a single instance and
+intentionally not backed by Redis/a database.
 
-Each endpoint gets its own named bucket with its own budget: route planning
-is inherently chattier than POI search (dragging an anchor re-requests its
-two adjacent legs), and sharing one budget would let a planning session
-starve the search it exists to feed.
+Each endpoint gets its own named bucket with its own budget, so one
+endpoint's traffic can never consume another's: route planning is
+inherently chatty (dragging an anchor re-requests its two adjacent legs),
+and sharing one budget would let a planning session starve the search it
+exists to feed.
+
+The frontend fans a single "Find POIs" click out into one
+/api/find-pois/route request per selected POI type (fired in parallel)
+rather than one request carrying every type, so progress/results can be
+shown per type instead of only once the slowest type finishes - see
+FindPoisCard.tsx / App.tsx's runFind. That doesn't change how much real
+DB work happens (still one query per type, same as before), just how many
+times this dependency gets checked for the same amount of work - so the
+budget below is sized to comfortably cover a full-registry search (~50
+searchable types) plus a couple of re-searches within the window.
 """
 
 import threading
@@ -18,8 +34,10 @@ from collections import defaultdict
 
 from fastapi import HTTPException, Request, status
 
-OVERPASS_REQUESTS_PER_WINDOW = 10
+REQUESTS_PER_WINDOW = 60
+LOOKUP_POI_REQUESTS_PER_WINDOW = 30
 ROUTING_REQUESTS_PER_WINDOW = 60
+
 WINDOW_S = 60.0
 
 _lock = threading.Lock()
@@ -36,7 +54,9 @@ def _client_ip(request: Request) -> str:
 
 
 def make_rate_limit(bucket: str, requests_per_window: int, window_s: float = WINDOW_S):
-    """Builds a FastAPI dependency enforcing one named bucket's budget."""
+    """Builds a FastAPI dependency that raises 429 once an IP exceeds the
+    request budget for this bucket - separate buckets so one endpoint's
+    traffic can't exhaust another's budget."""
 
     def rate_limit_dependency(request: Request) -> None:
         ip = _client_ip(request)
@@ -58,5 +78,6 @@ def make_rate_limit(bucket: str, requests_per_window: int, window_s: float = WIN
     return rate_limit_dependency
 
 
-rate_limit = make_rate_limit("overpass", OVERPASS_REQUESTS_PER_WINDOW)
+rate_limit = make_rate_limit("find_pois", REQUESTS_PER_WINDOW)
+lookup_poi_rate_limit = make_rate_limit("lookup_poi", LOOKUP_POI_REQUESTS_PER_WINDOW)
 routing_rate_limit = make_rate_limit("routing", ROUTING_REQUESTS_PER_WINDOW)
