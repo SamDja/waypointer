@@ -7,6 +7,7 @@ import { RouteMap, type PendingPoiLookup } from "@/components/RouteMap"
 import { SaveCard } from "@/components/SaveCard"
 import { StepCard } from "@/components/StepCard"
 import { PlannerPanel } from "@/components/PlannerPanel"
+import { ElevationProfile } from "@/components/ElevationProfile"
 import type { PlannerPoint } from "@/components/PlannerPointList"
 import { MapStyleSelect } from "@/components/MapStyleSelect"
 import { Toaster } from "@/components/Toaster"
@@ -75,7 +76,7 @@ import {
   type DeviceSettings,
   type PoiSearchEntry,
 } from "@/lib/settings"
-import { useMapInsets } from "@/lib/useMapInsets"
+import { useElementHeight, useMapInsets } from "@/lib/useMapInsets"
 import { toast, updateToast } from "@/lib/toast"
 import { loadWahooTokens, type WahooTokens } from "@/lib/wahooSettings"
 import type {
@@ -115,6 +116,9 @@ const SEARCH_STAGGER_MS = 200
 // Plenty for a planning session; bounds memory, since each entry holds a
 // whole PlannerState (an import's geometry included).
 const PLANNER_HISTORY_LIMIT = 100
+
+// Space between the elevation profile and the map's bottom/left edges.
+const PROFILE_GAP_PX = 16
 
 // One step of the planner's undo/redo history: the route to return to, and
 // the POIs/waypoints the edit that left it unchecked (because they ended up
@@ -228,7 +232,15 @@ export default function App() {
   // know how much of it they cover.
   const headerRef = useRef<HTMLElement>(null)
   const asideRef = useRef<HTMLElement>(null)
-  const mapInsets = useMapInsets(headerRef, asideRef)
+  const overlayInsets = useMapInsets(headerRef, asideRef)
+  // The elevation profile floats over the bottom of the map while planning;
+  // its height (plus its gap to the edge) is the map's bottom inset.
+  const [profileEl, setProfileEl] = useState<HTMLDivElement | null>(null)
+  const profileHeight = useElementHeight(profileEl)
+  const mapInsets = useMemo(
+    () => ({ ...overlayInsets, bottom: profileHeight > 0 ? profileHeight + PROFILE_GAP_PX : 0 }),
+    [overlayInsets, profileHeight]
+  )
   // The map's current zoom, for the planner's spur tolerance. A ref, not
   // state: it's only read when a point is placed or moved.
   const mapZoomRef = useRef(14)
@@ -1300,6 +1312,13 @@ export default function App() {
       }
     })
   }, [plannerState])
+  // Where each planner point sits along the route, for the elevation profile's ticks.
+  const plannerPointDistancesM = useMemo(() => {
+    if (!plannerState) return []
+    const distances = [0]
+    for (const legM of plannerLegDistancesM(plannerState)) distances.push(distances[distances.length - 1] + legM)
+    return plannerAnchors(plannerState).length > 0 ? distances : []
+  }, [plannerState])
   // The derived way back to the start, shown after the point list.
   const plannerReturn = useMemo(() => {
     if (!plannerState || plannerState.shape === "one-way") return null
@@ -1365,7 +1384,7 @@ export default function App() {
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col md:block">
-        <div className="h-[50vh] shrink-0 md:absolute md:inset-0 md:h-auto">
+        <div className="relative h-[50vh] shrink-0 md:absolute md:inset-0 md:h-auto">
           <RouteMap
             routeCoords={findResult?.route_coords ?? previewRouteCoords}
             candidates={allCandidates}
@@ -1407,6 +1426,23 @@ export default function App() {
                 : undefined
             }
           />
+          {plannerState && previewRouteCoords.length >= 2 && (
+            <div
+              ref={setProfileEl}
+              className="absolute z-20"
+              style={{ left: PROFILE_GAP_PX, bottom: PROFILE_GAP_PX, right: mapInsets.right + PROFILE_GAP_PX }}
+            >
+              <ElevationProfile
+                coords={previewRouteCoords}
+                elevations={previewElevations}
+                pointDistancesM={plannerPointDistancesM}
+                gainM={elevationGainM}
+                lossM={elevationLossM}
+                // Open on desktop; collapsed on a phone, where the map is only half the screen.
+                defaultOpen={window.matchMedia("(min-width: 48rem)").matches}
+              />
+            </div>
+          )}
         </div>
 
         <aside

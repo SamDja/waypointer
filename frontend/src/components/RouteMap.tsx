@@ -37,7 +37,8 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { MapLegend } from "@/components/MapLegend"
 import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
 import { buildAddablePoiFilter, resolvePoiTypeFromFeatureProps } from "@/lib/basemapPoiMapping"
-import { projectOntoPolylineM } from "@/lib/geometry"
+import { cumulativeDistancesM, pointAtDistanceM, projectOntoPolylineM } from "@/lib/geometry"
+import { setHoveredDistanceM, useHoveredDistanceM } from "@/lib/hoverDistance"
 import {
   CircleMarkerIcon,
   PLANNER_POINT_COLOR,
@@ -151,7 +152,7 @@ export interface PlanningProps {
 // literal in the destructured default would change identity every render,
 // defeating fitBoundsCandidates' useMemo below.
 const EMPTY_ID_SET: Set<number> = new Set()
-const NO_INSETS: MapInsets = { top: 0, right: 0 }
+const NO_INSETS: MapInsets = { top: 0, right: 0, bottom: 0 }
 // Breathing room around the route when fitting it into view, on top of
 // whatever the floating header/sidebar cover.
 const FIT_PADDING_PX = 20
@@ -784,6 +785,54 @@ function PlannerAnchorMarker({
  * - The insert position comes from where the pointer went DOWN (that's the
  *   stretch being split), while the new point lands where it came UP.
  */
+/**
+ * Reports the distance along the route under the pointer while hovering the
+ * route line, so the elevation profile's crosshair follows it (see
+ * lib/hoverDistance). Bound to the same wide hit layer the line-drag uses.
+ */
+function RouteHoverReporter({ routeCoords }: { routeCoords: [number, number][] }) {
+  const { current: map } = useMap()
+  const coordsRef = useRef(routeCoords)
+  useEffect(() => {
+    coordsRef.current = routeCoords
+  }, [routeCoords])
+
+  useEffect(() => {
+    if (!map) return
+    const handleMove = (e: MapLayerMouseEvent) => {
+      const { distanceFromStartM } = projectOntoPolylineM([e.lngLat.lat, e.lngLat.lng], coordsRef.current)
+      setHoveredDistanceM(distanceFromStartM)
+    }
+    const handleLeave = () => setHoveredDistanceM(null)
+    map.on("mousemove", ROUTE_HIT_LAYER_ID, handleMove)
+    map.on("mouseleave", ROUTE_HIT_LAYER_ID, handleLeave)
+    return () => {
+      map.off("mousemove", ROUTE_HIT_LAYER_ID, handleMove)
+      map.off("mouseleave", ROUTE_HIT_LAYER_ID, handleLeave)
+      setHoveredDistanceM(null)
+    }
+  }, [map])
+
+  return null
+}
+
+/** A dot on the route at the distance hovered in the elevation profile (or on the route itself). */
+function HoveredDistanceMarker({ routeCoords }: { routeCoords: [number, number][] }) {
+  const hoveredM = useHoveredDistanceM()
+  const cumulative = useMemo(() => cumulativeDistancesM(routeCoords), [routeCoords])
+  if (hoveredM === null) return null
+  const point = pointAtDistanceM(routeCoords, cumulative, hoveredM)
+  if (!point) return null
+  return (
+    <Marker longitude={point[1]} latitude={point[0]} style={{ zIndex: HOVERED_Z_INDEX, pointerEvents: "none" }}>
+      <div
+        className="rounded-full border-2 border-white"
+        style={{ width: 14, height: 14, backgroundColor: PLANNER_POINT_COLOR, boxShadow: "0 1px 3px rgba(0,0,0,0.4)" }}
+      />
+    </Marker>
+  )
+}
+
 function RouteLineInsertHandle({
   routeCoords,
   onInsertAnchor,
@@ -1193,7 +1242,7 @@ export function RouteMap({
     () => ({
       top: FIT_PADDING_PX + insets.top,
       right: FIT_PADDING_PX + insets.right,
-      bottom: FIT_PADDING_PX,
+      bottom: FIT_PADDING_PX + insets.bottom,
       left: FIT_PADDING_PX,
     }),
     [insets]
@@ -1242,7 +1291,7 @@ export function RouteMap({
         ref={mapWrapperRef}
         className="relative h-full w-full"
         // Read by the overlay controls below.
-        style={{ "--map-inset-top": `${insets.top}px` } as CSSProperties}
+        style={{ "--map-inset-top": `${insets.top}px`, "--map-inset-bottom": `${insets.bottom}px` } as CSSProperties}
       >
         <Map
           ref={mapRef}
@@ -1560,6 +1609,7 @@ export function RouteMap({
                 )
               })}
               <RouteLineInsertHandle routeCoords={routeCoords} onInsertAnchor={planning.onInsertAnchor} />
+              <RouteHoverReporter routeCoords={routeCoords} />
               {planning.selectedAnchor !== null && planning.anchors[planning.selectedAnchor] && (
                 <SelectedPointPopup
                   // Remounted per point, so switching selection re-anchors it.
@@ -1604,6 +1654,7 @@ export function RouteMap({
             </Marker>
           )}
           <DetachedAttribution hostRef={attributionHostRef} />
+          <HoveredDistanceMarker routeCoords={routeCoords} />
           <FitBounds
             routeCoords={routeCoords}
             candidates={fitBoundsCandidates}
@@ -1625,7 +1676,7 @@ export function RouteMap({
         {/* Every map control lives in one group on the left: the sidebar
             floats over the right side, so controls there would hang in the
             middle of the map. */}
-        <div className="absolute bottom-2 left-4 z-10 flex flex-col items-start gap-2">
+        <div className="absolute bottom-[calc(var(--map-inset-bottom)+0.5rem)] left-4 z-10 flex flex-col items-start gap-2">
           <div className="grid grid-cols-3 grid-rows-3 gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
