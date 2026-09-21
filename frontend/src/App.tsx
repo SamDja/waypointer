@@ -46,6 +46,7 @@ import {
   returnLeg,
   setRouteShape,
   setRoutingOptions,
+  spurToleranceM,
   trackPositions,
   trackedAfterExtend,
   trackedAfterTrim,
@@ -228,6 +229,9 @@ export default function App() {
   const headerRef = useRef<HTMLElement>(null)
   const asideRef = useRef<HTMLElement>(null)
   const mapInsets = useMapInsets(headerRef, asideRef)
+  // The map's current zoom, for the planner's spur tolerance. A ref, not
+  // state: it's only read when a point is placed or moved.
+  const mapZoomRef = useRef(14)
   // Leg keys with a request in flight, so a re-render mid-fetch doesn't fire
   // a duplicate request for the same leg.
   const inFlightLegs = useRef<Set<string>>(new Set())
@@ -744,10 +748,15 @@ export default function App() {
     return () => window.removeEventListener("keydown", listener)
   }, [isPlanning])
 
+  /** How long a dead-end spur at a point placed here, at the current zoom, may be and still be cut. */
+  function toleranceAt(point: [number, number]): number {
+    return spurToleranceM(mapZoomRef.current, point[0])
+  }
+
   function handleAppendAnchor(point: [number, number]) {
     if (!plannerState) return
     const before = plannerGeometry(plannerState).coords
-    const result = appendAnchor(plannerState, point)
+    const result = appendAnchor(plannerState, point, toleranceAt(point))
     if (!result.ok) {
       toast(result.error, "error")
       return
@@ -770,7 +779,7 @@ export default function App() {
 
   function handleMoveAnchor(anchorIndex: number, point: [number, number]) {
     if (!plannerState) return
-    const result = moveAnchor(plannerState, anchorIndex, point)
+    const result = moveAnchor(plannerState, anchorIndex, point, toleranceAt(point))
     if (!result.ok) {
       toast(result.error, "error")
       // Force the marker back to its real position - the drag already moved
@@ -822,7 +831,8 @@ export default function App() {
       return
     }
 
-    const result = which === "start" ? prependAnchor(plannerState, point) : appendAnchor(plannerState, point)
+    const result =
+      which === "start" ? prependAnchor(plannerState, point) : appendAnchor(plannerState, point, toleranceAt(point))
     if (!result.ok) {
       toast(result.error, "error")
       setPlannerState({ ...plannerState })
@@ -874,7 +884,7 @@ export default function App() {
       toast(inserted.error, "error")
       return
     }
-    const moved = moveAnchor(inserted.state, inserted.anchorIndex, dropPoint)
+    const moved = moveAnchor(inserted.state, inserted.anchorIndex, dropPoint, toleranceAt(dropPoint))
     if (!moved.ok) {
       toast(moved.error, "error")
       return
@@ -1374,6 +1384,9 @@ export default function App() {
             onConfirmPendingLookup={handleConfirmPendingLookup}
             onDismissPendingLookup={() => setPendingLookup(null)}
             insets={mapInsets}
+            onZoomChange={(zoom) => {
+              mapZoomRef.current = zoom
+            }}
             planning={
               plannerState
                 ? {

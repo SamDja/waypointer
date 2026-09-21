@@ -11,12 +11,14 @@ import {
   emptyPlannerState,
   endpointNeighbourKind,
   insertAnchorAt,
+  legKey,
   moveAnchor,
   outboundGeometry,
   plannerReturnDistanceM,
   returnLeg,
   setRouteShape,
   setRoutingOptions,
+  spurToleranceM,
   unroutedLegs,
   pendingLegs,
   offRouteItems,
@@ -710,5 +712,81 @@ describe("routing options", () => {
     const state = withLeg(drawnAB(), a, b, { ...routed, distanceM: 1234 }, requestedWith)
     expect(plannerLegDistancesM(state)[0]).toBeCloseTo(plannerLegDistancesM(drawnAB())[0], 6)
     expect(pendingLegs(setRoutingOptions(state, { consider_traffic: 0.3 }))).toHaveLength(0)
+  })
+})
+
+describe("dead-end spur removal", () => {
+  // A -> B -> C, where B was dropped ~220m up a side street off the A-C road:
+  // the first leg drives up the side street to B, the second comes straight
+  // back down it. j is the junction; s1 is on the side street.
+  const A: LatLon = [45.0, 7.0]
+  const m1: LatLon = [45.0, 7.005]
+  const j: LatLon = [45.0, 7.01]
+  const s1: LatLon = [45.001, 7.01]
+  const B: LatLon = [45.002, 7.01]
+  const m2: LatLon = [45.0, 7.015]
+  const C: LatLon = [45.0, 7.02]
+  const toB = { coords: [A, m1, j, s1, B], elevations: [1, 2, 3, 4, 5], distanceM: 1000 }
+  const toC = { coords: [B, s1, j, m2, C], elevations: [5, 4, 3, 2, 1], distanceM: 1000 }
+
+  function planned(toleranceM: number): PlannerState {
+    let state = emptyPlannerState(PROFILE)
+    state = (appendAnchor(state, A) as { state: PlannerState }).state
+    state = (appendAnchor(state, B, toleranceM) as { state: PlannerState }).state
+    state = (appendAnchor(state, C) as { state: PlannerState }).state
+    state = withLeg(state, A, B, toB)
+    return withLeg(state, B, C, toC)
+  }
+
+  it("cuts a spur within the point's tolerance, moving the point to where it was cut", () => {
+    const state = planned(300)
+    expect(plannerGeometry(state).coords).toEqual([A, m1, j, m2, C])
+    expect(plannerGeometry(state).elevations).toEqual([1, 2, 3, 2, 1])
+    expect(plannerAnchors(state)[1]).toEqual(j)
+  })
+
+  it("keeps a spur longer than the tolerance - a deliberate detour", () => {
+    const state = planned(100)
+    expect(plannerGeometry(state).coords).toEqual([A, m1, j, s1, B, s1, j, m2, C])
+    expect(plannerAnchors(state)[1]).toEqual(B)
+  })
+
+  it("never cuts a point placed without a tolerance", () => {
+    expect(plannerAnchors(planned(0))[1]).toEqual(B)
+  })
+
+  it("leaves the cached legs themselves untouched", () => {
+    const state = planned(300)
+    expect(state.legs[legKey(A, B, PROFILE)].coords).toEqual(toB.coords)
+  })
+
+  it("keeps distances consistent with the drawn route", () => {
+    const state = planned(300)
+    const legs = plannerLegDistancesM(state)
+    expect(legs[0] + legs[1]).toBeCloseTo(plannerDistanceM(state), 6)
+  })
+
+  it("doesn't cut where a leg meets imported geometry", () => {
+    let state = plannerStateFromImport(toB.coords, toB.elevations, PROFILE)
+    state = (appendAnchor(state, C, 300) as { state: PlannerState }).state
+    state = withLeg(state, B, C, toC)
+    expect(plannerGeometry(state).coords).toHaveLength(9)
+  })
+
+  it("uses the tolerance a moved point is given", () => {
+    const moved = moveAnchor(planned(0), 1, B, 300) as { state: PlannerState }
+    expect(plannerAnchors(moved.state)[1]).toEqual(j)
+  })
+})
+
+describe("spurToleranceM", () => {
+  it("is about 30px on the ground: large zoomed out, small zoomed in", () => {
+    // At the equator, zoom 0 is ~78km/px with 512px tiles.
+    expect(spurToleranceM(0, 0)).toBeCloseTo(30 * 78_271.5, -2)
+    expect(spurToleranceM(10, 46)).toBeGreaterThan(1000)
+    // ~12m at zoom 17 in northern Italy: a point placed that close in is deliberate.
+    expect(spurToleranceM(17, 46)).toBeLessThan(15)
+    // Each zoom level halves it.
+    expect(spurToleranceM(13, 46) / spurToleranceM(14, 46)).toBeCloseTo(2, 6)
   })
 })

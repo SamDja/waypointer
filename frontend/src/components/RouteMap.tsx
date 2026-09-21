@@ -101,6 +101,10 @@ export interface RouteMapProps {
   onDismissPendingLookup?: () => void
   // Present exactly while the route planner is active - see PlanningProps.
   planning?: PlanningProps
+  // Reported on load and after every zoom, for the route planner's spur
+  // tolerance (routePlanner.spurToleranceM), which depends on how zoomed in
+  // a point was placed.
+  onZoomChange?: (zoom: number) => void
   // How much of the map the floating header/sidebar cover. The map itself
   // stays full-page; only its own controls and fit-to-route framing move
   // clear of the covered area.
@@ -1138,6 +1142,7 @@ export function RouteMap({
   onDismissPendingLookup,
   planning,
   insets = NO_INSETS,
+  onZoomChange,
 }: RouteMapProps) {
   const [openPopup, setOpenPopup] = useState<{ kind: "candidate" | "waypoint"; id: number } | null>(null)
   const [bearing, setBearing] = useState(0)
@@ -1249,6 +1254,8 @@ export function RouteMap({
           // its own, those would compete with the floating header/sidebar
           // and render on top of them.
           style={{ width: "100%", height: "100%", isolation: "isolate" }}
+          onLoad={(e) => onZoomChange?.(e.target.getZoom())}
+          onZoomEnd={(e) => onZoomChange?.(e.viewState.zoom)}
           attributionControl={false}
           // Basemap POI icons stop being clickable while planning: a click
           // on the map there means "add a point", and a POI icon sitting

@@ -38,6 +38,13 @@ export interface RoutedSegment {
   kind: "routed"
   from: LatLon
   to: LatLon
+  // How long a dead-end spur at this segment's `to` end may be and still be
+  // cut (see segmentGeometries) - set from the map's zoom when that point
+  // was placed or moved, since a point dropped zoomed out is imprecise and
+  // one dropped zoomed in is deliberate. Absent/0 means never cut. Not part
+  // of the leg's cache key: it changes how the geometry is drawn, not what
+  // BRouter returns.
+  spurToleranceM?: number
 }
 
 export type Segment = FixedSegment | RoutedSegment
@@ -188,6 +195,85 @@ export function withLeg(
   return { ...state, legs: { ...state.legs, [legKey(from, to, routedWith.profile, routedWith.options)]: leg } }
 }
 
+// How far off the road a point may land, on screen, and still count as
+// misplaced rather than deliberate - see spurToleranceM.
+export const SPUR_TOLERANCE_PX = 30
+
+/**
+ * The spur tolerance for a point placed at `zoom` near `latitude`: that many
+ * pixels, in metres on the ground (MapLibre's 512px tiles). Zoomed out, a
+ * click can land hundreds of metres off the road intended; zoomed in, a
+ * point placed up a side street was put there on purpose.
+ */
+export function spurToleranceM(zoom: number, latitude: number): number {
+  const metresPerPixel = (40_075_016.686 * Math.cos((latitude * Math.PI) / 180)) / (512 * 2 ** zoom)
+  return SPUR_TOLERANCE_PX * metresPerPixel
+}
+
+// Two points closer than this are the same place when matching a spur's way
+// out against its way back. BRouter emits the same OSM node coordinates in
+// both directions, so in practice they match exactly.
+const SPUR_MATCH_M = 3
+
+/**
+ * How many points long the dead-end spur is where leg `a` ends and leg `b`
+ * begins - i.e. how far `b` retraces `a` backwards from the joint - or 0 if
+ * that's longer than `toleranceM` (a deliberate detour, kept) or there's no
+ * retrace. Never eats either leg below two points.
+ */
+function spurPointCount(a: LatLon[], b: LatLon[], toleranceM: number): number {
+  if (a.length < 3 || b.length < 3) return 0
+  const joint = a[a.length - 1]
+  if (haversineM(joint[0], joint[1], b[0][0], b[0][1]) > SPUR_MATCH_M) return 0
+  let count = 0
+  let lengthM = 0
+  while (count + 2 < a.length && count + 2 < b.length) {
+    const back = a[a.length - 2 - count]
+    const forward = b[count + 1]
+    if (haversineM(back[0], back[1], forward[0], forward[1]) > SPUR_MATCH_M) break
+    const tip = a[a.length - 1 - count]
+    lengthM += haversineM(tip[0], tip[1], back[0], back[1])
+    count++
+  }
+  return lengthM <= toleranceM ? count : 0
+}
+
+/**
+ * Each segment's geometry, with dead-end spurs cut at the points between two
+ * routed legs.
+ *
+ * A point placed slightly off the road the route should follow - say a few
+ * metres up a side street - makes BRouter route into the side street to
+ * reach it and straight back out: a spur. BRouter's own
+ * correctMisplacedViaPoints only fixes points *inside* one request, and this
+ * app routes one leg per request, so it's done here instead: where leg i's
+ * end and leg i+1's start retrace the same road, and that stretch is within
+ * the point's spurToleranceM, both are cut back to where they diverge - which
+ * is also where the point's marker then sits (plannerAnchors reads these).
+ *
+ * Applied on assembly, never to the cached legs, so moving the point or
+ * changing its tolerance recomputes cleanly. Every consumer of segment
+ * geometry goes through this, so distances measured on the drawn route and
+ * the model's own segment lengths always agree.
+ */
+function segmentGeometries(state: PlannerState): PlannerGeometry[] {
+  const geometries = state.segments.map((segment) => segmentGeometry(segment, state))
+  for (let i = 0; i < state.segments.length - 1; i++) {
+    const before = state.segments[i]
+    const after = state.segments[i + 1]
+    if (before.kind !== "routed" || after.kind !== "routed") continue
+    const toleranceM = before.spurToleranceM ?? 0
+    if (toleranceM <= 0) continue
+    const count = spurPointCount(geometries[i].coords, geometries[i + 1].coords, toleranceM)
+    if (count === 0) continue
+    const a = geometries[i]
+    const b = geometries[i + 1]
+    geometries[i] = { coords: a.coords.slice(0, -count), elevations: a.elevations.slice(0, -count) }
+    geometries[i + 1] = { coords: b.coords.slice(count), elevations: b.elevations.slice(count) }
+  }
+  return geometries
+}
+
 function segmentGeometry(
   segment: Segment,
   state: PlannerState
@@ -220,8 +306,7 @@ export function outboundGeometry(state: PlannerState): PlannerGeometry {
   if (state.segments.length === 0) {
     return state.start ? { coords: [state.start], elevations: [null] } : { coords: [], elevations: [] }
   }
-  for (const segment of state.segments) {
-    const geometry = segmentGeometry(segment, state)
+  for (const geometry of segmentGeometries(state)) {
     if (geometry.coords.length === 0) continue
     // Skip the first point when it repeats the previous segment's last.
     const skipFirst =
@@ -318,8 +403,7 @@ export function setRouteShape(state: PlannerState, shape: RouteShape): PlannerRe
 export function plannerAnchors(state: PlannerState): LatLon[] {
   if (state.start === null) return []
   const anchors: LatLon[] = [state.start]
-  for (const segment of state.segments) {
-    const { coords } = segmentGeometry(segment, state)
+  for (const { coords } of segmentGeometries(state)) {
     if (coords.length === 0) continue
     anchors.push(coords[coords.length - 1])
   }
@@ -346,7 +430,7 @@ export function commonPrefixLength(a: LatLon[], b: LatLon[]): number {
  * A leg still being routed counts as its straight-line placeholder.
  */
 export function plannerLegDistancesM(state: PlannerState): number[] {
-  return state.segments.map((segment) => totalDistanceM(segmentGeometry(segment, state).coords))
+  return segmentGeometries(state).map(({ coords }) => totalDistanceM(coords))
 }
 
 export function plannerDistanceM(state: PlannerState): number {
@@ -382,7 +466,7 @@ function guardCaps(state: PlannerState): PlannerResult {
   return { ok: true, state }
 }
 
-export function appendAnchor(state: PlannerState, point: LatLon): PlannerResult {
+export function appendAnchor(state: PlannerState, point: LatLon, spurToleranceM = 0): PlannerResult {
   const anchors = plannerAnchors(state)
   if (anchors.length === 0) {
     // The very first click just places the start; there is nothing to route
@@ -395,7 +479,7 @@ export function appendAnchor(state: PlannerState, point: LatLon): PlannerResult 
   }
   return guardCaps({
     ...state,
-    segments: [...state.segments, { kind: "routed", from: last, to: point }],
+    segments: [...state.segments, { kind: "routed", from: last, to: point, ...withTolerance(spurToleranceM) }],
   })
 }
 
@@ -434,6 +518,11 @@ export function endpointNeighbourKind(
     : state.segments[state.segments.length - 1].kind
 }
 
+/** The spurToleranceM field, only when there is one - so segments without stay plain. */
+function withTolerance(spurToleranceM: number | undefined): { spurToleranceM?: number } {
+  return spurToleranceM !== undefined && spurToleranceM > 0 ? { spurToleranceM } : {}
+}
+
 function segmentStart(segment: Segment): LatLon {
   return segment.kind === "fixed" ? segment.coords[0] : segment.from
 }
@@ -461,7 +550,12 @@ function fixedSegmentEnds(segment: FixedSegment): { from: LatLon; to: LatLon } {
  * there the affected stretch is the whole import, so the caller extends or
  * trims instead.
  */
-export function moveAnchor(state: PlannerState, anchorIndex: number, point: LatLon): PlannerResult {
+export function moveAnchor(
+  state: PlannerState,
+  anchorIndex: number,
+  point: LatLon,
+  spurToleranceM = 0
+): PlannerResult {
   const anchors = plannerAnchors(state)
   if (anchorIndex < 0 || anchorIndex >= anchors.length) {
     return { ok: false, error: "No such route point." }
@@ -478,14 +572,17 @@ export function moveAnchor(state: PlannerState, anchorIndex: number, point: LatL
     if (i !== anchorIndex - 1 && i !== anchorIndex) return segment
     const movingIsSegmentEnd = i === anchorIndex - 1
     if (segment.kind === "routed") {
-      return movingIsSegmentEnd ? { ...segment, to: point } : { ...segment, from: point }
+      // The moved point's tolerance lives on the segment ending at it.
+      return movingIsSegmentEnd
+        ? { ...segment, to: point, spurToleranceM: spurToleranceM > 0 ? spurToleranceM : undefined }
+        : { ...segment, from: point }
     }
     // Converting fixed -> routed: keep the far end where it is, and drop
     // this segment's imported geometry (BRouter supplies the replacement,
     // elevation included).
     const ends = fixedSegmentEnds(segment)
     return movingIsSegmentEnd
-      ? { kind: "routed", from: ends.from, to: point }
+      ? { kind: "routed", from: ends.from, to: point, ...withTolerance(spurToleranceM) }
       : { kind: "routed", from: point, to: ends.to }
   })
   // Moving anchor 0 moves the route's start as well as segment 0's origin.
@@ -513,9 +610,10 @@ export function insertAnchorAt(state: PlannerState, distanceFromStartM: number):
   // falls. Segment lengths come from the same geometry the caller measured
   // distanceFromStartM against, so the two always agree.
   let cumulativeM = 0
+  const geometries = segmentGeometries(state)
   for (let i = 0; i < state.segments.length; i++) {
     const segment = state.segments[i]
-    const { coords, elevations } = segmentGeometry(segment, state)
+    const { coords, elevations } = geometries[i]
     const segmentLengthM = totalDistanceM(coords)
     const isLast = i === state.segments.length - 1
     if (!isLast && cumulativeM + segmentLengthM <= distanceFromStartM) {
@@ -551,7 +649,8 @@ export function insertAnchorAt(state: PlannerState, distanceFromStartM: number):
           ]
         : [
             { kind: "routed", from: segment.from, to: splitPoint },
-            { kind: "routed", from: splitPoint, to: segment.to },
+            // Still ends at the same point, so it keeps that point's tolerance.
+            { kind: "routed", from: splitPoint, to: segment.to, ...withTolerance(segment.spurToleranceM) },
           ]
 
     const next = guardCaps({
@@ -619,7 +718,13 @@ export function removeAnchor(state: PlannerState, anchorIndex: number): PlannerR
       : // The neighbours' own far ends (as moveAnchor does), not the
         // snapped points plannerAnchors reports, so unchanged legs elsewhere
         // keep matching their cached geometry.
-        { kind: "routed", from: segmentStart(before), to: segmentEnd(after) }
+        {
+          kind: "routed",
+          from: segmentStart(before),
+          to: segmentEnd(after),
+          // It ends where `after` did, so that point keeps its tolerance.
+          ...withTolerance(after.kind === "routed" ? after.spurToleranceM : undefined),
+        }
   const segments = [
     ...state.segments.slice(0, anchorIndex - 1),
     merged,
