@@ -12,6 +12,10 @@ import {
   endpointNeighbourKind,
   insertAnchorAt,
   moveAnchor,
+  outboundGeometry,
+  plannerReturnDistanceM,
+  returnLeg,
+  setRouteShape,
   pendingLegs,
   offRouteItems,
   plannerAnchors,
@@ -578,5 +582,89 @@ describe("plannerLegDistancesM", () => {
     const legs = plannerLegDistancesM(split.state)
     expect(legs).toHaveLength(2)
     expect(legs[0] + legs[1]).toBeCloseTo(plannerDistanceM(state), 6)
+  })
+})
+
+describe("route shape", () => {
+  function drawn(lons: number[]): PlannerState {
+    let state = emptyPlannerState(PROFILE)
+    for (const lon of lons) state = (appendAnchor(state, [45.0, lon]) as { state: PlannerState }).state
+    return state
+  }
+  function shaped(state: PlannerState, shape: "one-way" | "loop" | "out-and-back"): PlannerState {
+    return (setRouteShape(state, shape) as { state: PlannerState }).state
+  }
+
+  it("a loop ends back at the start, via a return leg from the last point", () => {
+    const state = shaped(drawn([7.0, 7.01, 7.02]), "loop")
+    const { coords } = plannerGeometry(state)
+    expect(coords[coords.length - 1]).toEqual([45.0, 7.0])
+    expect(returnLeg(state)).toEqual({ kind: "routed", from: [45.0, 7.02], to: [45.0, 7.0] })
+  })
+
+  it("fetches the loop's return leg like any other leg", () => {
+    const state = shaped(drawn([7.0, 7.01]), "loop")
+    const pending = pendingLegs(state)
+    expect(pending).toContainEqual({ kind: "routed", from: [45.0, 7.01], to: [45.0, 7.0] })
+
+    const routedBack = withLeg(state, [45.0, 7.01], [45.0, 7.0], {
+      coords: [[45.0, 7.01], [45.001, 7.005], [45.0, 7.0]],
+      elevations: [10, 20, 30],
+      distanceM: 900,
+    })
+    expect(pendingLegs(routedBack)).not.toContainEqual({ kind: "routed", from: [45.0, 7.01], to: [45.0, 7.0] })
+    expect(plannerGeometry(routedBack).coords.slice(-2)).toEqual([
+      [45.001, 7.005],
+      [45.0, 7.0],
+    ])
+  })
+
+  it("keeps the points as the outbound ones - a new point goes before the return leg", () => {
+    const state = shaped(drawn([7.0, 7.01]), "loop")
+    const extended = (appendAnchor(state, [45.0, 7.02]) as { state: PlannerState }).state
+    expect(plannerAnchors(extended)).toEqual([
+      [45.0, 7.0],
+      [45.0, 7.01],
+      [45.0, 7.02],
+    ])
+    expect(returnLeg(extended)).toEqual({ kind: "routed", from: [45.0, 7.02], to: [45.0, 7.0] })
+  })
+
+  it("an out-and-back retraces the outbound geometry, turning at the last point", () => {
+    const state = shaped(importedState(5), "out-and-back")
+    const outbound = outboundGeometry(state)
+    const { coords, elevations } = plannerGeometry(state)
+    expect(coords).toEqual([...outbound.coords, ...outbound.coords.slice(0, -1).reverse()])
+    expect(elevations).toHaveLength(coords.length)
+    expect(pendingLegs(state)).toHaveLength(0)
+    expect(plannerReturnDistanceM(state)).toBeCloseTo(plannerDistanceM(state) / 2, 6)
+  })
+
+  it("one-way adds nothing after the last point", () => {
+    const state = drawn([7.0, 7.01])
+    expect(plannerGeometry(state)).toEqual(outboundGeometry(state))
+    expect(plannerReturnDistanceM(state)).toBeNull()
+  })
+
+  it("needs at least two points for a loop or out-and-back", () => {
+    expect(setRouteShape(drawn([7.0]), "loop").ok).toBe(false)
+    expect(setRouteShape(drawn([7.0]), "out-and-back").ok).toBe(false)
+    expect(setRouteShape(drawn([7.0]), "one-way").ok).toBe(true)
+  })
+
+  it("goes back to one-way when deleting leaves a single point", () => {
+    const state = shaped(drawn([7.0, 7.01]), "loop")
+    const result = removeAnchor(state, 1) as { state: PlannerState }
+    expect(result.state.shape).toBe("one-way")
+  })
+
+  it("trims only ever cut the outbound route", () => {
+    const state = shaped(importedState(11), "out-and-back")
+    const result = trimEnd(state, 400) as { ok: true; state: PlannerState }
+    expect(result.ok).toBe(true)
+    expect(outboundGeometry(result.state).coords[0]).toEqual([45.0, 7.0])
+    // Still an out-and-back of the shorter outbound route.
+    const { coords } = plannerGeometry(result.state)
+    expect(coords[coords.length - 1]).toEqual([45.0, 7.0])
   })
 })

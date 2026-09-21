@@ -34,12 +34,16 @@ import {
   offRouteItems,
   pendingLegs,
   plannerAnchors,
+  outboundGeometry,
   plannerGeometry,
   plannerLegDistancesM,
+  plannerReturnDistanceM,
   plannerStateFromImport,
   prependAnchor,
   removeAnchor,
   reorderAnchors,
+  returnLeg,
+  setRouteShape,
   trackPositions,
   trackedAfterExtend,
   trackedAfterTrim,
@@ -47,6 +51,7 @@ import {
   trimStart,
   withLeg,
   type PlannerState,
+  type RouteShape,
   type Segment,
   type TrackedPositions,
 } from "@/lib/routePlanner"
@@ -113,6 +118,12 @@ const PLANNER_HISTORY_LIMIT = 100
 interface PlannerHistoryEntry {
   state: PlannerState
   uncheckedKeys: string[]
+}
+
+/** Whether a loop's return leg is still waiting for its routed geometry. */
+function returnLegPending(state: PlannerState): boolean {
+  const returning = returnLeg(state)
+  return returning !== null && state.legs[legKey(returning.from, returning.to, state.profile)] === undefined
 }
 
 function sleep(ms: number): Promise<void> {
@@ -620,6 +631,22 @@ export default function App() {
     if (prefix < after.length) scheduleReSearch(prefix)
   }
 
+  /**
+   * Applies an edit with a full reprojection of tracked items, and a POI
+   * re-search over whatever the new route doesn't share with the old one (none
+   * if it only shrank). For edits with no cheaper notion of what changed -
+   * deleting, reordering, changing shape - and for any edit to a loop or
+   * out-and-back, where the derived return part changes along with the edit,
+   * so the old route is never simply a prefix of the new one.
+   */
+  function applyEditWithFullReprojection(state: PlannerState) {
+    if (!plannerState) return
+    const before = plannerGeometry(plannerState).coords
+    const after = plannerGeometry(state).coords
+    const prefix = commonPrefixLength(before, after)
+    applyPlannerEdit(state, seedTracked(after), prefix < after.length ? prefix : null)
+  }
+
   function handleRemoveAnchor(anchorIndex: number) {
     if (!plannerState) return
     const result = removeAnchor(plannerState, anchorIndex)
@@ -627,10 +654,17 @@ export default function App() {
       toast(result.error, "error")
       return
     }
-    const before = plannerGeometry(plannerState).coords
-    const after = plannerGeometry(result.state).coords
-    const prefix = commonPrefixLength(before, after)
-    applyPlannerEdit(result.state, seedTracked(after), prefix < after.length ? prefix : null)
+    applyEditWithFullReprojection(result.state)
+  }
+
+  function handleSetRouteShape(shape: RouteShape) {
+    if (!plannerState) return
+    const result = setRouteShape(plannerState, shape)
+    if (!result.ok) {
+      toast(result.error, "error")
+      return
+    }
+    if (result.state !== plannerState) applyEditWithFullReprojection(result.state)
   }
 
   /** A point-list drag: move the point at `from` to position `to` in ride order. */
@@ -641,11 +675,7 @@ export default function App() {
       toast(result.error, "error")
       return
     }
-    if (result.state === plannerState) return
-    const before = plannerGeometry(plannerState).coords
-    const after = plannerGeometry(result.state).coords
-    const prefix = commonPrefixLength(before, after)
-    applyPlannerEdit(result.state, seedTracked(after), prefix < after.length ? prefix : null)
+    if (result.state !== plannerState) applyEditWithFullReprojection(result.state)
   }
 
   // Planner keyboard shortcuts. Handled through a ref so the window listener
@@ -691,6 +721,10 @@ export default function App() {
     const result = appendAnchor(plannerState, point)
     if (!result.ok) {
       toast(result.error, "error")
+      return
+    }
+    if (plannerState.shape !== "one-way") {
+      applyEditWithFullReprojection(result.state)
       return
     }
     const after = plannerGeometry(result.state).coords
@@ -752,7 +786,8 @@ export default function App() {
     }
 
     if (droppedOnRoute) {
-      const { distanceFromStartM } = projectOntoPolylineM(point, coords)
+      // Trims cut the outbound route; the return part follows from it.
+      const { distanceFromStartM } = projectOntoPolylineM(point, outboundGeometry(plannerState).coords)
       if (which === "start") handleTrimStart(distanceFromStartM)
       else handleTrimEnd(distanceFromStartM)
       return
@@ -767,8 +802,10 @@ export default function App() {
     const after = plannerGeometry(result.state).coords
     // Prepending shifts every distance-from-start, so that direction needs a
     // full reprojection; appending keeps the whole existing route as a stable
-    // prefix.
-    if (which === "start") {
+    // prefix - unless a derived return part follows it.
+    if (plannerState.shape !== "one-way") {
+      applyEditWithFullReprojection(result.state)
+    } else if (which === "start") {
       applyPlannerEdit(result.state, seedTracked(after), 0)
     } else {
       const added = after.slice(Math.max(coords.length - 1, 0))
@@ -790,6 +827,19 @@ export default function App() {
    */
   function handleInsertAnchor(grabDistanceM: number, dropPoint: [number, number]) {
     if (!plannerState) return
+    // The grab distance is measured along the whole route as ridden. Past the
+    // outbound part it's on the derived return: a loop's return leg ends at
+    // the last point, so dragging it adds a point before it; an
+    // out-and-back's way back mirrors the outbound route, so the grab maps to
+    // the same spot on the way out.
+    const outboundM = totalDistanceM(outboundGeometry(plannerState).coords)
+    if (grabDistanceM > outboundM) {
+      if (plannerState.shape === "loop") {
+        handleAppendAnchor(dropPoint)
+        return
+      }
+      if (plannerState.shape === "out-and-back") grabDistanceM = Math.max(2 * outboundM - grabDistanceM, 0)
+    }
     const inserted = insertAnchorAt(plannerState, grabDistanceM)
     if (!inserted.ok) {
       toast(inserted.error, "error")
@@ -811,6 +861,10 @@ export default function App() {
       toast(result.error, "error")
       return
     }
+    if (plannerState.shape !== "one-way") {
+      applyEditWithFullReprojection(result.state)
+      return
+    }
     const after = plannerGeometry(result.state).coords
     applyPlannerEdit(
       result.state,
@@ -824,6 +878,10 @@ export default function App() {
     const result = trimEnd(plannerState, distanceFromStartM)
     if (!result.ok) {
       toast(result.error, "error")
+      return
+    }
+    if (plannerState.shape !== "one-way") {
+      applyEditWithFullReprojection(result.state)
       return
     }
     const after = plannerGeometry(result.state).coords
@@ -1175,17 +1233,42 @@ export default function App() {
     const anchors = plannerAnchors(plannerState)
     const legs = plannerLegDistancesM(plannerState)
     const pending = new Set<Segment>(pendingLegs(plannerState))
+    // A loop or out-and-back finishes where it started: the start is the
+    // finish too, and the last point is an ordinary numbered one (an
+    // out-and-back's turnaround).
+    const oneWay = plannerState.shape === "one-way"
     return anchors.map((_, i) => {
-      const kind = i === 0 ? "start" : i === anchors.length - 1 ? "end" : "point"
+      const kind = i === 0 ? (oneWay ? "start" : "start-finish") : oneWay && i === anchors.length - 1 ? "end" : "point"
+      const isTurnaround = plannerState.shape === "out-and-back" && i === anchors.length - 1
       return {
         id: `point-${i}`,
-        label: kind === "start" ? "Start" : kind === "end" ? "End" : `Point ${i}`,
+        label:
+          kind === "start"
+            ? "Start"
+            : kind === "start-finish"
+              ? "Start / Finish"
+              : kind === "end"
+                ? "End"
+                : isTurnaround
+                  ? `Point ${i} (turnaround)`
+                  : `Point ${i}`,
         kind,
         number: i,
         legDistanceM: i === 0 ? null : legs[i - 1],
         legPending: i > 0 && pending.has(plannerState.segments[i - 1]),
       }
     })
+  }, [plannerState])
+  // The derived way back to the start, shown after the point list.
+  const plannerReturn = useMemo(() => {
+    if (!plannerState || plannerState.shape === "one-way") return null
+    const distanceM = plannerReturnDistanceM(plannerState)
+    if (distanceM === null) return null
+    return {
+      label: plannerState.shape === "loop" ? "Back to start" : "Same way back",
+      distanceM,
+      pending: returnLegPending(plannerState),
+    }
   }, [plannerState])
 
   const allCandidates = useMemo(() => {
@@ -1274,6 +1357,7 @@ export default function App() {
                     onClearSelection: () => setSelectedAnchorIndex(null),
                     onDeleteAnchor: handleRemoveAnchor,
                     hoveredAnchor: hoveredAnchorIndex,
+                    shape: plannerState.shape,
                     onHoverAnchor: setHoveredAnchorIndex,
                   }
                 : undefined
@@ -1301,6 +1385,10 @@ export default function App() {
                 onUndo={() => stepPlannerHistory("undo")}
                 onRedo={() => stepPlannerHistory("redo")}
                 points={plannerPoints}
+                returnLeg={plannerReturn}
+                shape={plannerState.shape}
+                canChangeShape={plannerPoints.length >= 2}
+                onShapeChange={handleSetRouteShape}
                 onReorderPoint={handleReorderAnchor}
                 onDeletePoint={handleRemoveAnchor}
                 hoveredPoint={hoveredAnchorIndex}

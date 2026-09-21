@@ -6,10 +6,16 @@ export const ROUTE_END_COLOR = "oklch(50.5% 0.213 27.518)"
 // The route planner's numbered points (and its pending-leg line) - shared
 // with PlannerPointList so the list's badges match the map.
 export const PLANNER_POINT_COLOR = "#7c3aed"
+// A route that finishes where it starts (a loop or out-and-back) marks that
+// spot with one marker in both colours, split diagonally.
+export const START_FINISH_BACKGROUND = `linear-gradient(135deg, ${ROUTE_START_COLOR} 50%, ${ROUTE_END_COLOR} 50%)`
 
 interface CircleMarkerIconProps {
   icon: LucideIcon
   bgColor: string
+  // A full CSS background (e.g. START_FINISH_BACKGROUND) drawn instead of
+  // bgColor, which still tints the highlight glow.
+  background?: string
   iconColor?: string
   size?: number
   // Adds a glow ring in the marker's own bgColor around the base drop
@@ -28,6 +34,7 @@ interface CircleMarkerIconProps {
 export function CircleMarkerIcon({
   icon: Icon,
   bgColor,
+  background,
   iconColor = colors.olive[50],
   size = 28,
   highlighted = false,
@@ -41,7 +48,7 @@ export function CircleMarkerIcon({
       style={{
         width: size,
         height: size,
-        backgroundColor: bgColor,
+        background: background ?? bgColor,
         boxShadow: highlighted
           ? `0 1px 3px rgba(0,0,0,0.4), 0 0 0 4px color-mix(in oklch, ${bgColor} 40%, transparent)`
           : '0 1px 3px rgba(0,0,0,0.4)',

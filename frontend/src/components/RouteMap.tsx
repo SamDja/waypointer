@@ -18,6 +18,7 @@ import {
   ChevronRight,
   ChevronUp,
   Crosshair,
+  Flag,
   Info,
   Locate,
   MapPin,
@@ -42,6 +43,7 @@ import {
   PLANNER_POINT_COLOR,
   ROUTE_END_COLOR,
   ROUTE_START_COLOR,
+  START_FINISH_BACKGROUND,
   UserLocationMarker,
 } from "@/lib/mapIcons"
 import { MAP_STYLES } from "@/lib/mapStyles"
@@ -54,6 +56,7 @@ import {
 import { POI_TYPES } from "@/lib/poiTypes"
 import { toast } from "@/lib/toast"
 import type { MapInsets } from "@/lib/useMapInsets"
+import type { RouteShape } from "@/lib/routePlanner"
 import type { Candidate, CandidateDetails, ExistingWaypoint, HoveredPoi, PoiLookupResult } from "@/types/candidate"
 import colors from "tailwindcss/colors"
 
@@ -133,6 +136,10 @@ export interface PlanningProps {
   // map, and hovering a marker highlights its row.
   hoveredAnchor: number | null
   onHoverAnchor: (anchorIndex: number | null) => void
+  // A loop or out-and-back finishes at its start: the last anchor is then an
+  // ordinary numbered point, and the start is one combined start/finish
+  // marker.
+  shape: RouteShape
 }
 
 
@@ -426,10 +433,12 @@ function EndpointMarker({
   onSelect,
   highlighted = false,
   onHover,
+  background,
 }: {
   point: [number, number]
   icon: typeof Play
   color: string
+  background?: string
   label: string
   tooltip: string
   onDragEnd?: (point: [number, number], droppedOnRoute: boolean) => void
@@ -468,7 +477,7 @@ function EndpointMarker({
             onMouseEnter={onHover && (() => onHover(true))}
             onMouseLeave={onHover && (() => onHover(false))}
           >
-            <CircleMarkerIcon icon={icon} bgColor={color} highlighted={highlighted} />
+            <CircleMarkerIcon icon={icon} bgColor={color} background={background} highlighted={highlighted} />
           </div>
         </TooltipTrigger>
         <TooltipContent>{tooltip}</TooltipContent>
@@ -491,8 +500,12 @@ function RouteEndpointMarkers({
   onSelect,
   hovered = null,
   onHover,
+  finishesAtStart = false,
 }: {
   routeCoords: [number, number][]
+  // Planning a loop or out-and-back: one combined start/finish marker, which
+  // drags, selects and hovers as the start.
+  finishesAtStart?: boolean
   onMoveEndpoint?: (which: "start" | "end", point: [number, number], droppedOnRoute: boolean) => void
   // Planning only: clicking an end selects it (see PlanningProps.selectedAnchor),
   // and hovering is shared with the point list (PlanningProps.hoveredAnchor).
@@ -524,14 +537,23 @@ function RouteEndpointMarkers({
     )
   }
 
-  if (isLoop && !onMoveEndpoint) {
+  // A route that finishes where it starts gets one marker in both colours -
+  // a loaded loop, or a loop/out-and-back being planned. (A one-way route
+  // being planned whose ends happen to meet keeps both, so each end stays
+  // grabbable on its own.)
+  if ((isLoop && !onMoveEndpoint) || finishesAtStart) {
     return (
       <EndpointMarker
         point={start}
-        icon={Play}
+        icon={Flag}
         color={ROUTE_START_COLOR}
-        label="Route start and end"
-        tooltip="Start / End"
+        background={START_FINISH_BACKGROUND}
+        label="Route start and finish"
+        tooltip={onMoveEndpoint ? "Start / Finish - drag to move" : "Start / Finish"}
+        onDragEnd={onMoveEndpoint ? (point, onRoute) => onMoveEndpoint("start", point, onRoute) : undefined}
+        onSelect={onSelect && (() => onSelect("start"))}
+        highlighted={hovered === "start"}
+        onHover={onHover && ((on) => onHover(on ? "start" : null))}
       />
     )
   }
@@ -671,10 +693,13 @@ function PendingLegLines({ pendingLegs }: { pendingLegs: [number, number][][] })
  * route. Only interior points get one - the start and end are the green/red
  * endpoint markers, which double as their own drag handles.
  */
-/** How a planner point is named - interior points match the number on their marker. */
-function anchorLabel(anchorIndex: number, anchorCount: number): string {
-  if (anchorIndex === 0) return "Start"
-  if (anchorIndex === anchorCount - 1) return "End"
+/**
+ * How a planner point is named - interior points match the number on their
+ * marker, and a route that finishes at its start has no separate end.
+ */
+function anchorLabel(anchorIndex: number, anchorCount: number, shape: RouteShape): string {
+  if (anchorIndex === 0) return shape === "one-way" ? "Start" : "Start / Finish"
+  if (anchorIndex === anchorCount - 1 && shape === "one-way") return "End"
   return `Point ${anchorIndex}`
 }
 
@@ -1500,7 +1525,8 @@ export function RouteMap({
                   start/end markers below, which are their own drag handles.
                   The anchor index doubles as the displayed number, so points
                   read 1, 2, 3 in the order they're ridden. */}
-              {planning.anchors.slice(1, -1).map((anchor, i) => {
+              {/* Interior points - plus the last one when the route finishes at its start. */}
+              {planning.anchors.slice(1, planning.shape === "one-way" ? -1 : undefined).map((anchor, i) => {
                 const index = i + 1
                 return (
                   <Marker
@@ -1532,7 +1558,7 @@ export function RouteMap({
                   // Remounted per point, so switching selection re-anchors it.
                   key={`selected-point-${planning.selectedAnchor}`}
                   point={planning.anchors[planning.selectedAnchor]}
-                  label={anchorLabel(planning.selectedAnchor, planning.anchors.length)}
+                  label={anchorLabel(planning.selectedAnchor, planning.anchors.length, planning.shape)}
                   onDelete={() => planning.onDeleteAnchor(planning.selectedAnchor!)}
                   onClose={planning.onClearSelection}
                 />
@@ -1543,6 +1569,7 @@ export function RouteMap({
           <RouteEndpointMarkers
             routeCoords={routeCoords}
             onMoveEndpoint={planning?.onMoveEndpoint}
+            finishesAtStart={planning !== undefined && planning.shape !== "one-way"}
             onSelect={
               planning &&
               ((which) => planning.onSelectAnchor(which === "start" ? 0 : planning.anchors.length - 1))

@@ -48,6 +48,16 @@ export interface RoutedLeg {
   distanceM: number
 }
 
+// What happens after the last point:
+// - one-way: nothing, the route ends there.
+// - loop: a routed return leg from the last point back to the start.
+// - out-and-back: the outbound geometry again, reversed - the last point is
+//   the turnaround.
+// The return part is never stored as segments: plannerGeometry derives it,
+// so anchors stay the outbound points only and every edit operation (append
+// inserts before the return, delete, reorder, ...) works unchanged.
+export type RouteShape = "one-way" | "loop" | "out-and-back"
+
 export interface PlannerState {
   // The route's first point, held separately from the segments because the
   // first click has nothing to route to yet. Representing it as a
@@ -61,6 +71,7 @@ export interface PlannerState {
   // edit, reuses geometry already fetched instead of re-requesting it.
   legs: Record<string, RoutedLeg>
   profile: string
+  shape: RouteShape
 }
 
 // Guardrails on a hand-drawn route: each anchor costs a routing request, and
@@ -73,7 +84,7 @@ export const MAX_ROUTE_DISTANCE_M = 300_000
 export const ANCHOR_SNAP_M = 25
 
 export function emptyPlannerState(profile: string): PlannerState {
-  return { start: null, segments: [], legs: {}, profile }
+  return { start: null, segments: [], legs: {}, profile, shape: "one-way" }
 }
 
 export function plannerStateFromImport(
@@ -86,6 +97,7 @@ export function plannerStateFromImport(
     segments: coords.length > 0 ? [{ kind: "fixed", coords, elevations }] : [],
     legs: {},
     profile,
+    shape: "one-way",
   }
 }
 
@@ -101,7 +113,8 @@ export function legKey(from: LatLon, to: LatLon, profile: string): string {
 
 /** The routed legs in `state` that have no geometry fetched yet. */
 export function pendingLegs(state: PlannerState): RoutedSegment[] {
-  return state.segments.filter(
+  const returning = returnLeg(state)
+  return [...state.segments, ...(returning ? [returning] : [])].filter(
     (s): s is RoutedSegment => s.kind === "routed" && state.legs[legKey(s.from, s.to, state.profile)] === undefined
   )
 }
@@ -129,10 +142,12 @@ interface PlannerGeometry {
 }
 
 /**
- * Concatenates every segment's geometry in order, dropping the duplicated
- * joint point where one segment ends and the next begins.
+ * The route as drawn - every segment's geometry in order, dropping the
+ * duplicated joint point where one segment ends and the next begins - without
+ * the return part a loop or out-and-back adds (see plannerGeometry). This is
+ * what trims measure against: the return is derived, never cut.
  */
-export function plannerGeometry(state: PlannerState): PlannerGeometry {
+export function outboundGeometry(state: PlannerState): PlannerGeometry {
   const coords: LatLon[] = []
   const elevations: (number | null)[] = []
   // Before the second click there are no segments, only a placed start point.
@@ -157,6 +172,72 @@ export function plannerGeometry(state: PlannerState): PlannerGeometry {
     }
   }
   return { coords, elevations }
+}
+
+/**
+ * A loop's return leg, from the last point back to the start - or null when
+ * the route isn't a loop, has fewer than two points, or already ends on its
+ * start (routing a leg of a few metres would only add a spur).
+ */
+export function returnLeg(state: PlannerState): RoutedSegment | null {
+  if (state.shape !== "loop") return null
+  const anchors = plannerAnchors(state)
+  if (anchors.length < 2) return null
+  const last = anchors[anchors.length - 1]
+  const first = anchors[0]
+  if (haversineM(last[0], last[1], first[0], first[1]) < ANCHOR_SNAP_M) return null
+  return { kind: "routed", from: last, to: first }
+}
+
+/** Just the part the shape adds after the last point - empty for one-way. */
+function returnGeometry(state: PlannerState, outbound: PlannerGeometry): PlannerGeometry {
+  if (state.shape === "out-and-back" && outbound.coords.length >= 2) {
+    // Back the way it came: everything before the turnaround, reversed.
+    return {
+      coords: outbound.coords.slice(0, -1).reverse(),
+      elevations: outbound.elevations.slice(0, -1).reverse(),
+    }
+  }
+  const returning = returnLeg(state)
+  if (!returning) return { coords: [], elevations: [] }
+  const geometry = segmentGeometry(returning, state)
+  // Its first point is the last point of the outbound route.
+  return { coords: geometry.coords.slice(1), elevations: geometry.elevations.slice(1) }
+}
+
+/**
+ * The whole route as ridden: the outbound geometry plus whatever the shape
+ * adds (a loop's return leg, an out-and-back's way back). This is what the
+ * map draws, what's exported, and what distances and POI searches measure.
+ */
+export function plannerGeometry(state: PlannerState): PlannerGeometry {
+  const outbound = outboundGeometry(state)
+  const returning = returnGeometry(state, outbound)
+  return {
+    coords: [...outbound.coords, ...returning.coords],
+    elevations: [...outbound.elevations, ...returning.elevations],
+  }
+}
+
+/** Length of the part the shape adds after the last point - null for one-way. */
+export function plannerReturnDistanceM(state: PlannerState): number | null {
+  if (state.shape === "one-way") return null
+  const outbound = outboundGeometry(state)
+  const returning = returnGeometry(state, outbound)
+  if (returning.coords.length === 0) return null
+  return totalDistanceM([outbound.coords[outbound.coords.length - 1], ...returning.coords])
+}
+
+/**
+ * Switches what happens after the last point. A loop or out-and-back needs at
+ * least two points - with only a start there's nowhere to come back from.
+ */
+export function setRouteShape(state: PlannerState, shape: RouteShape): PlannerResult {
+  if (shape === state.shape) return { ok: true, state }
+  if (shape !== "one-way" && plannerAnchors(state).length < 2) {
+    return { ok: false, error: "Add at least two points first." }
+  }
+  return guardCaps({ ...state, shape })
 }
 
 /**
@@ -440,7 +521,9 @@ export function removeAnchor(state: PlannerState, anchorIndex: number): PlannerR
   if (anchorIndex < 0 || anchorIndex >= anchors.length) {
     return { ok: false, error: "No such route point." }
   }
-  if (anchors.length === 1) return { ok: true, state: { ...state, start: null, segments: [] } }
+  if (anchors.length === 1) return { ok: true, state: { ...state, start: null, segments: [], shape: "one-way" } }
+  // Down to a single point, there's no loop or out-and-back left to ride.
+  const shape: RouteShape = anchors.length === 2 ? "one-way" : state.shape
 
   // Anchor i ends segment i-1 and starts segment i (see plannerAnchors).
   const before = state.segments[anchorIndex - 1]
@@ -451,12 +534,12 @@ export function removeAnchor(state: PlannerState, anchorIndex: number): PlannerR
     if (bounded.kind === "fixed") {
       return { ok: false, error: "That point belongs to the imported route - trim it instead." }
     }
-    if (anchorIndex > 0) return { ok: true, state: { ...state, segments: state.segments.slice(0, -1) } }
+    if (anchorIndex > 0) return { ok: true, state: { ...state, shape, segments: state.segments.slice(0, -1) } }
     const rest = state.segments.slice(1)
     // The next segment's own origin, not plannerAnchors' reading of it, so
     // the start stays in step with that segment's leg cache key.
     const nextStart = rest.length === 0 ? anchors[1] : segmentStart(rest[0])
-    return { ok: true, state: { ...state, start: nextStart, segments: rest } }
+    return { ok: true, state: { ...state, shape, start: nextStart, segments: rest } }
   }
 
   const merged: Segment =
@@ -493,7 +576,7 @@ export function removeAnchor(state: PlannerState, anchorIndex: number): PlannerR
  * line they just trimmed.
  */
 function trim(state: PlannerState, distanceFromStartM: number, keep: "before" | "after"): TrimResult {
-  const { coords, elevations } = plannerGeometry(state)
+  const { coords, elevations } = outboundGeometry(state)
   if (coords.length < 2) return { ok: false, error: "Nothing to trim." }
 
   // Walk the concatenated polyline to find the cut index.

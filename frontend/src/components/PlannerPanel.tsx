@@ -1,10 +1,12 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { PlannerPointList, type PlannerPoint } from "@/components/PlannerPointList"
+import { PlannerPointList, type PlannerPoint, type PlannerReturnLeg } from "@/components/PlannerPointList"
 import { RemoveRouteButton } from "@/components/RemoveRouteButton"
 import { RouteStats } from "@/components/RouteStats"
-import { Check, Redo2, Undo2, type LucideIcon } from "lucide-react"
+import { ArrowLeftRight, ArrowRight, Check, Redo2, RefreshCw, Undo2, type LucideIcon } from "lucide-react"
+import type { RouteShape } from "@/lib/routePlanner"
 
 // The platform's modifier key, for shortcut hints.
 const MOD_KEY = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+"
@@ -21,6 +23,11 @@ export interface PlannerPanelProps {
   onUndo: () => void
   onRedo: () => void
   points: PlannerPoint[]
+  returnLeg: PlannerReturnLeg | null
+  shape: RouteShape
+  // A loop or out-and-back needs a point to come back from.
+  canChangeShape: boolean
+  onShapeChange: (shape: RouteShape) => void
   onReorderPoint: (from: number, to: number) => void
   onDeletePoint: (index: number) => void
   hoveredPoint: number | null
@@ -31,6 +38,12 @@ export interface PlannerPanelProps {
   avgSpeedKmh: number
   onAvgSpeedChange: (speedKmh: number) => void
 }
+
+const ROUTE_SHAPES: { value: RouteShape; label: string; icon: LucideIcon }[] = [
+  { value: "one-way", label: "One-way", icon: ArrowRight },
+  { value: "loop", label: "Loop", icon: RefreshCw },
+  { value: "out-and-back", label: "Out & back", icon: ArrowLeftRight },
+]
 
 // Replaces the sidebar's step cards for as long as the planner is active:
 // planning and the find/save flow are separate phases, so they don't share
@@ -45,6 +58,10 @@ export function PlannerPanel({
   onUndo,
   onRedo,
   points,
+  returnLeg,
+  shape,
+  canChangeShape,
+  onShapeChange,
   onReorderPoint,
   onDeletePoint,
   hoveredPoint,
@@ -85,8 +102,20 @@ export function PlannerPanel({
           route to trim there. Click a point to delete it.
         </p>
 
+        <Tabs value={shape} onValueChange={(value) => onShapeChange(value as RouteShape)}>
+          <TabsList className="w-full">
+            {ROUTE_SHAPES.map(({ value, label, icon: Icon }) => (
+              <TabsTrigger key={value} value={value} disabled={value !== "one-way" && !canChangeShape}>
+                <Icon className="size-4" />
+                {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+
         <PlannerPointList
           points={points}
+          returnLeg={returnLeg}
           onReorder={onReorderPoint}
           onDelete={onDeletePoint}
           hoveredIndex={hoveredPoint}
