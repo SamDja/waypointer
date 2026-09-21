@@ -6,6 +6,8 @@ import { ImportCard } from "@/components/ImportCard"
 import { RouteMap, type PendingPoiLookup } from "@/components/RouteMap"
 import { SaveCard } from "@/components/SaveCard"
 import { StepCard } from "@/components/StepCard"
+import { PlannerPanel } from "@/components/PlannerPanel"
+import { MapStyleSelect } from "@/components/MapStyleSelect"
 import { Toaster } from "@/components/Toaster"
 import { WahooProfileMenu } from "@/components/WahooProfileMenu"
 import { OffRouteDialog, type OffRouteItem } from "@/components/OffRouteDialog"
@@ -56,6 +58,7 @@ import {
   type DeviceSettings,
   type PoiSearchEntry,
 } from "@/lib/settings"
+import { useMapInsets } from "@/lib/useMapInsets"
 import { toast, updateToast } from "@/lib/toast"
 import { loadWahooTokens, type WahooTokens } from "@/lib/wahooSettings"
 import type {
@@ -146,6 +149,9 @@ export default function App() {
   // re-synthesizes `file` from it - which is what lets the entire downstream
   // pipeline (find-pois, save, the Wahoo push) stay untouched.
   const [plannerState, setPlannerState] = useState<PlannerState | null>(null)
+  // Whether planning opened on an empty map or on an already-loaded route -
+  // only PlannerPanel's wording depends on it.
+  const [plannerMode, setPlannerMode] = useState<"new" | "edit">("new")
   // The imported file's parsed document, kept so an edited import is
   // re-serialized from the original rather than rebuilt - preserving its
   // pre-existing <wpt> entries and their waypointer: extension markers.
@@ -165,6 +171,11 @@ export default function App() {
   // The debounced re-search fires after `file` has been replaced by an edit,
   // so it reads the current one from here rather than from a stale closure.
   const latestFileRef = useRef<File | null>(null)
+  // The header and sidebar float over the full-page map; RouteMap needs to
+  // know how much of it they cover.
+  const headerRef = useRef<HTMLElement>(null)
+  const asideRef = useRef<HTMLElement>(null)
+  const mapInsets = useMapInsets(headerRef, asideRef)
   // Leg keys with a request in flight, so a re-render mid-fetch doesn't fire
   // a duplicate request for the same leg.
   const inFlightLegs = useRef<Set<string>>(new Set())
@@ -479,16 +490,17 @@ export default function App() {
       coords.length > 0
         ? plannerStateFromImport(coords, previewElevations, routingProfile)
         : emptyPlannerState(routingProfile)
+    setPlannerMode(coords.length > 0 ? "edit" : "new")
     setPlannerState(state)
     setTrackedPositions(seedTracked(coords))
-    // Step 1 holds the planning instructions and the "Done editing" button,
-    // so it has to stay open for the duration.
-    setOpenStep("import")
   }
 
   function handleExitPlanning() {
     setPlannerState(null)
     setPendingEdit(null)
+    // Planning is step 1's work; once it's done, a route that actually
+    // exists moves straight on to finding POIs along it.
+    setOpenStep(file ? "find" : "import")
   }
 
   function handleAppendAnchor(point: [number, number]) {
@@ -544,6 +556,13 @@ export default function App() {
     if (!plannerState) return
     const coords = plannerGeometry(plannerState).coords
     const anchors = plannerAnchors(plannerState)
+
+    // A lone first point is both ends and has nothing to extend or trim:
+    // dragging it just moves it.
+    if (anchors.length === 1) {
+      handleMoveAnchor(0, point)
+      return
+    }
 
     if (endpointNeighbourKind(plannerState, which) === "routed") {
       handleMoveAnchor(which === "start" ? 0 : anchors.length - 1, point)
@@ -992,7 +1011,11 @@ export default function App() {
   )
 
   return (
-    <div className="flex h-screen flex-col">
+    // The map fills the page and the header/sidebar float over it. Both are
+    // transparent and let clicks through to the map; only their contents
+    // (the header pills, the cards) are opaque and interactive. Below `md`
+    // the sidebar stacks under the map instead.
+    <div className="relative flex h-dvh flex-col overflow-hidden">
       <Toaster />
       <FeedbackWidget />
       <OffRouteDialog
@@ -1003,16 +1026,21 @@ export default function App() {
         onConfirm={handleConfirmPendingEdit}
         onCancel={() => setPendingEdit(null)}
       />
-      <header className="flex shrink-0 items-center justify-between gap-1.5 border-b px-4 py-2">
-        <div className="flex items-center gap-1.5">
+      <header
+        ref={headerRef}
+        className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-2 px-4 pt-4 [&>*]:pointer-events-auto"
+      >
+        <div className="flex h-11 items-center gap-1.5 rounded-xl bg-card px-3 shadow-lg ring-1 ring-foreground/10">
           <img src="favicon.svg" className="w-6" />
           <h1 className="text-lg font-semibold">Sulla Via</h1>
         </div>
-        <WahooProfileMenu wahooTokens={wahooTokens} onWahooTokensChange={setWahooTokens} />
+        <div className="flex h-11 items-center rounded-xl bg-card px-1 shadow-lg ring-1 ring-foreground/10">
+          <WahooProfileMenu wahooTokens={wahooTokens} onWahooTokensChange={setWahooTokens} />
+        </div>
       </header>
 
-      <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
-        <div className="h-[50vh] shrink-0 md:h-auto md:flex-1">
+      <div className="flex min-h-0 flex-1 flex-col md:block">
+        <div className="h-[50vh] shrink-0 md:absolute md:inset-0 md:h-auto">
           <RouteMap
             routeCoords={findResult?.route_coords ?? previewRouteCoords}
             candidates={allCandidates}
@@ -1024,13 +1052,13 @@ export default function App() {
             onChangeWaypointType={handleAssignWaypointType}
             hoveredPoi={hoveredPoi}
             mapStyleKey={mapStyleKey}
-            onMapStyleChange={handleMapStyleChange}
             candidateDetails={candidateDetails}
             clickAddedCandidateIds={clickAddedCandidateIds}
             onBasemapPoiClick={handleBasemapPoiClick}
             pendingLookup={pendingLookup}
             onConfirmPendingLookup={handleConfirmPendingLookup}
             onDismissPendingLookup={() => setPendingLookup(null)}
+            insets={mapInsets}
             planning={
               plannerState
                 ? {
@@ -1046,78 +1074,100 @@ export default function App() {
           />
         </div>
 
-        <aside className="flex w-full min-h-0 flex-1 flex-col border-t md:w-1/3 md:min-w-[480px] md:flex-none md:border-t-0 md:border-l">
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0">
-            <StepCard
-              title={"1. Import route" + (file ? " ✅": "")}
-              open={openStep === "import"}
-              onOpenChange={(open) => setOpenStep(open ? "import" : null)}
-            >
-              <ImportCard
-                file={file}
-                onFileChange={handleFileChange}
+        <aside
+          ref={asideRef}
+          className="flex min-h-0 w-full flex-1 flex-col md:pointer-events-none md:absolute md:right-0 md:bottom-0 md:z-20 md:w-1/3 md:min-w-[480px]"
+          // Starts right under the floating header, whose height is measured.
+          style={{ top: mapInsets.top || undefined }}
+        >
+          {/* Everything in here floats over the map on desktop, hence the
+              shadows: a card on its own is too close in tone to the map. */}
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0 [&>*]:shadow-lg md:[&>*]:pointer-events-auto">
+            <MapStyleSelect value={mapStyleKey} onChange={handleMapStyleChange} />
+            {plannerState ? (
+              <PlannerPanel
+                mode={plannerMode}
+                hasRoute={file !== null}
+                onDone={handleExitPlanning}
                 onRemove={handleRemoveRoute}
-                onNext={() => setOpenStep("find")}
-                pointCount={pointCount}
-                existingWaypoints={existingWaypoints}
-                onChangeWaypointType={handleAssignWaypointType}
-                keptWaypointIndices={keptWaypointIndices}
-                onToggleExistingWaypoint={handleToggleExistingWaypoint}
-                onToggleAllExistingWaypoints={handleToggleAllExistingWaypoints}
-                onHoverWaypoint={handleHoverWaypoint}
                 distanceM={distanceM}
                 elevationGainM={elevationGainM}
                 elevationLossM={elevationLossM}
                 avgSpeedKmh={avgSpeedKmh}
                 onAvgSpeedChange={handleAvgSpeedChange}
-                wahooTokens={wahooTokens}
-                onWahooTokensChange={setWahooTokens}
-                isPlanning={plannerState !== null}
-                onStartPlanning={handleStartPlanning}
-                onStopPlanning={handleExitPlanning}
               />
-            </StepCard>
-
-            {file && (
-              <StepCard
-                title={"2. Find POIs" + (findResult ? " ✅": "")}
-                open={openStep === "find"}
-                onOpenChange={(open) => setOpenStep(open ? "find" : null)}
-              >
-                <div className="flex flex-col gap-4">
-                  <FindPoisCard
-                    entries={poiSearchEntries}
-                    onChange={handlePoiSearchChange}
-                    onFind={handleFind}
-                    disabled={!file || poiSearchEntries.length === 0}
-                    isFinding={isFinding}
-                    progress={searchProgress}
+            ) : (
+              <>
+                <StepCard
+                  title={"1. Get a route" + (file ? " ✅": "")}
+                  open={openStep === "import"}
+                  onOpenChange={(open) => setOpenStep(open ? "import" : null)}
+                >
+                  <ImportCard
+                    file={file}
+                    onFileChange={handleFileChange}
+                    onRemove={handleRemoveRoute}
+                    onNext={() => setOpenStep("find")}
+                    pointCount={pointCount}
+                    existingWaypoints={existingWaypoints}
+                    onChangeWaypointType={handleAssignWaypointType}
+                    keptWaypointIndices={keptWaypointIndices}
+                    onToggleExistingWaypoint={handleToggleExistingWaypoint}
+                    onToggleAllExistingWaypoints={handleToggleAllExistingWaypoints}
+                    onHoverWaypoint={handleHoverWaypoint}
+                    distanceM={distanceM}
+                    elevationGainM={elevationGainM}
+                    elevationLossM={elevationLossM}
+                    avgSpeedKmh={avgSpeedKmh}
+                    onAvgSpeedChange={handleAvgSpeedChange}
+                    wahooTokens={wahooTokens}
+                    onWahooTokensChange={setWahooTokens}
+                    onStartPlanning={handleStartPlanning}
                   />
-                  <CandidateChecklist
+                </StepCard>
+
+                {file && (
+                  <StepCard
+                    title={"2. Find POIs" + (findResult ? " ✅": "")}
+                    open={openStep === "find"}
+                    onOpenChange={(open) => setOpenStep(open ? "find" : null)}
+                  >
+                    <div className="flex flex-col gap-4">
+                      <FindPoisCard
+                        entries={poiSearchEntries}
+                        onChange={handlePoiSearchChange}
+                        onFind={handleFind}
+                        disabled={!file || poiSearchEntries.length === 0}
+                        isFinding={isFinding}
+                        progress={searchProgress}
+                      />
+                      <CandidateChecklist
+                        candidates={allCandidates}
+                        selectedIds={selectedIds}
+                        onToggle={handleToggle}
+                        onToggleAll={handleToggleAllCandidates}
+                        searchedPoiTypes={searchedPoiTypes}
+                        failedPoiTypes={findResult?.failed_poi_types ?? EMPTY_FAILED_POI_TYPES}
+                        onHoverCandidate={handleHoverCandidate}
+                      />
+                    </div>
+                  </StepCard>
+                )}
+
+                {file && (
+                  <SaveCard
+                    file={file}
                     candidates={allCandidates}
                     selectedIds={selectedIds}
-                    onToggle={handleToggle}
-                    onToggleAll={handleToggleAllCandidates}
-                    searchedPoiTypes={searchedPoiTypes}
-                    failedPoiTypes={findResult?.failed_poi_types ?? EMPTY_FAILED_POI_TYPES}
-                    onHoverCandidate={handleHoverCandidate}
+                    existingWaypoints={existingWaypoints}
+                    keptWaypointIndices={keptWaypointIndices}
+                    settings={deviceSettings}
+                    onSettingsChange={handleDeviceSettingsChange}
+                    wahooTokens={wahooTokens}
+                    onWahooTokensChange={setWahooTokens}
                   />
-                </div>
-              </StepCard>
-            )}
-
-            {file && (
-              <SaveCard
-                file={file}
-                candidates={allCandidates}
-                selectedIds={selectedIds}
-                existingWaypoints={existingWaypoints}
-                keptWaypointIndices={keptWaypointIndices}
-                settings={deviceSettings}
-                onSettingsChange={handleDeviceSettingsChange}
-                wahooTokens={wahooTokens}
-                onWahooTokensChange={setWahooTokens}
-              />
+                )}
+              </>
             )}
           </div>
         </aside>

@@ -1,3 +1,5 @@
+import { Bike, type LucideIcon } from "lucide-react"
+
 export interface RoadLegendCategory {
   label: string
   // Real layer id in the style JSON providing the fill (top) line - the
@@ -20,6 +22,9 @@ export interface RoadLegendCategory {
 export interface MapStyleConfig {
   key: string
   label: string
+  // Shown next to the label in MapStyleSelect - one per activity, since
+  // this registry doubles as the activity list.
+  icon: LucideIcon
   styleUrl: string
   // BRouter profile the route planner routes with while this style is
   // active. Deliberately lives here rather than behind its own selector:
@@ -84,6 +89,7 @@ export const MAP_STYLES: MapStyleConfig[] = [
   {
     key: "road_cycling",
     label: "Road Cycling",
+    icon: Bike,
     styleUrl: "/map-styles/road-cycling.json",
     // Road-bike oriented (prefers paved, avoids tracks) while explicitly
     // penalizing high-traffic roads - the same judgement road-cycling.json

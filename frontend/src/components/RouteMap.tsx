@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react"
 import { Layer, Map, Marker, Popup, Source, useMap, type MapRef } from "react-map-gl/maplibre"
 import "maplibre-gl/dist/maplibre-gl.css"
 import type {
@@ -7,9 +7,10 @@ import type {
   MapLayerTouchEvent,
   MapMouseEvent,
   MapTouchEvent,
+  PaddingOptions,
   PointLike,
 } from "maplibre-gl"
-import { setWorkerUrl } from "maplibre-gl"
+import { AttributionControl, setWorkerUrl } from "maplibre-gl"
 import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url"
 import {
   ChevronDown,
@@ -30,7 +31,6 @@ import {
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { MapLegend } from "@/components/MapLegend"
 import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
@@ -46,6 +46,7 @@ import {
 } from "@/lib/osmTagLabels"
 import { POI_TYPES } from "@/lib/poiTypes"
 import { toast } from "@/lib/toast"
+import type { MapInsets } from "@/lib/useMapInsets"
 import type { Candidate, CandidateDetails, ExistingWaypoint, HoveredPoi, PoiLookupResult } from "@/types/candidate"
 import colors from "tailwindcss/colors"
 
@@ -77,7 +78,6 @@ export interface RouteMapProps {
   onChangeWaypointType?: (index: number, poiType: string) => void
   hoveredPoi?: HoveredPoi
   mapStyleKey: string
-  onMapStyleChange: (key: string) => void
   // Tags/last-edited for every candidate with a popup, keyed by osm_id -
   // covers both search-found candidates (via FindPoisResponse.candidate_details)
   // and basemap-click-added ones (see App.tsx's candidateDetails).
@@ -91,6 +91,10 @@ export interface RouteMapProps {
   onDismissPendingLookup?: () => void
   // Present exactly while the route planner is active - see PlanningProps.
   planning?: PlanningProps
+  // How much of the map the floating header/sidebar cover. The map itself
+  // stays full-page; only its own controls and fit-to-route framing move
+  // clear of the covered area.
+  insets?: MapInsets
 }
 
 export interface PlanningProps {
@@ -118,6 +122,10 @@ export interface PlanningProps {
 // literal in the destructured default would change identity every render,
 // defeating fitBoundsCandidates' useMemo below.
 const EMPTY_ID_SET: Set<number> = new Set()
+const NO_INSETS: MapInsets = { top: 0, right: 0 }
+// Breathing room around the route when fitting it into view, on top of
+// whatever the floating header/sidebar cover.
+const FIT_PADDING_PX = 20
 
 const DEFAULT_CENTER: [number, number] = [46.06352, 11.12864]
 const DEFAULT_ZOOM = 14
@@ -203,15 +211,45 @@ function getRouteBounds(
   ]
 }
 
+// MapLibre's own attribution control, mounted into a host element outside the
+// map instead of into one of the map's control corners. The map container is
+// its own stacking context (see the <Map> below) so its markers and popups
+// can never rise above the surrounding UI - which would trap a corner
+// control too. This keeps MapLibre's behaviour (attributions collected from
+// the style's sources, shown until the first drag, then collapsed to an "i"
+// button) while letting index.css pin it to the page corner above the
+// sidebar.
+function DetachedAttribution({ hostRef }: { hostRef: RefObject<HTMLDivElement | null> }) {
+  const { current: mapRef } = useMap()
+
+  useEffect(() => {
+    const map = mapRef?.getMap()
+    const host = hostRef.current
+    if (!map || !host) return
+    // Passing options replaces MapLibre's defaults wholesale, so its own
+    // "MapLibre" credit has to be restated.
+    const control = new AttributionControl({
+      compact: true,
+      customAttribution: '<a href="https://maplibre.org/" target="_blank">MapLibre</a>',
+    })
+    host.appendChild(control.onAdd(map))
+    return () => control.onRemove()
+  }, [mapRef, hostRef])
+
+  return null
+}
+
 function FitBounds({
   routeCoords,
   candidates,
   existingWaypoints,
   disabled,
+  padding,
 }: {
   routeCoords: [number, number][]
   candidates: Candidate[]
   existingWaypoints: ExistingWaypoint[]
+  padding: PaddingOptions
   // Suppressed while the route planner is active: routeCoords changes on
   // every anchor placed or dragged, and refitting on each one yanks the
   // viewport out from under the visitor mid-edit.
@@ -233,8 +271,8 @@ function FitBounds({
     const key = JSON.stringify(bounds)
     if (key === lastAppliedBoundsRef.current) return
     lastAppliedBoundsRef.current = key
-    map.fitBounds(bounds, { padding: 20, duration: 0 })
-  }, [map, routeCoords, candidates, existingWaypoints, disabled])
+    map.fitBounds(bounds, { padding, duration: 0 })
+  }, [map, routeCoords, candidates, existingWaypoints, disabled, padding])
 
   return null
 }
@@ -428,6 +466,21 @@ function RouteEndpointMarkers({
   const isLoop = start[0] === end[0] && start[1] === end[1]
   const dragTooltip = " - drag to move, or onto the route to trim"
 
+  // A route that's still just its first planned point has a start and no end
+  // yet - drawing both would stack the end marker on top of the start.
+  if (routeCoords.length === 1) {
+    return (
+      <EndpointMarker
+        point={start}
+        icon={Play}
+        color={ROUTE_START_COLOR}
+        label="Route start"
+        tooltip={onMoveEndpoint ? "Start - drag to move" : "Start"}
+        onDragEnd={onMoveEndpoint ? (point, onRoute) => onMoveEndpoint("start", point, onRoute) : undefined}
+      />
+    )
+  }
+
   if (isLoop && !onMoveEndpoint) {
     return (
       <EndpointMarker
@@ -509,7 +562,7 @@ function CompassControl({ bearing, mapRef }: { bearing: number; mapRef: React.Re
         <Button
           variant="outline"
           size="icon-sm"
-          className="bg-background touch-none"
+          className="bg-background shadow-md touch-none"
           onPointerDown={handlePointerDown}
           aria-label="Rotate map"
         >
@@ -949,7 +1002,6 @@ export function RouteMap({
   onChangeWaypointType,
   hoveredPoi = null,
   mapStyleKey,
-  onMapStyleChange,
   candidateDetails = {},
   clickAddedCandidateIds = EMPTY_ID_SET,
   onBasemapPoiClick,
@@ -957,6 +1009,7 @@ export function RouteMap({
   onConfirmPendingLookup,
   onDismissPendingLookup,
   planning,
+  insets = NO_INSETS,
 }: RouteMapProps) {
   const [openPopup, setOpenPopup] = useState<{ kind: "candidate" | "waypoint"; id: number } | null>(null)
   const [bearing, setBearing] = useState(0)
@@ -976,6 +1029,7 @@ export function RouteMap({
   // fixed pixel guess - MapLibre's popup DOM is a descendant of this
   // wrapper, so the variable cascades to it with no prop plumbing.
   const mapWrapperRef = useRef<HTMLDivElement>(null)
+  const attributionHostRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = mapWrapperRef.current
     if (!el) return
@@ -1002,6 +1056,16 @@ export function RouteMap({
     [candidates, clickAddedCandidateIds]
   )
 
+  const fitPadding = useMemo(
+    () => ({
+      top: FIT_PADDING_PX + insets.top,
+      right: FIT_PADDING_PX + insets.right,
+      bottom: FIT_PADDING_PX,
+      left: FIT_PADDING_PX,
+    }),
+    [insets]
+  )
+
   const pan = (dx: number, dy: number) => {
     mapRef.current?.getMap().panBy([dx, dy], { duration: 200 })
   }
@@ -1010,7 +1074,7 @@ export function RouteMap({
     const map = mapRef.current?.getMap()
     const bounds = getRouteBounds(routeCoords, candidates, existingWaypoints)
     if (!map || !bounds) return
-    map.fitBounds(bounds, { padding: 20, duration: 500 })
+    map.fitBounds(bounds, { padding: fitPadding, duration: 500 })
   }
 
   const handleCenterOnLocation = () => {
@@ -1041,12 +1105,23 @@ export function RouteMap({
 
   return (
     <TooltipProvider>
-      <div ref={mapWrapperRef} className="relative h-full w-full">
+      <div
+        ref={mapWrapperRef}
+        className="relative h-full w-full"
+        // Read by the overlay controls below.
+        style={{ "--map-inset-top": `${insets.top}px` } as CSSProperties}
+      >
         <Map
           ref={mapRef}
           initialViewState={{ longitude: center[1], latitude: center[0], zoom }}
           mapStyle={styleUrl}
-          style={{ width: "100%", height: "100%" }}
+          // isolation: every marker and popup is a descendant of this
+          // element and carries its own z-index (up to 1500, see the
+          // constants above and index.css) - without a stacking context of
+          // its own, those would compete with the floating header/sidebar
+          // and render on top of them.
+          style={{ width: "100%", height: "100%", isolation: "isolate" }}
+          attributionControl={false}
           // Basemap POI icons stop being clickable while planning: a click
           // on the map there means "add a point", and a POI icon sitting
           // where the visitor wants the route to go must not swallow it.
@@ -1347,41 +1422,36 @@ export function RouteMap({
               <UserLocationMarker />
             </Marker>
           )}
+          <DetachedAttribution hostRef={attributionHostRef} />
           <FitBounds
             routeCoords={routeCoords}
             candidates={fitBoundsCandidates}
             existingWaypoints={existingWaypoints}
             disabled={planning !== undefined}
+            padding={fitPadding}
           />
         </Map>
 
-        <div className="absolute left-2 top-2 z-10">
+        {/* Outside the isolated <Map>, so it can sit above the sidebar - see
+            DetachedAttribution. Also carries MapLibre's corner class so the
+            control keeps its stock styling. */}
+        <div ref={attributionHostRef} className="map-attribution-corner maplibregl-ctrl-bottom-right" />
+
+        <div className="absolute left-4 top-[calc(var(--map-inset-top)+0.5rem)] z-10">
           <MapLegend candidates={candidates} existingWaypoints={existingWaypoints} mapStyleKey={mapStyleKey} />
         </div>
 
-        <div className="absolute right-2 top-2 z-10">
-          <Select value={mapStyleKey} onValueChange={onMapStyleChange}>
-            <SelectTrigger className="bg-background">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {MAP_STYLES.map((s) => (
-                <SelectItem key={s.key} value={s.key}>
-                  {s.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="absolute bottom-2 right-2 z-10 flex flex-col items-end gap-2">
+        {/* Every map control lives in one group on the left: the sidebar
+            floats over the right side, so controls there would hang in the
+            middle of the map. */}
+        <div className="absolute bottom-2 left-4 z-10 flex flex-col items-start gap-2">
           <div className="grid grid-cols-3 grid-rows-3 gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant="outline"
                   size="icon-sm"
-                  className="bg-background col-start-2 row-start-1"
+                  className="bg-background shadow-md col-start-2 row-start-1"
                   onClick={() => pan(0, -100)}
                   aria-label="Pan up"
                 >
@@ -1395,7 +1465,7 @@ export function RouteMap({
                 <Button
                   variant="outline"
                   size="icon-sm"
-                  className="bg-background col-start-1 row-start-2"
+                  className="bg-background shadow-md col-start-1 row-start-2"
                   onClick={() => pan(-100, 0)}
                   aria-label="Pan left"
                 >
@@ -1409,7 +1479,7 @@ export function RouteMap({
                 <Button
                   variant="outline"
                   size="icon-sm"
-                  className="bg-background col-start-3 row-start-2"
+                  className="bg-background shadow-md col-start-3 row-start-2"
                   onClick={() => pan(100, 0)}
                   aria-label="Pan right"
                 >
@@ -1423,7 +1493,7 @@ export function RouteMap({
                 <Button
                   variant="outline"
                   size="icon-sm"
-                  className="bg-background col-start-2 row-start-3"
+                  className="bg-background shadow-md col-start-2 row-start-3"
                   onClick={() => pan(0, 100)}
                   aria-label="Pan down"
                 >
@@ -1434,13 +1504,13 @@ export function RouteMap({
             </Tooltip>
           </div>
 
-          <div className="flex flex-col gap-1">
+          <div className="grid grid-cols-3 gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant="outline"
                   size="icon-sm"
-                  className="bg-background"
+                  className="bg-background shadow-md"
                   onClick={() => mapRef.current?.getMap().zoomIn({ duration: 200 })}
                   aria-label="Zoom in"
                 >
@@ -1454,7 +1524,7 @@ export function RouteMap({
                 <Button
                   variant="outline"
                   size="icon-sm"
-                  className="bg-background"
+                  className="bg-background shadow-md"
                   onClick={() => mapRef.current?.getMap().zoomOut({ duration: 200 })}
                   aria-label="Zoom out"
                 >
@@ -1464,40 +1534,37 @@ export function RouteMap({
               <TooltipContent>Zoom out</TooltipContent>
             </Tooltip>
             <CompassControl bearing={bearing} mapRef={mapRef} />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  className="bg-background shadow-md"
+                  onClick={handleCenterOnRoute}
+                  disabled={!hasRoute}
+                  aria-label="Center on route"
+                >
+                  <Crosshair />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Center on route</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  className="bg-background shadow-md"
+                  loading={locating}
+                  onClick={handleCenterOnLocation}
+                  aria-label="Center on my location"
+                >
+                  <Locate />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Center on my location</TooltipContent>
+            </Tooltip>
           </div>
-        </div>
-
-        <div className="absolute bottom-2 left-2 z-10 flex gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                className="bg-background"
-                onClick={handleCenterOnRoute}
-                disabled={!hasRoute}
-                aria-label="Center on route"
-              >
-                <Crosshair />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Center on route</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                className="bg-background"
-                loading={locating}
-                onClick={handleCenterOnLocation}
-                aria-label="Center on my location"
-              >
-                <Locate />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Center on my location</TooltipContent>
-          </Tooltip>
         </div>
       </div>
     </TooltipProvider>

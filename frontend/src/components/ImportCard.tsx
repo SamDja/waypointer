@@ -1,40 +1,20 @@
 import { useRef, useState, type DragEvent } from "react"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { PoiListItem } from "@/components/PoiListItem"
 import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
+import { RemoveRouteButton } from "@/components/RemoveRouteButton"
+import { RouteStats } from "@/components/RouteStats"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { WahooRoutesDialog } from "@/components/WahooRoutesDialog"
-import { formatDurationHours } from "@/lib/geometry"
 import { toast, updateToast } from "@/lib/toast"
 import { track } from "@/lib/analytics"
 import { missingWahooScopeWarning } from "@/lib/wahooAuth"
 import { connectWahoo } from "@/lib/wahooConnect"
 import { type WahooTokens } from "@/lib/wahooSettings"
 import { cn } from "@/lib/utils"
-import {
-  ArrowRightIcon,
-  Clock,
-  FileUp,
-  FileText,
-  PencilLine,
-  RulerDimensionLine,
-  Trash2Icon,
-  TrendingDown,
-  TrendingUp,
-} from "lucide-react"
+import { ArrowRightIcon, FileUp, FileText, PencilLine, Route } from "lucide-react"
 import type { ExistingWaypoint } from "@/types/candidate"
 
 export interface ImportCardProps {
@@ -56,11 +36,10 @@ export interface ImportCardProps {
   wahooTokens: WahooTokens | null
   onWahooTokensChange: (tokens: WahooTokens | null) => void
   onHoverWaypoint?: (index: number | null) => void
-  // Route planning is a third way in alongside GPX upload and Wahoo import,
-  // and the same mode edits a route that's already loaded.
-  isPlanning: boolean
+  // Planning a new route is the alternative to loading one, and the same
+  // planner edits a route that's already loaded. While it's active, App
+  // shows PlannerPanel instead of this card.
   onStartPlanning: () => void
-  onStopPlanning: () => void
 }
 
 export function ImportCard({
@@ -82,15 +61,12 @@ export function ImportCard({
   wahooTokens,
   onWahooTokensChange,
   onHoverWaypoint,
-  isPlanning,
   onStartPlanning,
-  onStopPlanning,
 }: ImportCardProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [isDragActive, setIsDragActive] = useState(false)
   const [isConnectingWahoo, setIsConnectingWahoo] = useState(false)
   const [showWahooImport, setShowWahooImport] = useState(false)
-  const [showRemoveConfirm, setShowRemoveConfirm] = useState(false)
   const [activeTab, setActiveTab] = useState("info")
 
   // The first "Next" click routes through the Waypoints tab (if the file
@@ -131,8 +107,6 @@ export function ImportCard({
   }
 
   if (file) {
-    const durationHours = distanceM > 0 ? distanceM / 1000 / avgSpeedKmh : 0
-
     return (
       <div className="flex flex-col gap-3">
         <div className="flex items-center gap-3 rounded-md border p-4">
@@ -158,63 +132,13 @@ export function ImportCard({
           </TabsList>
 
           <TabsContent value="info">
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border p-4 text-sm">
-              <div className="flex flex-row items-center gap-2">
-                <RulerDimensionLine className="size-6" />
-                <div className="flex flex-col">
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    Distance
-                  </span>
-                  <span className="font-medium">{(distanceM / 1000).toFixed(1)}km</span>
-                </div>
-              </div>
-              <div className="flex flex-row items-center gap-2">
-                <Clock className="size-6" />
-                <div className="flex flex-col">
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    Est. duration
-                  </span>
-                  <span className="font-medium">{formatDurationHours(durationHours)}</span>
-                </div>
-              </div>
-              <div className="flex flex-row items-center gap-2">
-                <TrendingUp className="size-6" />
-                <div className="flex flex-col">
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    Elevation gain
-                  </span>
-                  <span className="font-medium">{Math.round(elevationGainM)}m</span>
-                </div>
-              </div>
-              <div className="flex flex-row items-center gap-2">
-                <TrendingDown className="size-6" />
-                <div className="flex flex-col">
-                  <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                    Elevation loss
-                  </span>
-                  <span className="font-medium">{Math.round(elevationLossM)}m</span>
-                </div>
-              </div>
-
-              <div className="col-span-2 flex items-center gap-2 border-t pt-2">
-                <Label htmlFor="avg-speed" className="text-xs text-muted-foreground">
-                  Estimate at
-                </Label>
-                <Input
-                  id="avg-speed"
-                  type="number"
-                  min={1}
-                  step={1}
-                  value={avgSpeedKmh}
-                  onChange={(e) => {
-                    const next = Number(e.target.value)
-                    if (Number.isFinite(next) && next > 0) onAvgSpeedChange(next)
-                  }}
-                  className="h-7 w-16"
-                />
-                <span className="text-xs text-muted-foreground">km/h</span>
-              </div>
-            </div>
+            <RouteStats
+              distanceM={distanceM}
+              elevationGainM={elevationGainM}
+              elevationLossM={elevationLossM}
+              avgSpeedKmh={avgSpeedKmh}
+              onAvgSpeedChange={onAvgSpeedChange}
+            />
           </TabsContent>
 
           {existingWaypoints.length > 0 && (
@@ -269,82 +193,70 @@ export function ImportCard({
         </Tabs>
 
         <div className="flex items-center gap-2">
-          <Button variant="destructive" className="w-fit" onClick={() => setShowRemoveConfirm(true)}>
-            <Trash2Icon className="size-4" />
-            Remove route
-          </Button>
-          <Button
-            variant={isPlanning ? "default" : "secondary"}
-            className="w-fit"
-            onClick={isPlanning ? onStopPlanning : onStartPlanning}
-          >
+          <RemoveRouteButton onRemove={onRemove} />
+          <Button variant="secondary" className="w-fit" onClick={onStartPlanning}>
             <PencilLine className="size-4" />
-            {isPlanning ? "Done editing" : "Edit route"}
+            Edit route
           </Button>
           <Button className="w-fit grow" onClick={handleNext}>
             Next
             <ArrowRightIcon className="size-4" />
           </Button>
         </div>
-
-        {isPlanning && (
-          <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
-            Click the map to add a point to the end of the route, or drag the route line to add one in the
-            middle. Drag any point to move it. Drag the start or end marker to move that end — or drop it
-            back onto the route to trim there.
-          </p>
-        )}
-
-        <AlertDialog open={showRemoveConfirm} onOpenChange={setShowRemoveConfirm}>
-          <AlertDialogContent>
-            <AlertDialogHeader>
-              <AlertDialogTitle>Remove this route?</AlertDialogTitle>
-              <AlertDialogDescription>
-                Your POI selections and search results will be cleared too.
-              </AlertDialogDescription>
-            </AlertDialogHeader>
-            <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={onRemove} className="bg-red-600 text-white hover:bg-red-700">
-                Remove
-              </AlertDialogAction>
-            </AlertDialogFooter>
-          </AlertDialogContent>
-        </AlertDialog>
       </div>
     )
   }
 
+  // Loading a route and planning a new one are two separate starting points,
+  // so the empty state offers them as two equal choices.
   return (
-    <div className="flex flex-col gap-3">
-      <div
-        onDragOver={(e) => {
-          e.preventDefault()
-          setIsDragActive(true)
-        }}
-        onDragLeave={() => setIsDragActive(false)}
-        onDrop={handleDrop}
-        className={cn(
-          "flex flex-col items-center gap-3 rounded-md border-2 border-dashed p-6 text-center transition-colors",
-          isDragActive ? "border-primary bg-accent" : "border-input"
-        )}
-      >
-        <FileUp size={48} strokeWidth={1}></FileUp>
-        <p className="text-sm text-muted-foreground">Drag and drop a GPX file here</p>
-        <Button type="button" onClick={() => inputRef.current?.click()}>
-          Choose File
-        </Button>
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".gpx"
-          className="hidden"
-          onChange={(e) => {
-            const selected = e.target.files?.[0]
-            if (selected) onFileChange(selected, "browse")
+    <div className="flex flex-col gap-4">
+      <section className="flex flex-col gap-3">
+        <h3 className="text-sm font-medium">Load a route</h3>
+        <div
+          onDragOver={(e) => {
+            e.preventDefault()
+            setIsDragActive(true)
           }}
-        />
-      </div>
+          onDragLeave={() => setIsDragActive(false)}
+          onDrop={handleDrop}
+          className={cn(
+            "flex flex-col items-center gap-3 rounded-md border-2 border-dashed p-6 text-center transition-colors",
+            isDragActive ? "border-primary bg-accent" : "border-input"
+          )}
+        >
+          <FileUp size={48} strokeWidth={1}></FileUp>
+          <p className="text-sm text-muted-foreground">Drag and drop a GPX file here</p>
+          <Button type="button" onClick={() => inputRef.current?.click()}>
+            Choose File
+          </Button>
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".gpx"
+            className="hidden"
+            onChange={(e) => {
+              const selected = e.target.files?.[0]
+              if (selected) onFileChange(selected, "browse")
+            }}
+          />
+        </div>
+
+        {wahooTokens ? (
+          <Button variant="secondary" className="w-full" onClick={() => setShowWahooImport(true)}>
+            Import from Wahoo
+          </Button>
+        ) : (
+          <Button
+            variant="secondary"
+            className="w-full"
+            loading={isConnectingWahoo}
+            onClick={handleConnectWahoo}
+          >
+            {isConnectingWahoo ? "Connecting…" : "Connect Wahoo to import a route"}
+          </Button>
+        )}
+      </section>
 
       <div className="flex items-center gap-2 text-xs text-muted-foreground">
         <span className="h-px flex-1 bg-border" />
@@ -352,25 +264,19 @@ export function ImportCard({
         <span className="h-px flex-1 bg-border" />
       </div>
 
-      {wahooTokens ? (
-        <Button variant="secondary" className="w-full" onClick={() => setShowWahooImport(true)}>
-          Import from Wahoo
-        </Button>
-      ) : (
-        <Button
-          variant="secondary"
-          className="w-full"
-          loading={isConnectingWahoo}
-          onClick={handleConnectWahoo}
-        >
-          {isConnectingWahoo ? "Connecting…" : "Connect Wahoo to import a route"}
-        </Button>
-      )}
-
-      <Button variant="secondary" className="w-full" onClick={onStartPlanning}>
-        <PencilLine className="size-4" />
-        Plan a route on the map
-      </Button>
+      <section className="flex flex-col gap-3">
+        <h3 className="text-sm font-medium">Plan a new route</h3>
+        <div className="flex flex-col items-center gap-3 rounded-md border p-6 text-center">
+          <Route size={48} strokeWidth={1} />
+          <p className="text-sm text-muted-foreground">
+            Draw a route on the map, snapped to roads suited to cycling.
+          </p>
+          <Button type="button" onClick={onStartPlanning}>
+            <PencilLine className="size-4" />
+            Start planning
+          </Button>
+        </div>
+      </section>
 
       <WahooRoutesDialog
         open={showWahooImport}

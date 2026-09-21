@@ -134,6 +134,28 @@ body {
   }
 }
 
+/* MapLibre's attribution, mounted outside the map by RouteMap.tsx's
+   DetachedAttribution, is pinned to the page's bottom-right corner, just
+   below FeedbackWidget's button and centred on the same vertical line
+   (right: 22px + half its 24px button = FeedbackWidget's right-4 + half its
+   36px button). z-30 keeps it above the floating sidebar's cards (z-20). It
+   keeps MapLibre's own behaviour of showing its text until the map is first
+   dragged, then collapsing to the "i" button - OSM's attribution guidelines
+   allow collapsing only after it has been shown. The doubled class wins over
+   maplibre-gl.css's corner rules, which are imported after this file. */
+.map-attribution-corner.maplibregl-ctrl-bottom-right {
+  position: fixed;
+  right: 22px;
+  bottom: 16px;
+  z-index: 30;
+}
+.map-attribution-corner.maplibregl-ctrl-bottom-right > .maplibregl-ctrl-attrib {
+  margin: 0;
+  box-shadow:
+    0 4px 6px -1px rgb(0 0 0 / 0.1),
+    0 2px 4px -2px rgb(0 0 0 / 0.1);
+}
+
 /* MapLibre's default close button (RouteMap.tsx's candidate/waypoint
    popups) ships with no padding at all - it's flush against the popup's
    corner, making the "x" glyph touch both edges. */

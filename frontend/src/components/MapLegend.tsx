@@ -114,7 +114,7 @@ export function MapLegend({ candidates, existingWaypoints, mapStyleKey }: MapLeg
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
-            <Button variant="outline" size="icon-sm" className="bg-background" aria-label="Legend">
+            <Button variant="outline" size="icon-sm" className="bg-background shadow-md" aria-label="Legend">
               <Info />
             </Button>
           </PopoverTrigger>

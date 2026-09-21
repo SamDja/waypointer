@@ -135,6 +135,16 @@ describe("edit operations", () => {
     expect(segments[2]).toMatchObject({ from: [45.5, 7.002] })
   })
 
+  it("moveAnchor moves a lone first point rather than adding a second one", () => {
+    let state = emptyPlannerState(PROFILE)
+    state = (appendAnchor(state, [45.0, 7.0]) as { state: PlannerState }).state
+    const moved = moveAnchor(state, 0, [45.1, 7.1])
+    expect(moved.ok).toBe(true)
+    const after = (moved as { state: PlannerState }).state
+    expect(plannerAnchors(after)).toEqual([[45.1, 7.1]])
+    expect(after.segments).toEqual([])
+  })
+
   it("refuses to move an anchor bounding imported geometry", () => {
     const state = importedState()
     expect(moveAnchor(state, 0, [45.5, 7.0]).ok).toBe(false)
