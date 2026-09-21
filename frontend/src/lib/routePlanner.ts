@@ -179,6 +179,20 @@ export function plannerAnchors(state: PlannerState): LatLon[] {
   return anchors
 }
 
+/**
+ * How many leading coordinates two versions of a route share. Edits that
+ * don't come with their own notion of "what changed" (deleting a point,
+ * undo/redo) use this to re-search POIs only past the unchanged prefix - and
+ * not at all when the new route is just a prefix of the old one, since a
+ * route that only shrank covers no new ground.
+ */
+export function commonPrefixLength(a: LatLon[], b: LatLon[]): number {
+  const n = Math.min(a.length, b.length)
+  let i = 0
+  while (i < n && a[i][0] === b[i][0] && a[i][1] === b[i][1]) i++
+  return i
+}
+
 export function plannerDistanceM(state: PlannerState): number {
   return totalDistanceM(plannerGeometry(state).coords)
 }
@@ -262,6 +276,14 @@ export function endpointNeighbourKind(
   return which === "start"
     ? state.segments[0].kind
     : state.segments[state.segments.length - 1].kind
+}
+
+function segmentStart(segment: Segment): LatLon {
+  return segment.kind === "fixed" ? segment.coords[0] : segment.from
+}
+
+function segmentEnd(segment: Segment): LatLon {
+  return segment.kind === "fixed" ? segment.coords[segment.coords.length - 1] : segment.to
 }
 
 /** Endpoints of a `fixed` segment, which are also its only anchors. */
@@ -389,13 +411,66 @@ export function insertAnchorAt(state: PlannerState, distanceFromStartM: number):
   return { ok: false, error: "That point isn't on the route." }
 }
 
-export function removeLastAnchor(state: PlannerState): PlannerResult {
-  if (state.segments.length === 0) {
-    // Only the start point is placed - undoing it clears the route.
-    if (state.start !== null) return { ok: true, state: { ...state, start: null } }
-    return { ok: false, error: "Nothing to undo." }
+/**
+ * Deletes the anchor at `anchorIndex` (an index into plannerAnchors).
+ *
+ * - An interior anchor merges the two segments it joins. Two `fixed`
+ *   neighbours rejoin into one `fixed` segment, byte-identical to before the
+ *   anchor was inserted (the inverse of insertAnchorAt's split), so no
+ *   routing is needed. Otherwise the merged stretch becomes one `routed` leg
+ *   between the neighbouring anchors - the imported geometry on a `fixed`
+ *   side can't survive losing one of its ends, but the loss is bounded to
+ *   that stretch, as with moveAnchor.
+ * - An endpoint drops the segment it bounds. Refused when that segment is
+ *   `fixed`: on a pristine import it spans the whole route, so deleting the
+ *   start would delete the entire track (trimming is the tool for that).
+ * - The last remaining anchor clears the route.
+ */
+export function removeAnchor(state: PlannerState, anchorIndex: number): PlannerResult {
+  const anchors = plannerAnchors(state)
+  if (anchorIndex < 0 || anchorIndex >= anchors.length) {
+    return { ok: false, error: "No such route point." }
   }
-  return { ok: true, state: { ...state, segments: state.segments.slice(0, -1) } }
+  if (anchors.length === 1) return { ok: true, state: { ...state, start: null, segments: [] } }
+
+  // Anchor i ends segment i-1 and starts segment i (see plannerAnchors).
+  const before = state.segments[anchorIndex - 1]
+  const after = state.segments[anchorIndex]
+
+  if (before === undefined || after === undefined) {
+    const bounded = before ?? after
+    if (bounded.kind === "fixed") {
+      return { ok: false, error: "That point belongs to the imported route - trim it instead." }
+    }
+    if (anchorIndex > 0) return { ok: true, state: { ...state, segments: state.segments.slice(0, -1) } }
+    const rest = state.segments.slice(1)
+    // The next segment's own origin, not plannerAnchors' reading of it, so
+    // the start stays in step with that segment's leg cache key.
+    const nextStart = rest.length === 0 ? anchors[1] : segmentStart(rest[0])
+    return { ok: true, state: { ...state, start: nextStart, segments: rest } }
+  }
+
+  const merged: Segment =
+    before.kind === "fixed" && after.kind === "fixed"
+      ? {
+          kind: "fixed",
+          // The shared joint point appears in both; keep it once.
+          coords: [...before.coords, ...after.coords.slice(1)],
+          elevations: [...before.elevations, ...after.elevations.slice(1)],
+        }
+      : // The neighbours' own far ends (as moveAnchor does), not the
+        // snapped points plannerAnchors reports, so unchanged legs elsewhere
+        // keep matching their cached geometry.
+        { kind: "routed", from: segmentStart(before), to: segmentEnd(after) }
+  const segments = [
+    ...state.segments.slice(0, anchorIndex - 1),
+    merged,
+    ...state.segments.slice(anchorIndex + 1),
+  ]
+  // Merging can only shorten a routed stretch or restore imported geometry,
+  // but a merged routed leg could in principle route longer than the two it
+  // replaces - so the distance cap still applies.
+  return guardCaps({ ...state, segments })
 }
 
 /**

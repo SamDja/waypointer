@@ -1,8 +1,12 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { RemoveRouteButton } from "@/components/RemoveRouteButton"
 import { RouteStats } from "@/components/RouteStats"
-import { Check } from "lucide-react"
+import { Check, Redo2, Undo2, type LucideIcon } from "lucide-react"
+
+// The platform's modifier key, for shortcut hints.
+const MOD_KEY = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘" : "Ctrl+"
 
 export interface PlannerPanelProps {
   // "new" when planning started from an empty map, "edit" when it opened on
@@ -11,6 +15,10 @@ export interface PlannerPanelProps {
   hasRoute: boolean
   onDone: () => void
   onRemove: () => void
+  canUndo: boolean
+  canRedo: boolean
+  onUndo: () => void
+  onRedo: () => void
   distanceM: number
   elevationGainM: number
   elevationLossM: number
@@ -26,6 +34,10 @@ export function PlannerPanel({
   hasRoute,
   onDone,
   onRemove,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
   distanceM,
   elevationGainM,
   elevationLossM,
@@ -37,8 +49,18 @@ export function PlannerPanel({
       <CardHeader>
         <CardTitle>{mode === "new" ? "Plan a new route" : "Edit route"}</CardTitle>
         <CardDescription>Routed along roads suited to cycling.</CardDescription>
-        <CardAction>
-          <Button onClick={onDone}>
+        <CardAction className="flex items-center gap-1">
+          <TooltipProvider>
+            <IconAction icon={Undo2} label="Undo" shortcut={`${MOD_KEY}Z`} disabled={!canUndo} onClick={onUndo} />
+            <IconAction
+              icon={Redo2}
+              label="Redo"
+              shortcut={`${MOD_KEY}Shift+Z`}
+              disabled={!canRedo}
+              onClick={onRedo}
+            />
+          </TooltipProvider>
+          <Button className="ml-1" onClick={onDone}>
             <Check className="size-4" />
             Done
           </Button>
@@ -49,7 +71,7 @@ export function PlannerPanel({
         <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
           Click the map to add a point to the end of the route, or drag the route line to add one in the middle.
           Drag any point to move it. Drag the start or end marker to move that end — or drop it back onto the
-          route to trim there.
+          route to trim there. Click a point to delete it.
         </p>
 
         {hasRoute && (
@@ -65,5 +87,35 @@ export function PlannerPanel({
         {hasRoute && <RemoveRouteButton onRemove={onRemove} />}
       </CardContent>
     </Card>
+  )
+}
+
+function IconAction({
+  icon: Icon,
+  label,
+  shortcut,
+  disabled,
+  onClick,
+}: {
+  icon: LucideIcon
+  label: string
+  shortcut: string
+  disabled: boolean
+  onClick: () => void
+}) {
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        {/* Wrapped so the tooltip still shows while the button is disabled. */}
+        <span>
+          <Button variant="ghost" size="icon-sm" disabled={disabled} onClick={onClick} aria-label={label}>
+            <Icon className="size-4" />
+          </Button>
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>
+        {label} ({shortcut})
+      </TooltipContent>
+    </Tooltip>
   )
 }

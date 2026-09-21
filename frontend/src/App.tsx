@@ -24,6 +24,7 @@ import {
 import { routingProfileForStyle } from "@/lib/mapStyles"
 import {
   appendAnchor,
+  commonPrefixLength,
   emptyPlannerState,
   endpointNeighbourKind,
   insertAnchorAt,
@@ -35,6 +36,7 @@ import {
   plannerGeometry,
   plannerStateFromImport,
   prependAnchor,
+  removeAnchor,
   trackPositions,
   trackedAfterExtend,
   trackedAfterTrim,
@@ -95,6 +97,20 @@ const RE_SEARCH_DEBOUNCE_MS = 1500
 // progressive per-type streaming.)
 const SEARCH_STAGGER_MS = 200
 
+// Plenty for a planning session; bounds memory, since each entry holds a
+// whole PlannerState (an import's geometry included).
+const PLANNER_HISTORY_LIMIT = 100
+
+// One step of the planner's undo/redo history: the route to return to, and
+// the POIs/waypoints the edit that left it unchecked (because they ended up
+// off the new route) - returning re-checks them. Tracked positions aren't
+// stored: they're recomputed against the restored route, which also covers
+// anything a search found since.
+interface PlannerHistoryEntry {
+  state: PlannerState
+  uncheckedKeys: string[]
+}
+
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -152,6 +168,12 @@ export default function App() {
   // Whether planning opened on an empty map or on an already-loaded route -
   // only PlannerPanel's wording depends on it.
   const [plannerMode, setPlannerMode] = useState<"new" | "edit">("new")
+  const [plannerPast, setPlannerPast] = useState<PlannerHistoryEntry[]>([])
+  const [plannerFuture, setPlannerFuture] = useState<PlannerHistoryEntry[]>([])
+  // The planner point clicked on the map, as an index into plannerAnchors -
+  // what Delete/Backspace and the point's map popup act on. Any edit clears
+  // it, since indices shift.
+  const [selectedAnchorIndex, setSelectedAnchorIndex] = useState<number | null>(null)
   // The imported file's parsed document, kept so an edited import is
   // re-serialized from the original rather than rebuilt - preserving its
   // pre-existing <wpt> entries and their waypointer: extension markers.
@@ -277,7 +299,12 @@ export default function App() {
     plannerCoordsRef.current = coords
     setPreviewRouteCoords(coords)
     setPreviewElevations(elevations)
-    if (coords.length < 2) return
+    // Deleting points can take a route back below two - there's no file to
+    // hand downstream until there are two again.
+    if (coords.length < 2) {
+      setFile(null)
+      return
+    }
     const name = plannedFilenameRef.current
     setFile(
       buildGpxFile(
@@ -299,7 +326,7 @@ export default function App() {
     // A newly imported file replaces whatever was being planned.
     setPlannerState(null)
     setTrackedPositions({})
-    setPendingEdit(null)
+    resetPlannerSession()
 
     const text = await newFile.text()
     setSourceDoc(parseGpxDocument(text))
@@ -338,7 +365,7 @@ export default function App() {
     setPlannerState(null)
     setSourceDoc(null)
     setTrackedPositions({})
-    setPendingEdit(null)
+    resetPlannerSession()
   }
 
   // -- Route planner ------------------------------------------------------
@@ -386,8 +413,15 @@ export default function App() {
   function commitPlannerEdit(
     state: PlannerState,
     tracked: TrackedPositions,
-    unchangedPrefixLength: number | null
+    unchangedPrefixLength: number | null,
+    uncheckedKeys: string[] = []
   ) {
+    if (plannerState) {
+      const entry = { state: plannerState, uncheckedKeys }
+      setPlannerPast((prev) => [...prev, entry].slice(-PLANNER_HISTORY_LIMIT))
+      setPlannerFuture([])
+    }
+    setSelectedAnchorIndex(null)
     setPlannerState(state)
     setTrackedPositions(tracked)
     // The file and map preview follow from the plannerState effect above.
@@ -425,23 +459,30 @@ export default function App() {
     }, RE_SEARCH_DEBOUNCE_MS)
   }
 
-  function uncheckKeys(keys: string[]) {
+  /** Checks or unchecks tracked items by key (`w:<index>` / `c:<osm_id>`). */
+  function setKeysChecked(keys: string[], checked: boolean) {
     const waypointIndices = keys.filter((k) => k.startsWith("w:")).map((k) => Number(k.slice(2)))
     const osmIds = keys.filter((k) => k.startsWith("c:")).map((k) => Number(k.slice(2)))
-    if (waypointIndices.length > 0) {
-      setKeptWaypointIndices((prev) => {
-        const next = new Set(prev)
-        for (const index of waypointIndices) next.delete(index)
-        return next
-      })
+    const apply = <T,>(prev: Set<T>, items: T[]) => {
+      const next = new Set(prev)
+      for (const item of items) {
+        if (checked) next.add(item)
+        else next.delete(item)
+      }
+      return next
     }
-    if (osmIds.length > 0) {
-      setSelectedIds((prev) => {
-        const next = new Set(prev)
-        for (const id of osmIds) next.delete(id)
-        return next
-      })
-    }
+    if (waypointIndices.length > 0) setKeptWaypointIndices((prev) => apply(prev, waypointIndices))
+    if (osmIds.length > 0) setSelectedIds((prev) => apply(prev, osmIds))
+  }
+
+  /** Keys of the items in `checked` that `tracked` places off the route. */
+  function strandedKeys(tracked: TrackedPositions, checked: Set<string>, thresholdM: number): string[] {
+    return offRouteItems(
+      Object.entries(tracked)
+        .filter(([key]) => checked.has(key))
+        .map(([key, position]) => ({ ...position, key })),
+      thresholdM
+    ).map((item) => item.key)
   }
 
   /**
@@ -462,8 +503,9 @@ export default function App() {
 
   function handleConfirmPendingEdit() {
     if (!pendingEdit) return
-    uncheckKeys(offRouteFor(pendingEdit.tracked, offRouteThresholdM).map((i) => i.key))
-    commitPlannerEdit(pendingEdit.state, pendingEdit.tracked, pendingEdit.unchangedPrefixLength)
+    const unchecked = offRouteFor(pendingEdit.tracked, offRouteThresholdM).map((i) => i.key)
+    setKeysChecked(unchecked, false)
+    commitPlannerEdit(pendingEdit.state, pendingEdit.tracked, pendingEdit.unchangedPrefixLength, unchecked)
     setPendingEdit(null)
   }
 
@@ -491,17 +533,133 @@ export default function App() {
         ? plannerStateFromImport(coords, previewElevations, routingProfile)
         : emptyPlannerState(routingProfile)
     setPlannerMode(coords.length > 0 ? "edit" : "new")
+    resetPlannerSession()
     setPlannerState(state)
     setTrackedPositions(seedTracked(coords))
   }
 
   function handleExitPlanning() {
+    // Every point was deleted: there's no route to carry on with, so leave
+    // the way "Remove route" would rather than with stale search results.
+    if (!file) {
+      handleRemoveRoute()
+      return
+    }
     setPlannerState(null)
-    setPendingEdit(null)
+    resetPlannerSession()
     // Planning is step 1's work; once it's done, a route that actually
     // exists moves straight on to finding POIs along it.
-    setOpenStep(file ? "find" : "import")
+    setOpenStep("find")
   }
+
+  /** Undo/redo history, point selection and any held-back edit belong to one planning session. */
+  function resetPlannerSession() {
+    setPlannerPast([])
+    setPlannerFuture([])
+    setSelectedAnchorIndex(null)
+    setPendingEdit(null)
+  }
+
+  /**
+   * Undo (or redo) one planner edit.
+   *
+   * Moving through history is itself a route change, so it gets the same
+   * treatment as an edit, minus the confirmation dialog: the visitor asked
+   * for exactly this route back. What the reverted edit unchecked is
+   * re-checked; whatever the restored route now strands is unchecked (with a
+   * toast) and recorded on the opposite stack, so stepping back again
+   * re-checks it in turn.
+   */
+  function stepPlannerHistory(direction: "undo" | "redo") {
+    if (!plannerState || pendingEdit) return
+    const source = direction === "undo" ? plannerPast : plannerFuture
+    const entry = source[source.length - 1]
+    if (!entry) return
+
+    // Keep every leg fetched since the entry was recorded, so stepping back
+    // to a route never re-requests geometry that's already here.
+    const restored = { ...entry.state, legs: { ...entry.state.legs, ...plannerState.legs } }
+    const before = plannerGeometry(plannerState).coords
+    const after = plannerGeometry(restored).coords
+    const tracked = seedTracked(after)
+
+    const checked = new Set([...checkedTrackedKeys(), ...entry.uncheckedKeys])
+    const stranded = strandedKeys(tracked, checked, offRouteThresholdM)
+    const strandedSet = new Set(stranded)
+    setKeysChecked(entry.uncheckedKeys.filter((key) => !strandedSet.has(key)), true)
+    setKeysChecked(stranded, false)
+    if (stranded.length > 0) {
+      toast(
+        `Unchecked ${stranded.length} POI${stranded.length === 1 ? "" : "s"} no longer near the route.`,
+      )
+    }
+
+    const inverse = { state: plannerState, uncheckedKeys: stranded }
+    if (direction === "undo") {
+      setPlannerPast((prev) => prev.slice(0, -1))
+      setPlannerFuture((prev) => [...prev, inverse])
+    } else {
+      setPlannerFuture((prev) => prev.slice(0, -1))
+      setPlannerPast((prev) => [...prev, inverse].slice(-PLANNER_HISTORY_LIMIT))
+    }
+    setSelectedAnchorIndex(null)
+    setPlannerState(restored)
+    setTrackedPositions(tracked)
+    // Search only the ground the restored route adds beyond what it shares
+    // with the current one - none at all if it's just shorter.
+    const prefix = commonPrefixLength(before, after)
+    if (prefix < after.length) scheduleReSearch(prefix)
+  }
+
+  function handleRemoveAnchor(anchorIndex: number) {
+    if (!plannerState) return
+    const result = removeAnchor(plannerState, anchorIndex)
+    if (!result.ok) {
+      toast(result.error, "error")
+      return
+    }
+    const before = plannerGeometry(plannerState).coords
+    const after = plannerGeometry(result.state).coords
+    const prefix = commonPrefixLength(before, after)
+    applyPlannerEdit(result.state, seedTracked(after), prefix < after.length ? prefix : null)
+  }
+
+  // Planner keyboard shortcuts. Handled through a ref so the window listener
+  // is bound once per planning session yet always sees the current state.
+  const plannerKeyDownRef = useRef<(e: KeyboardEvent) => void>(() => {})
+  useEffect(() => {
+    plannerKeyDownRef.current = (e: KeyboardEvent) => {
+      if (pendingEdit) return
+      const target = e.target instanceof Element ? e.target : null
+      // Typing in a field, or anything inside an open dialog, keeps its keys.
+      if (
+        target?.closest("input, textarea, select, [contenteditable=true], [role=dialog], [role=alertdialog]")
+      ) {
+        return
+      }
+      const mod = e.metaKey || e.ctrlKey
+      const key = e.key.toLowerCase()
+      if (mod && key === "z") {
+        e.preventDefault()
+        stepPlannerHistory(e.shiftKey ? "redo" : "undo")
+      } else if (mod && key === "y") {
+        e.preventDefault()
+        stepPlannerHistory("redo")
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedAnchorIndex !== null) {
+        e.preventDefault()
+        handleRemoveAnchor(selectedAnchorIndex)
+      } else if (e.key === "Escape" && selectedAnchorIndex !== null) {
+        setSelectedAnchorIndex(null)
+      }
+    }
+  })
+  const isPlanning = plannerState !== null
+  useEffect(() => {
+    if (!isPlanning) return
+    const listener = (e: KeyboardEvent) => plannerKeyDownRef.current(e)
+    window.addEventListener("keydown", listener)
+    return () => window.removeEventListener("keydown", listener)
+  }, [isPlanning])
 
   function handleAppendAnchor(point: [number, number]) {
     if (!plannerState) return
@@ -1068,6 +1226,10 @@ export default function App() {
                     onMoveAnchor: handleMoveAnchor,
                     onMoveEndpoint: handleMoveEndpoint,
                     onInsertAnchor: handleInsertAnchor,
+                    selectedAnchor: selectedAnchorIndex,
+                    onSelectAnchor: setSelectedAnchorIndex,
+                    onClearSelection: () => setSelectedAnchorIndex(null),
+                    onDeleteAnchor: handleRemoveAnchor,
                   }
                 : undefined
             }
@@ -1089,6 +1251,10 @@ export default function App() {
                 mode={plannerMode}
                 hasRoute={file !== null}
                 onDone={handleExitPlanning}
+                canUndo={plannerPast.length > 0}
+                canRedo={plannerFuture.length > 0}
+                onUndo={() => stepPlannerHistory("undo")}
+                onRedo={() => stepPlannerHistory("redo")}
                 onRemove={handleRemoveRoute}
                 distanceM={distanceM}
                 elevationGainM={elevationGainM}

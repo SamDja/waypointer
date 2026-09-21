@@ -26,6 +26,7 @@ import {
   Plus,
   Minus,
   Square,
+  Trash2Icon,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -116,7 +117,14 @@ export interface PlanningProps {
   // grabDistanceM says which stretch to split (where the drag started);
   // dropPoint is where the new point lands.
   onInsertAnchor: (grabDistanceM: number, dropPoint: [number, number]) => void
+  // The clicked point (index into anchors). Clicking a point selects it,
+  // which opens a popup on it offering to delete it.
+  selectedAnchor: number | null
+  onSelectAnchor: (anchorIndex: number) => void
+  onClearSelection: () => void
+  onDeleteAnchor: (anchorIndex: number) => void
 }
+
 
 // Stable empty-Set default for clickAddedCandidateIds - a fresh `new Set()`
 // literal in the destructured default would change identity every render,
@@ -405,6 +413,7 @@ function EndpointMarker({
   label,
   tooltip,
   onDragEnd,
+  onSelect,
 }: {
   point: [number, number]
   icon: typeof Play
@@ -412,6 +421,7 @@ function EndpointMarker({
   label: string
   tooltip: string
   onDragEnd?: (point: [number, number], droppedOnRoute: boolean) => void
+  onSelect?: () => void
 }) {
   const { current: mapRef } = useMap()
   return (
@@ -431,7 +441,10 @@ function EndpointMarker({
             }
           : undefined
       }
-      onClick={(e) => e.originalEvent.stopPropagation()}
+      onClick={(e) => {
+        e.originalEvent.stopPropagation()
+        onSelect?.()
+      }}
     >
       <Tooltip>
         <TooltipTrigger asChild>
@@ -456,9 +469,12 @@ function EndpointMarker({
 function RouteEndpointMarkers({
   routeCoords,
   onMoveEndpoint,
+  onSelect,
 }: {
   routeCoords: [number, number][]
   onMoveEndpoint?: (which: "start" | "end", point: [number, number], droppedOnRoute: boolean) => void
+  // Planning only: clicking an end selects it (see PlanningProps.selectedAnchor).
+  onSelect?: (which: "start" | "end") => void
 }) {
   if (routeCoords.length === 0) return null
   const start = routeCoords[0]
@@ -477,6 +493,7 @@ function RouteEndpointMarkers({
         label="Route start"
         tooltip={onMoveEndpoint ? "Start - drag to move" : "Start"}
         onDragEnd={onMoveEndpoint ? (point, onRoute) => onMoveEndpoint("start", point, onRoute) : undefined}
+        onSelect={onSelect && (() => onSelect("start"))}
       />
     )
   }
@@ -502,6 +519,7 @@ function RouteEndpointMarkers({
         label="Route start"
         tooltip={onMoveEndpoint ? `Start${dragTooltip}` : "Start"}
         onDragEnd={onMoveEndpoint ? (point, onRoute) => onMoveEndpoint("start", point, onRoute) : undefined}
+        onSelect={onSelect && (() => onSelect("start"))}
       />
       <EndpointMarker
         point={end}
@@ -510,6 +528,7 @@ function RouteEndpointMarkers({
         label="Route end"
         tooltip={onMoveEndpoint ? `End${dragTooltip}` : "End"}
         onDragEnd={onMoveEndpoint ? (point, onRoute) => onMoveEndpoint("end", point, onRoute) : undefined}
+        onSelect={onSelect && (() => onSelect("end"))}
       />
     </>
   )
@@ -622,6 +641,47 @@ function PendingLegLines({ pendingLegs }: { pendingLegs: [number, number][][] })
  * route. Only interior points get one - the start and end are the green/red
  * endpoint markers, which double as their own drag handles.
  */
+/** How a planner point is named - interior points match the number on their marker. */
+function anchorLabel(anchorIndex: number, anchorCount: number): string {
+  if (anchorIndex === 0) return "Start"
+  if (anchorIndex === anchorCount - 1) return "End"
+  return `Point ${anchorIndex}`
+}
+
+// Opened by clicking a planner point, and the only sign it's selected: the
+// one place to delete it by pointer (Delete/Backspace does the same from the
+// keyboard - see App.tsx). Clicking
+// elsewhere on the map closes it, via the Popup's default closeOnClick.
+function SelectedPointPopup({
+  point,
+  label,
+  onDelete,
+  onClose,
+}: {
+  point: [number, number]
+  label: string
+  onDelete: () => void
+  onClose: () => void
+}) {
+  return (
+    <Popup longitude={point[1]} latitude={point[0]} anchor="bottom" offset={20} onClose={onClose}>
+      <div className="flex flex-col gap-2 pr-4 text-sm">
+        <span className="font-medium">{label}</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="destructive" size="sm" onClick={onDelete}>
+              <Trash2Icon className="size-4" />
+              Delete point
+            </Button>
+          </TooltipTrigger>
+          {/* To the side: above would cover the popup's title, below the point itself. */}
+          <TooltipContent side="right">Or press Delete</TooltipContent>
+        </Tooltip>
+      </div>
+    </Popup>
+  )
+}
+
 function PlannerAnchorMarker({ number }: { number: number }) {
   return (
     <div
@@ -1136,6 +1196,13 @@ export function RouteMap({
               // appending to the far end is never what a click on the
               // middle of the route meant.
               if (isOnRouteLine(e.target, e.point)) return
+              // With a point's popup open, a click elsewhere just dismisses
+              // it - adding a point as well would turn every "never mind"
+              // into an edit.
+              if (planning.selectedAnchor !== null) {
+                planning.onClearSelection()
+                return
+              }
               planning.onAppendAnchor([e.lngLat.lat, e.lngLat.lng])
               return
             }
@@ -1403,19 +1470,36 @@ export function RouteMap({
                     draggable
                     style={{ zIndex: PLANNER_ANCHOR_Z_INDEX }}
                     onDragEnd={(e) => planning.onMoveAnchor(index, [e.lngLat.lat, e.lngLat.lng])}
-                    onClick={(e) => e.originalEvent.stopPropagation()}
+                    onClick={(e) => {
+                      e.originalEvent.stopPropagation()
+                      planning.onSelectAnchor(index)
+                    }}
                   >
                     <PlannerAnchorMarker number={index} />
                   </Marker>
                 )
               })}
               <RouteLineInsertHandle routeCoords={routeCoords} onInsertAnchor={planning.onInsertAnchor} />
+              {planning.selectedAnchor !== null && planning.anchors[planning.selectedAnchor] && (
+                <SelectedPointPopup
+                  // Remounted per point, so switching selection re-anchors it.
+                  key={`selected-point-${planning.selectedAnchor}`}
+                  point={planning.anchors[planning.selectedAnchor]}
+                  label={anchorLabel(planning.selectedAnchor, planning.anchors.length)}
+                  onDelete={() => planning.onDeleteAnchor(planning.selectedAnchor!)}
+                  onClose={planning.onClearSelection}
+                />
+              )}
             </>
           )}
 
           <RouteEndpointMarkers
             routeCoords={routeCoords}
             onMoveEndpoint={planning?.onMoveEndpoint}
+            onSelect={
+              planning &&
+              ((which) => planning.onSelectAnchor(which === "start" ? 0 : planning.anchors.length - 1))
+            }
           />
           {userLocation && (
             <Marker longitude={userLocation[0]} latitude={userLocation[1]}>

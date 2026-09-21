@@ -7,6 +7,7 @@ import {
   type Positioned,
   type RoutedSegment,
   appendAnchor,
+  commonPrefixLength,
   emptyPlannerState,
   endpointNeighbourKind,
   insertAnchorAt,
@@ -17,7 +18,7 @@ import {
   plannerGeometry,
   plannerStateFromImport,
   prependAnchor,
-  removeLastAnchor,
+  removeAnchor,
   trimEnd,
   trimStart,
   updateDistancesAfterExtend,
@@ -150,15 +151,6 @@ describe("edit operations", () => {
     expect(moveAnchor(state, 0, [45.5, 7.0]).ok).toBe(false)
   })
 
-  it("removeLastAnchor drops the last segment", () => {
-    let state = emptyPlannerState(PROFILE)
-    state = (appendAnchor(state, [45.0, 7.0]) as { state: PlannerState }).state
-    state = (appendAnchor(state, [45.0, 7.001]) as { state: PlannerState }).state
-    const undone = removeLastAnchor(state)
-    expect(undone.ok).toBe(true)
-    expect(plannerAnchors((undone as { state: PlannerState }).state)).toEqual([[45.0, 7.0]])
-  })
-
   it("prependAnchor extends the start", () => {
     const state = importedState()
     const result = prependAnchor(state, [45.0, 6.99])
@@ -238,6 +230,77 @@ describe("insertAnchorAt", () => {
   it("refuses a split that lands on an existing point", () => {
     expect(insertAnchorAt(importedState(11), 0).ok).toBe(false)
     expect(insertAnchorAt(emptyPlannerState(PROFILE), 100).ok).toBe(false)
+  })
+})
+
+describe("removeAnchor", () => {
+  function drawn(lons: number[]): PlannerState {
+    let state = emptyPlannerState(PROFILE)
+    for (const lon of lons) state = (appendAnchor(state, [45.0, lon]) as { state: PlannerState }).state
+    return state
+  }
+
+  it("drops the last point of a drawn route", () => {
+    const result = removeAnchor(drawn([7.0, 7.001, 7.002]), 2) as { state: PlannerState }
+    expect(plannerAnchors(result.state)).toEqual([
+      [45.0, 7.0],
+      [45.0, 7.001],
+    ])
+  })
+
+  it("drops the first point, making the next one the start", () => {
+    const result = removeAnchor(drawn([7.0, 7.001, 7.002]), 0) as { state: PlannerState }
+    expect(result.state.start).toEqual([45.0, 7.001])
+    expect(plannerAnchors(result.state)).toEqual([
+      [45.0, 7.001],
+      [45.0, 7.002],
+    ])
+  })
+
+  it("merges the two legs around an interior point into one routed leg", () => {
+    const result = removeAnchor(drawn([7.0, 7.001, 7.002, 7.003]), 2) as { state: PlannerState }
+    expect(result.state.segments).toHaveLength(2)
+    expect(result.state.segments[1]).toEqual({ kind: "routed", from: [45.0, 7.001], to: [45.0, 7.003] })
+  })
+
+  // The inverse of insertAnchorAt's lossless split: inserting then deleting
+  // a point on an import must leave the imported track exactly as it was.
+  it("rejoins two imported halves byte-identically, with no routing needed", () => {
+    const state = importedState(11)
+    const split = insertAnchorAt(state, 400) as { state: PlannerState; anchorIndex: number }
+    const result = removeAnchor(split.state, split.anchorIndex) as { state: PlannerState }
+
+    expect(result.state.segments).toHaveLength(1)
+    expect(result.state.segments[0].kind).toBe("fixed")
+    expect(plannerGeometry(result.state)).toEqual(plannerGeometry(state))
+    expect(pendingLegs(result.state)).toHaveLength(0)
+  })
+
+  it("routes across the gap when only one side is imported", () => {
+    const state = importedState(11)
+    const split = insertAnchorAt(state, 400) as { state: PlannerState; anchorIndex: number }
+    const extended = appendAnchor(split.state, [45.0, 7.02]) as { state: PlannerState }
+    // Anchors: 0 (start), 1 (split point), 2 (import's end), 3 (appended).
+    const result = removeAnchor(extended.state, 2) as { state: PlannerState }
+
+    expect(result.state.segments.map((s) => s.kind)).toEqual(["fixed", "routed"])
+    const anchors = plannerAnchors(extended.state)
+    expect(result.state.segments[1]).toEqual({ kind: "routed", from: anchors[1], to: anchors[3] })
+  })
+
+  it("refuses to delete an end bounding imported geometry", () => {
+    const state = importedState(11)
+    expect(removeAnchor(state, 0).ok).toBe(false)
+    expect(removeAnchor(state, plannerAnchors(state).length - 1).ok).toBe(false)
+  })
+
+  it("clears the route when deleting its only point", () => {
+    const result = removeAnchor(drawn([7.0]), 0) as { state: PlannerState }
+    expect(plannerAnchors(result.state)).toEqual([])
+  })
+
+  it("rejects an index that isn't a point", () => {
+    expect(removeAnchor(drawn([7.0, 7.001]), 5).ok).toBe(false)
   })
 })
 
@@ -423,5 +486,15 @@ describe("offRouteItems", () => {
     )
     expect(offRouteItems(items, 500)).toHaveLength(1)
     expect(offRouteItems(items, 500)[0].lat).toBe(45.01)
+  })
+})
+
+describe("commonPrefixLength", () => {
+  it("counts the leading coordinates two routes share", () => {
+    const route = line(5)
+    expect(commonPrefixLength(route, route)).toBe(5)
+    expect(commonPrefixLength(route, route.slice(0, 3))).toBe(3)
+    expect(commonPrefixLength(route, [...route.slice(0, 2), [46.0, 7.0]])).toBe(2)
+    expect(commonPrefixLength(route, [])).toBe(0)
   })
 })
