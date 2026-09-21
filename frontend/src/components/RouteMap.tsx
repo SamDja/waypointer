@@ -9,6 +9,8 @@ import type {
   MapTouchEvent,
   PointLike,
 } from "maplibre-gl"
+import { setWorkerUrl } from "maplibre-gl"
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url"
 import {
   ChevronDown,
   ChevronLeft,
@@ -46,6 +48,12 @@ import { POI_TYPES } from "@/lib/poiTypes"
 import { toast } from "@/lib/toast"
 import type { Candidate, CandidateDetails, ExistingWaypoint, HoveredPoi, PoiLookupResult } from "@/types/candidate"
 import colors from "tailwindcss/colors"
+
+// maplibre-gl v6 no longer inlines its worker: it loads it as a sibling file of
+// its own module URL, which Vite's dep pre-bundling (dev) and chunking (build)
+// both break, leaving the map with no tiles. Point it at a Vite-bundled copy
+// instead - this must run before the first <Map> mounts.
+setWorkerUrl(maplibreWorkerUrl)
 
 // A basemap POI icon the visitor clicked, mid-resolution or resolved -
 // rendered as its own Popup (not tied to a Marker, since "not found" has no
