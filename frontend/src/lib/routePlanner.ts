@@ -193,6 +193,15 @@ export function commonPrefixLength(a: LatLon[], b: LatLon[]): number {
   return i
 }
 
+/**
+ * Distance along the route of each segment - i.e. from each point to the
+ * next, index-aligned with segments (segment i runs from anchor i to i+1).
+ * A leg still being routed counts as its straight-line placeholder.
+ */
+export function plannerLegDistancesM(state: PlannerState): number[] {
+  return state.segments.map((segment) => totalDistanceM(segmentGeometry(segment, state).coords))
+}
+
 export function plannerDistanceM(state: PlannerState): number {
   return totalDistanceM(plannerGeometry(state).coords)
 }
@@ -704,4 +713,45 @@ export function trackedAfterExtend(
       startMoved
     )
   )
+}
+
+/**
+ * Moves the anchor at `from` to position `to` in the point order (the
+ * point-list drag), re-pointing the route through the new order.
+ *
+ * A pair of anchors that stays consecutive, in the same direction, keeps its
+ * segment as-is - routed geometry already fetched, or imported geometry
+ * verbatim. Every new pair becomes a `routed` leg.
+ *
+ * Refused when it would break up a `fixed` segment: on a pristine import
+ * that one segment is the whole track, so e.g. swapping its start and end
+ * would replace an entire imported route with a single routed leg. Imported
+ * stretches keep their order; moving points on the map is the tool there.
+ */
+export function reorderAnchors(state: PlannerState, from: number, to: number): PlannerResult {
+  const anchors = plannerAnchors(state)
+  if (from < 0 || from >= anchors.length || to < 0 || to >= anchors.length) {
+    return { ok: false, error: "No such route point." }
+  }
+  if (from === to) return { ok: true, state }
+
+  const order = anchors.map((_, i) => i)
+  const [moved] = order.splice(from, 1)
+  order.splice(to, 0, moved)
+
+  const segments: Segment[] = []
+  for (let k = 0; k < order.length - 1; k++) {
+    const a = order[k]
+    const b = order[k + 1]
+    // Segment a runs from anchor a to anchor a+1 (see plannerAnchors).
+    segments.push(b === a + 1 ? state.segments[a] : { kind: "routed", from: anchors[a], to: anchors[b] })
+  }
+
+  const kept = new Set(segments)
+  if (state.segments.some((segment) => segment.kind === "fixed" && !kept.has(segment))) {
+    return { ok: false, error: "Imported parts of the route keep their order - move points on the map instead." }
+  }
+
+  const start = segments.length > 0 ? segmentStart(segments[0]) : anchors[order[0]]
+  return guardCaps({ ...state, start, segments })
 }

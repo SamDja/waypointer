@@ -37,7 +37,13 @@ import { MapLegend } from "@/components/MapLegend"
 import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
 import { buildAddablePoiFilter, resolvePoiTypeFromFeatureProps } from "@/lib/basemapPoiMapping"
 import { projectOntoPolylineM } from "@/lib/geometry"
-import { CircleMarkerIcon, ROUTE_END_COLOR, ROUTE_START_COLOR, UserLocationMarker } from "@/lib/mapIcons"
+import {
+  CircleMarkerIcon,
+  PLANNER_POINT_COLOR,
+  ROUTE_END_COLOR,
+  ROUTE_START_COLOR,
+  UserLocationMarker,
+} from "@/lib/mapIcons"
 import { MAP_STYLES } from "@/lib/mapStyles"
 import {
   formatExactDateTime,
@@ -123,6 +129,10 @@ export interface PlanningProps {
   onSelectAnchor: (anchorIndex: number) => void
   onClearSelection: () => void
   onDeleteAnchor: (anchorIndex: number) => void
+  // Shared with PlannerPanel's point list: the hovered point glows on the
+  // map, and hovering a marker highlights its row.
+  hoveredAnchor: number | null
+  onHoverAnchor: (anchorIndex: number | null) => void
 }
 
 
@@ -414,6 +424,8 @@ function EndpointMarker({
   tooltip,
   onDragEnd,
   onSelect,
+  highlighted = false,
+  onHover,
 }: {
   point: [number, number]
   icon: typeof Play
@@ -422,6 +434,8 @@ function EndpointMarker({
   tooltip: string
   onDragEnd?: (point: [number, number], droppedOnRoute: boolean) => void
   onSelect?: () => void
+  highlighted?: boolean
+  onHover?: (hovering: boolean) => void
 }) {
   const { current: mapRef } = useMap()
   return (
@@ -448,8 +462,13 @@ function EndpointMarker({
     >
       <Tooltip>
         <TooltipTrigger asChild>
-          <div aria-label={label} className={onDragEnd ? "cursor-grab active:cursor-grabbing" : undefined}>
-            <CircleMarkerIcon icon={icon} bgColor={color} />
+          <div
+            aria-label={label}
+            className={onDragEnd ? "cursor-grab active:cursor-grabbing" : undefined}
+            onMouseEnter={onHover && (() => onHover(true))}
+            onMouseLeave={onHover && (() => onHover(false))}
+          >
+            <CircleMarkerIcon icon={icon} bgColor={color} highlighted={highlighted} />
           </div>
         </TooltipTrigger>
         <TooltipContent>{tooltip}</TooltipContent>
@@ -470,11 +489,16 @@ function RouteEndpointMarkers({
   routeCoords,
   onMoveEndpoint,
   onSelect,
+  hovered = null,
+  onHover,
 }: {
   routeCoords: [number, number][]
   onMoveEndpoint?: (which: "start" | "end", point: [number, number], droppedOnRoute: boolean) => void
-  // Planning only: clicking an end selects it (see PlanningProps.selectedAnchor).
+  // Planning only: clicking an end selects it (see PlanningProps.selectedAnchor),
+  // and hovering is shared with the point list (PlanningProps.hoveredAnchor).
   onSelect?: (which: "start" | "end") => void
+  hovered?: "start" | "end" | null
+  onHover?: (which: "start" | "end" | null) => void
 }) {
   if (routeCoords.length === 0) return null
   const start = routeCoords[0]
@@ -494,6 +518,8 @@ function RouteEndpointMarkers({
         tooltip={onMoveEndpoint ? "Start - drag to move" : "Start"}
         onDragEnd={onMoveEndpoint ? (point, onRoute) => onMoveEndpoint("start", point, onRoute) : undefined}
         onSelect={onSelect && (() => onSelect("start"))}
+        highlighted={hovered === "start"}
+        onHover={onHover && ((on) => onHover(on ? "start" : null))}
       />
     )
   }
@@ -520,6 +546,8 @@ function RouteEndpointMarkers({
         tooltip={onMoveEndpoint ? `Start${dragTooltip}` : "Start"}
         onDragEnd={onMoveEndpoint ? (point, onRoute) => onMoveEndpoint("start", point, onRoute) : undefined}
         onSelect={onSelect && (() => onSelect("start"))}
+        highlighted={hovered === "start"}
+        onHover={onHover && ((on) => onHover(on ? "start" : null))}
       />
       <EndpointMarker
         point={end}
@@ -529,6 +557,8 @@ function RouteEndpointMarkers({
         tooltip={onMoveEndpoint ? `End${dragTooltip}` : "End"}
         onDragEnd={onMoveEndpoint ? (point, onRoute) => onMoveEndpoint("end", point, onRoute) : undefined}
         onSelect={onSelect && (() => onSelect("end"))}
+        highlighted={hovered === "end"}
+        onHover={onHover && ((on) => onHover(on ? "end" : null))}
       />
     </>
   )
@@ -593,7 +623,7 @@ function CompassControl({ bearing, mapRef }: { bearing: number; mapRef: React.Re
   )
 }
 
-const PLANNER_ANCHOR_COLOR = "#7c3aed"
+const PLANNER_ANCHOR_COLOR = PLANNER_POINT_COLOR
 const PLANNER_PENDING_SOURCE_ID = "planner-pending"
 // Above the POI markers so anchors stay grabbable while planning over a
 // dense candidate cluster, but below HOVERED_Z_INDEX.
@@ -682,16 +712,29 @@ function SelectedPointPopup({
   )
 }
 
-function PlannerAnchorMarker({ number }: { number: number }) {
+function PlannerAnchorMarker({
+  number,
+  highlighted,
+  onHover,
+}: {
+  number: number
+  highlighted: boolean
+  onHover: (hovering: boolean) => void
+}) {
   return (
     <div
       aria-label={`Route point ${number}`}
+      onMouseEnter={() => onHover(true)}
+      onMouseLeave={() => onHover(false)}
       className="flex cursor-grab items-center justify-center rounded-full border-2 border-white text-[11px] font-semibold leading-none text-white active:cursor-grabbing"
       style={{
         width: PLANNER_ANCHOR_SIZE,
         height: PLANNER_ANCHOR_SIZE,
         backgroundColor: PLANNER_ANCHOR_COLOR,
-        boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
+        // The same glow CircleMarkerIcon's `highlighted` gives the start/end.
+        boxShadow: highlighted
+          ? `0 1px 3px rgba(0,0,0,0.4), 0 0 0 4px color-mix(in oklch, ${PLANNER_ANCHOR_COLOR} 40%, transparent)`
+          : "0 1px 3px rgba(0,0,0,0.4)",
       }}
     >
       {number}
@@ -1475,7 +1518,11 @@ export function RouteMap({
                       planning.onSelectAnchor(index)
                     }}
                   >
-                    <PlannerAnchorMarker number={index} />
+                    <PlannerAnchorMarker
+                      number={index}
+                      highlighted={planning.hoveredAnchor === index}
+                      onHover={(on) => planning.onHoverAnchor(on ? index : null)}
+                    />
                   </Marker>
                 )
               })}
@@ -1499,6 +1546,22 @@ export function RouteMap({
             onSelect={
               planning &&
               ((which) => planning.onSelectAnchor(which === "start" ? 0 : planning.anchors.length - 1))
+            }
+            hovered={
+              !planning || planning.hoveredAnchor === null
+                ? null
+                : planning.hoveredAnchor === 0
+                  ? "start"
+                  : planning.hoveredAnchor === planning.anchors.length - 1
+                    ? "end"
+                    : null
+            }
+            onHover={
+              planning &&
+              ((which) =>
+                planning.onHoverAnchor(
+                  which === null ? null : which === "start" ? 0 : planning.anchors.length - 1
+                ))
             }
           />
           {userLocation && (

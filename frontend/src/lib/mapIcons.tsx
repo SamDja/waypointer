@@ -3,6 +3,9 @@ import colors from "tailwindcss/colors"
 
 export const ROUTE_START_COLOR = "oklch(53.2% 0.157 131.589)"
 export const ROUTE_END_COLOR = "oklch(50.5% 0.213 27.518)"
+// The route planner's numbered points (and its pending-leg line) - shared
+// with PlannerPointList so the list's badges match the map.
+export const PLANNER_POINT_COLOR = "#7c3aed"
 
 interface CircleMarkerIconProps {
   icon: LucideIcon
@@ -27,6 +30,7 @@ export function CircleMarkerIcon({
   bgColor,
   iconColor = colors.olive[50],
   size = 28,
+  highlighted = false,
   opacity = 1,
 }: CircleMarkerIconProps) {
   const iconSize = Math.round(size * 0.7)
@@ -38,7 +42,9 @@ export function CircleMarkerIcon({
         width: size,
         height: size,
         backgroundColor: bgColor,
-        boxShadow: '0 1px 3px rgba(0,0,0,0.4)',
+        boxShadow: highlighted
+          ? `0 1px 3px rgba(0,0,0,0.4), 0 0 0 4px color-mix(in oklch, ${bgColor} 40%, transparent)`
+          : '0 1px 3px rgba(0,0,0,0.4)',
         opacity,
       }}
     >

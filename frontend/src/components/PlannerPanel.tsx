@@ -1,6 +1,7 @@
 import { Button } from "@/components/ui/button"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { PlannerPointList, type PlannerPoint } from "@/components/PlannerPointList"
 import { RemoveRouteButton } from "@/components/RemoveRouteButton"
 import { RouteStats } from "@/components/RouteStats"
 import { Check, Redo2, Undo2, type LucideIcon } from "lucide-react"
@@ -19,6 +20,11 @@ export interface PlannerPanelProps {
   canRedo: boolean
   onUndo: () => void
   onRedo: () => void
+  points: PlannerPoint[]
+  onReorderPoint: (from: number, to: number) => void
+  onDeletePoint: (index: number) => void
+  hoveredPoint: number | null
+  onHoverPoint: (index: number | null) => void
   distanceM: number
   elevationGainM: number
   elevationLossM: number
@@ -38,6 +44,11 @@ export function PlannerPanel({
   canRedo,
   onUndo,
   onRedo,
+  points,
+  onReorderPoint,
+  onDeletePoint,
+  hoveredPoint,
+  onHoverPoint,
   distanceM,
   elevationGainM,
   elevationLossM,
@@ -73,6 +84,14 @@ export function PlannerPanel({
           Drag any point to move it. Drag the start or end marker to move that end — or drop it back onto the
           route to trim there. Click a point to delete it.
         </p>
+
+        <PlannerPointList
+          points={points}
+          onReorder={onReorderPoint}
+          onDelete={onDeletePoint}
+          hoveredIndex={hoveredPoint}
+          onHover={onHoverPoint}
+        />
 
         {hasRoute && (
           <RouteStats

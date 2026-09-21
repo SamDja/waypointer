@@ -17,8 +17,11 @@ import {
   plannerAnchors,
   plannerGeometry,
   plannerStateFromImport,
+  plannerDistanceM,
+  plannerLegDistancesM,
   prependAnchor,
   removeAnchor,
+  reorderAnchors,
   trimEnd,
   trimStart,
   updateDistancesAfterExtend,
@@ -496,5 +499,84 @@ describe("commonPrefixLength", () => {
     expect(commonPrefixLength(route, route.slice(0, 3))).toBe(3)
     expect(commonPrefixLength(route, [...route.slice(0, 2), [46.0, 7.0]])).toBe(2)
     expect(commonPrefixLength(route, [])).toBe(0)
+  })
+})
+
+describe("reorderAnchors", () => {
+  function drawn(lons: number[]): PlannerState {
+    let state = emptyPlannerState(PROFILE)
+    for (const lon of lons) state = (appendAnchor(state, [45.0, lon]) as { state: PlannerState }).state
+    return state
+  }
+
+  it("moves a point and routes through the new order", () => {
+    const state = drawn([7.0, 7.001, 7.002, 7.003])
+    const result = reorderAnchors(state, 3, 1) as { state: PlannerState }
+    expect(plannerAnchors(result.state)).toEqual([
+      [45.0, 7.0],
+      [45.0, 7.003],
+      [45.0, 7.001],
+      [45.0, 7.002],
+    ])
+  })
+
+  it("keeps every segment whose two points stay consecutive, by identity", () => {
+    const state = drawn([7.0, 7.001, 7.002, 7.003, 7.004])
+    // A B C D E -> A B D C E: only A-B survives as a pair in the same direction.
+    const result = reorderAnchors(state, 3, 2) as { state: PlannerState }
+    expect(result.state.segments[0]).toBe(state.segments[0])
+    expect(result.state.segments.slice(1).every((s) => s.kind === "routed" && !state.segments.includes(s))).toBe(
+      true
+    )
+  })
+
+  it("can move the start, making another point the start", () => {
+    const state = drawn([7.0, 7.001, 7.002])
+    const result = reorderAnchors(state, 0, 2) as { state: PlannerState }
+    expect(result.state.start).toEqual([45.0, 7.001])
+    expect(plannerAnchors(result.state)).toEqual([
+      [45.0, 7.001],
+      [45.0, 7.002],
+      [45.0, 7.0],
+    ])
+  })
+
+  it("is a no-op when a point is dropped where it was", () => {
+    const state = drawn([7.0, 7.001, 7.002])
+    expect((reorderAnchors(state, 1, 1) as { state: PlannerState }).state).toBe(state)
+  })
+
+  it("refuses to break up imported geometry", () => {
+    const state = importedState(11)
+    expect(reorderAnchors(state, 0, 1).ok).toBe(false)
+  })
+
+  it("reorders the drawn part of an extended import, keeping the import intact", () => {
+    let state = importedState(11)
+    state = (appendAnchor(state, [45.0, 7.02]) as { state: PlannerState }).state
+    state = (appendAnchor(state, [45.0, 7.03]) as { state: PlannerState }).state
+    // import start, import end, X, Y -> import start, import end, Y, X
+    const result = reorderAnchors(state, 3, 2) as { ok: true; state: PlannerState }
+    expect(result.ok).toBe(true)
+    expect(result.state.segments[0]).toBe(state.segments[0])
+    expect(plannerAnchors(result.state).slice(2)).toEqual([
+      [45.0, 7.03],
+      [45.0, 7.02],
+    ])
+  })
+
+  it("rejects an index that isn't a point", () => {
+    expect(reorderAnchors(drawn([7.0, 7.001]), 0, 5).ok).toBe(false)
+  })
+})
+
+describe("plannerLegDistancesM", () => {
+  it("gives one distance per segment, adding up to the route's length", () => {
+    const coords = line(11)
+    const state = plannerStateFromImport(coords, coords.map(() => 100), PROFILE)
+    const split = insertAnchorAt(state, 400) as { state: PlannerState }
+    const legs = plannerLegDistancesM(split.state)
+    expect(legs).toHaveLength(2)
+    expect(legs[0] + legs[1]).toBeCloseTo(plannerDistanceM(state), 6)
   })
 })

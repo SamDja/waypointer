@@ -7,6 +7,7 @@ import { RouteMap, type PendingPoiLookup } from "@/components/RouteMap"
 import { SaveCard } from "@/components/SaveCard"
 import { StepCard } from "@/components/StepCard"
 import { PlannerPanel } from "@/components/PlannerPanel"
+import type { PlannerPoint } from "@/components/PlannerPointList"
 import { MapStyleSelect } from "@/components/MapStyleSelect"
 import { Toaster } from "@/components/Toaster"
 import { WahooProfileMenu } from "@/components/WahooProfileMenu"
@@ -34,9 +35,11 @@ import {
   pendingLegs,
   plannerAnchors,
   plannerGeometry,
+  plannerLegDistancesM,
   plannerStateFromImport,
   prependAnchor,
   removeAnchor,
+  reorderAnchors,
   trackPositions,
   trackedAfterExtend,
   trackedAfterTrim,
@@ -44,6 +47,7 @@ import {
   trimStart,
   withLeg,
   type PlannerState,
+  type Segment,
   type TrackedPositions,
 } from "@/lib/routePlanner"
 import {
@@ -174,6 +178,9 @@ export default function App() {
   // what Delete/Backspace and the point's map popup act on. Any edit clears
   // it, since indices shift.
   const [selectedAnchorIndex, setSelectedAnchorIndex] = useState<number | null>(null)
+  // The planner point hovered in PlannerPanel's point list or on the map,
+  // highlighted in both.
+  const [hoveredAnchorIndex, setHoveredAnchorIndex] = useState<number | null>(null)
   // The imported file's parsed document, kept so an edited import is
   // re-serialized from the original rather than rebuilt - preserving its
   // pre-existing <wpt> entries and their waypointer: extension markers.
@@ -422,6 +429,7 @@ export default function App() {
       setPlannerFuture([])
     }
     setSelectedAnchorIndex(null)
+    setHoveredAnchorIndex(null)
     setPlannerState(state)
     setTrackedPositions(tracked)
     // The file and map preview follow from the plannerState effect above.
@@ -557,6 +565,7 @@ export default function App() {
     setPlannerPast([])
     setPlannerFuture([])
     setSelectedAnchorIndex(null)
+    setHoveredAnchorIndex(null)
     setPendingEdit(null)
   }
 
@@ -618,6 +627,21 @@ export default function App() {
       toast(result.error, "error")
       return
     }
+    const before = plannerGeometry(plannerState).coords
+    const after = plannerGeometry(result.state).coords
+    const prefix = commonPrefixLength(before, after)
+    applyPlannerEdit(result.state, seedTracked(after), prefix < after.length ? prefix : null)
+  }
+
+  /** A point-list drag: move the point at `from` to position `to` in ride order. */
+  function handleReorderAnchor(from: number, to: number) {
+    if (!plannerState) return
+    const result = reorderAnchors(plannerState, from, to)
+    if (!result.ok) {
+      toast(result.error, "error")
+      return
+    }
+    if (result.state === plannerState) return
     const before = plannerGeometry(plannerState).coords
     const after = plannerGeometry(result.state).coords
     const prefix = commonPrefixLength(before, after)
@@ -1145,6 +1169,25 @@ export default function App() {
   // turns up there) - this, not findResult?.candidates directly, is what
   // the map/checklist/save flow reads, so a click-added POI flows through
   // the existing selection/export pipeline unchanged.
+  // PlannerPanel's point list: one row per anchor, in ride order.
+  const plannerPoints = useMemo((): PlannerPoint[] => {
+    if (!plannerState) return []
+    const anchors = plannerAnchors(plannerState)
+    const legs = plannerLegDistancesM(plannerState)
+    const pending = new Set<Segment>(pendingLegs(plannerState))
+    return anchors.map((_, i) => {
+      const kind = i === 0 ? "start" : i === anchors.length - 1 ? "end" : "point"
+      return {
+        id: `point-${i}`,
+        label: kind === "start" ? "Start" : kind === "end" ? "End" : `Point ${i}`,
+        kind,
+        number: i,
+        legDistanceM: i === 0 ? null : legs[i - 1],
+        legPending: i > 0 && pending.has(plannerState.segments[i - 1]),
+      }
+    })
+  }, [plannerState])
+
   const allCandidates = useMemo(() => {
     if (clickAddedCandidates.length === 0) return findResult?.candidates ?? EMPTY_CANDIDATES
     const foundIds = new Set((findResult?.candidates ?? []).map((c) => c.osm_id))
@@ -1230,6 +1273,8 @@ export default function App() {
                     onSelectAnchor: setSelectedAnchorIndex,
                     onClearSelection: () => setSelectedAnchorIndex(null),
                     onDeleteAnchor: handleRemoveAnchor,
+                    hoveredAnchor: hoveredAnchorIndex,
+                    onHoverAnchor: setHoveredAnchorIndex,
                   }
                 : undefined
             }
@@ -1255,6 +1300,11 @@ export default function App() {
                 canRedo={plannerFuture.length > 0}
                 onUndo={() => stepPlannerHistory("undo")}
                 onRedo={() => stepPlannerHistory("redo")}
+                points={plannerPoints}
+                onReorderPoint={handleReorderAnchor}
+                onDeletePoint={handleRemoveAnchor}
+                hoveredPoint={hoveredAnchorIndex}
+                onHoverPoint={setHoveredAnchorIndex}
                 onRemove={handleRemoveRoute}
                 distanceM={distanceM}
                 elevationGainM={elevationGainM}
