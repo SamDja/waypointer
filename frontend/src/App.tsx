@@ -22,13 +22,14 @@ import {
   parseRouteCoordsFromGpx,
   parseRouteElevationsFromGpx,
 } from "@/lib/gpx"
-import { routingProfileForStyle } from "@/lib/mapStyles"
+import { routingOptionSpecsForStyle, routingProfileForStyle, type RoutingOptions } from "@/lib/mapStyles"
 import {
   appendAnchor,
   commonPrefixLength,
   emptyPlannerState,
   endpointNeighbourKind,
   insertAnchorAt,
+  isLegRouted,
   legKey,
   moveAnchor,
   offRouteItems,
@@ -44,11 +45,13 @@ import {
   reorderAnchors,
   returnLeg,
   setRouteShape,
+  setRoutingOptions,
   trackPositions,
   trackedAfterExtend,
   trackedAfterTrim,
   trimEnd,
   trimStart,
+  unroutedLegs,
   withLeg,
   type PlannerState,
   type RouteShape,
@@ -59,11 +62,13 @@ import {
   loadAvgSpeedKmh,
   loadMapStyleKey,
   loadOffRouteThresholdM,
+  loadRoutingOptions,
   loadPoiSearchConfig,
   loadSettings,
   saveAvgSpeedKmh,
   saveMapStyleKey,
   saveOffRouteThresholdM,
+  saveRoutingOptions,
   savePoiSearchConfig,
   saveSettings,
   type DeviceSettings,
@@ -123,7 +128,7 @@ interface PlannerHistoryEntry {
 /** Whether a loop's return leg is still waiting for its routed geometry. */
 function returnLegPending(state: PlannerState): boolean {
   const returning = returnLeg(state)
-  return returning !== null && state.legs[legKey(returning.from, returning.to, state.profile)] === undefined
+  return returning !== null && !isLegRouted(state, returning)
 }
 
 function sleep(ms: number): Promise<void> {
@@ -173,6 +178,13 @@ export default function App() {
   const [wahooTokens, setWahooTokens] = useState<WahooTokens | null>(() => loadWahooTokens())
   const [avgSpeedKmh, setAvgSpeedKmh] = useState<number>(() => loadAvgSpeedKmh())
   const [mapStyleKey, setMapStyleKey] = useState<string>(() => loadMapStyleKey())
+  // The visitor's saved BRouter options for the current style - what a new
+  // planning session starts with. While planning, the planner state's own
+  // options are what the route (and PlannerPanel) reflect, so an undo that
+  // restores older options shows them without overwriting this preference.
+  const [routingOptions, setRoutingOptionsPreference] = useState<RoutingOptions>(() =>
+    loadRoutingOptions(loadMapStyleKey())
+  )
 
   // -- Route planner ------------------------------------------------------
   // Non-null exactly while the planner is active. The planner is the source
@@ -280,19 +292,23 @@ export default function App() {
     if (!plannerState) return
 
     for (const segment of pendingLegs(plannerState)) {
-      const key = legKey(segment.from, segment.to, plannerState.profile)
+      const key = legKey(segment.from, segment.to, plannerState.profile, plannerState.options)
       if (inFlightLegs.current.has(key)) continue
       inFlightLegs.current.add(key)
 
-      routeLeg(segment.from, segment.to, plannerState.profile)
+      const routedWith = { profile: plannerState.profile, options: plannerState.options }
+      routeLeg(segment.from, segment.to, routedWith.profile, routedWith.options)
         .then((response) => {
           setPlannerState((prev) => {
             if (!prev) return prev
-            return withLeg(prev, segment.from, segment.to, {
-              coords: response.coords,
-              elevations: response.elevations,
-              distanceM: response.distance_m,
-            })
+            return withLeg(
+              prev,
+              segment.from,
+              segment.to,
+              { coords: response.coords, elevations: response.elevations, distanceM: response.distance_m },
+              // The options may have changed while this was in flight.
+              routedWith
+            )
           })
         })
         .catch((err) => {
@@ -549,8 +565,8 @@ export default function App() {
       file?.name ?? `Planned route ${new Date().toISOString().slice(0, 10)}.gpx`
     const state =
       coords.length > 0
-        ? plannerStateFromImport(coords, previewElevations, routingProfile)
-        : emptyPlannerState(routingProfile)
+        ? plannerStateFromImport(coords, previewElevations, routingProfile, routingOptions)
+        : emptyPlannerState(routingProfile, routingOptions)
     setPlannerMode(coords.length > 0 ? "edit" : "new")
     resetPlannerSession()
     setPlannerState(state)
@@ -655,6 +671,19 @@ export default function App() {
       return
     }
     applyEditWithFullReprojection(result.state)
+  }
+
+  /**
+   * Changing a routing option re-routes every routed leg (imported geometry
+   * is untouched): the options are part of each leg's cache key, so the legs
+   * go pending and are fetched again - one undoable edit, with each leg drawn
+   * with its previous geometry until the new one arrives. Also remembered
+   * as the preference for this style.
+   */
+  function handleRoutingOptionsChange(options: RoutingOptions) {
+    setRoutingOptionsPreference(options)
+    saveRoutingOptions(mapStyleKey, options)
+    if (plannerState) applyEditWithFullReprojection(setRoutingOptions(plannerState, options))
   }
 
   function handleSetRouteShape(shape: RouteShape) {
@@ -900,6 +929,8 @@ export default function App() {
   function handleMapStyleChange(key: string) {
     setMapStyleKey(key)
     saveMapStyleKey(key)
+    // Each style is an activity with its own profile and options.
+    setRoutingOptionsPreference(loadRoutingOptions(key))
   }
 
   function handleDeviceSettingsChange(settings: DeviceSettings) {
@@ -1347,7 +1378,7 @@ export default function App() {
               plannerState
                 ? {
                     anchors: plannerAnchors(plannerState),
-                    pendingLegs: pendingLegs(plannerState).map((leg) => [leg.from, leg.to]),
+                    pendingLegs: unroutedLegs(plannerState).map((leg) => [leg.from, leg.to]),
                     onAppendAnchor: handleAppendAnchor,
                     onMoveAnchor: handleMoveAnchor,
                     onMoveEndpoint: handleMoveEndpoint,
@@ -1386,6 +1417,9 @@ export default function App() {
                 onRedo={() => stepPlannerHistory("redo")}
                 points={plannerPoints}
                 returnLeg={plannerReturn}
+                routingOptionSpecs={routingOptionSpecsForStyle(mapStyleKey)}
+                routingOptions={plannerState.options}
+                onRoutingOptionsChange={handleRoutingOptionsChange}
                 shape={plannerState.shape}
                 canChangeShape={plannerPoints.length >= 2}
                 onShapeChange={handleSetRouteShape}

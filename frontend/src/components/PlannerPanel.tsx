@@ -4,8 +4,10 @@ import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { PlannerPointList, type PlannerPoint, type PlannerReturnLeg } from "@/components/PlannerPointList"
 import { RemoveRouteButton } from "@/components/RemoveRouteButton"
+import { RoutingOptionsSection } from "@/components/RoutingOptionsSection"
 import { RouteStats } from "@/components/RouteStats"
 import { ArrowLeftRight, ArrowRight, Check, Redo2, RefreshCw, Undo2, type LucideIcon } from "lucide-react"
+import type { RoutingOptionSpec, RoutingOptions } from "@/lib/mapStyles"
 import type { RouteShape } from "@/lib/routePlanner"
 
 // The platform's modifier key, for shortcut hints.
@@ -24,6 +26,9 @@ export interface PlannerPanelProps {
   onRedo: () => void
   points: PlannerPoint[]
   returnLeg: PlannerReturnLeg | null
+  routingOptionSpecs: RoutingOptionSpec[]
+  routingOptions: RoutingOptions
+  onRoutingOptionsChange: (options: RoutingOptions) => void
   shape: RouteShape
   // A loop or out-and-back needs a point to come back from.
   canChangeShape: boolean
@@ -59,6 +64,9 @@ export function PlannerPanel({
   onRedo,
   points,
   returnLeg,
+  routingOptionSpecs,
+  routingOptions,
+  onRoutingOptionsChange,
   shape,
   canChangeShape,
   onShapeChange,
@@ -101,6 +109,12 @@ export function PlannerPanel({
           Drag any point to move it. Drag the start or end marker to move that end — or drop it back onto the
           route to trim there. Click a point to delete it.
         </p>
+
+        <RoutingOptionsSection
+          specs={routingOptionSpecs}
+          values={routingOptions}
+          onChange={onRoutingOptionsChange}
+        />
 
         <Tabs value={shape} onValueChange={(value) => onShapeChange(value as RouteShape)}>
           <TabsList className="w-full">

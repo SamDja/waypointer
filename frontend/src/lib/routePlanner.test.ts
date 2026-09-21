@@ -16,6 +16,8 @@ import {
   plannerReturnDistanceM,
   returnLeg,
   setRouteShape,
+  setRoutingOptions,
+  unroutedLegs,
   pendingLegs,
   offRouteItems,
   plannerAnchors,
@@ -666,5 +668,47 @@ describe("route shape", () => {
     // Still an out-and-back of the shorter outbound route.
     const { coords } = plannerGeometry(result.state)
     expect(coords[coords.length - 1]).toEqual([45.0, 7.0])
+  })
+})
+
+describe("routing options", () => {
+  const a: LatLon = [45.0, 7.0]
+  const b: LatLon = [45.0, 7.01]
+  const routed = { coords: [a, [45.001, 7.005] as LatLon, b], elevations: [1, 2, 3], distanceM: 900 }
+
+  function drawnAB(options = { consider_traffic: 1 }): PlannerState {
+    let state = emptyPlannerState(PROFILE, options)
+    state = (appendAnchor(state, a) as { state: PlannerState }).state
+    state = (appendAnchor(state, b) as { state: PlannerState }).state
+    return withLeg(state, a, b, routed)
+  }
+
+  it("re-routes routed legs when options change, leaving imported geometry alone", () => {
+    const drawn = setRoutingOptions(drawnAB(), { consider_traffic: 0.3 })
+    expect(pendingLegs(drawn)).toHaveLength(1)
+
+    const imported = setRoutingOptions(importedState(), { consider_traffic: 0.3 })
+    expect(pendingLegs(imported)).toHaveLength(0)
+  })
+
+  it("draws a re-routing leg with its previous geometry rather than a straight line", () => {
+    const state = setRoutingOptions(drawnAB(), { consider_traffic: 0.3 })
+    expect(plannerGeometry(state).coords).toEqual(routed.coords)
+    // Pending (it will be fetched) but not unrouted (nothing to dash).
+    expect(pendingLegs(state)).toHaveLength(1)
+    expect(unroutedLegs(state)).toHaveLength(0)
+  })
+
+  it("switching back reuses the geometry already fetched", () => {
+    const state = setRoutingOptions(setRoutingOptions(drawnAB(), { consider_traffic: 0.3 }), { consider_traffic: 1 })
+    expect(pendingLegs(state)).toHaveLength(0)
+  })
+
+  it("stores a late response under the options it was requested with", () => {
+    const requestedWith = { profile: PROFILE, options: { consider_traffic: 0.3 } }
+    // The visitor switched back before the 0.3 response arrived.
+    const state = withLeg(drawnAB(), a, b, { ...routed, distanceM: 1234 }, requestedWith)
+    expect(plannerLegDistancesM(state)[0]).toBeCloseTo(plannerLegDistancesM(drawnAB())[0], 6)
+    expect(pendingLegs(setRoutingOptions(state, { consider_traffic: 0.3 }))).toHaveLength(0)
   })
 })

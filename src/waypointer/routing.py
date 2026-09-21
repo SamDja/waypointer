@@ -13,6 +13,7 @@ env-overridable URL, a shared TTLCache, a descriptive User-Agent, and one
 error type the caller maps to a 502.
 """
 
+import math
 import os
 from dataclasses import dataclass
 
@@ -44,6 +45,82 @@ ALLOWED_PROFILES = frozenset({"fastbike-lowtraffic"})
 DEFAULT_PROFILE = "fastbike-lowtraffic"
 
 
+@dataclass(frozen=True)
+class BoolOption:
+    default: bool
+
+
+@dataclass(frozen=True)
+class ChoiceOption:
+    # A fixed set of numeric values rather than a free number, so a visitor
+    # can't push BRouter's cost model somewhere nobody tested.
+    choices: tuple[float, ...]
+    default: float
+
+
+RoutingOption = BoolOption | ChoiceOption
+
+# The BRouter profile parameters each profile lets a visitor change, passed
+# as `profile:<name>=<value>` query parameters (BRouter's per-request
+# override of a profile's `assign ... # %name%` variables). An allowlist for
+# the same reason as ALLOWED_PROFILES; everything not listed stays at the
+# profile's own default. Mirrors the routingOptions in
+# frontend/src/lib/mapStyles.ts, labels and all, by hand.
+#
+# Two defaults deliberately differ from fastbike-lowtraffic's own: ferries
+# and steps are off, since a road bike planner shouldn't route onto either
+# unless asked.
+PROFILE_OPTIONS: dict[str, dict[str, RoutingOption]] = {
+    "fastbike-lowtraffic": {
+        # How much longer a detour is worth to avoid busy roads: BRouter
+        # scales its traffic penalty by this (1 = the profile's full
+        # avoidance, 0 = ignore traffic).
+        "consider_traffic": ChoiceOption(choices=(0.0, 0.1, 0.3, 0.5, 1.0), default=1.0),
+        "allow_ferries": BoolOption(default=False),
+        "allow_steps": BoolOption(default=False),
+        "consider_noise": BoolOption(default=False),
+        "consider_river": BoolOption(default=False),
+        "consider_forest": BoolOption(default=False),
+        "consider_town": BoolOption(default=False),
+    },
+}
+
+
+def resolve_options(profile: str, options: dict[str, object] | None) -> dict[str, str]:
+    """Validates caller-supplied options for `profile` and returns every
+    option that profile exposes, encoded for BRouter.
+
+    Missing options take their default, and every exposed option is always
+    returned - so the cache key and the request are unambiguous, and a change
+    of defaults on the public instance can't quietly change a route. Raises
+    ValueError for an unknown option or a value of the wrong kind.
+
+    BRouter's encoding: booleans must be `1`/`0` (it answers `true` with an
+    empty body), numbers are plain decimals.
+    """
+    allowed = PROFILE_OPTIONS.get(profile, {})
+    supplied = options or {}
+    unknown = sorted(set(supplied) - set(allowed))
+    if unknown:
+        raise ValueError(f"Unknown routing option(s) for {profile}: {', '.join(unknown)}")
+
+    encoded: dict[str, str] = {}
+    for name, spec in sorted(allowed.items()):
+        value = supplied.get(name, spec.default)
+        if isinstance(spec, BoolOption):
+            if not isinstance(value, bool):
+                raise ValueError(f"Routing option {name} must be true or false.")
+            encoded[name] = "1" if value else "0"
+        else:
+            # bool is an int subclass - reject it explicitly for a number.
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ValueError(f"Routing option {name} must be a number.")
+            if not any(math.isclose(value, choice) for choice in spec.choices):
+                raise ValueError(f"Routing option {name} must be one of {list(spec.choices)}.")
+            encoded[name] = f"{value:g}"
+    return encoded
+
+
 class RoutingError(RuntimeError):
     """Raised when the routing request fails or returns malformed data."""
 
@@ -62,23 +139,32 @@ class RoutedLeg:
 _cache: TTLCache[RoutedLeg] = TTLCache(CACHE_TTL_S)
 
 
-def _cache_key(start: LatLon, end: LatLon, profile: str, url: str) -> str:
-    return f"{url}\n{profile}\n{start[0]},{start[1]}\n{end[0]},{end[1]}"
+def _cache_key(
+    start: LatLon, end: LatLon, profile: str, options: dict[str, str], url: str
+) -> str:
+    encoded = ",".join(f"{name}={value}" for name, value in sorted(options.items()))
+    return f"{url}\n{profile}\n{encoded}\n{start[0]},{start[1]}\n{end[0]},{end[1]}"
 
 
-def build_routing_params(start: LatLon, end: LatLon, profile: str) -> dict[str, str]:
+def build_routing_params(
+    start: LatLon, end: LatLon, profile: str, options: dict[str, str] | None = None
+) -> dict[str, str]:
     """Builds BRouter's query parameters for a two-point leg.
 
     Note the coordinate order flip: BRouter's `lonlats` is lon,lat pairs,
     while every coordinate elsewhere in this codebase is (lat, lon).
+    `options` are already-encoded values from resolve_options().
     """
-    return {
+    params = {
         "lonlats": f"{start[1]},{start[0]}|{end[1]},{end[0]}",
         "profile": profile,
         # BRouter can return several alternatives; 0 is the primary one.
         "alternativeidx": "0",
         "format": "geojson",
     }
+    for name, value in (options or {}).items():
+        params[f"profile:{name}"] = value
+    return params
 
 
 def _parse_leg(payload: dict) -> RoutedLeg:
@@ -118,20 +204,24 @@ def route_leg(
     start: LatLon,
     end: LatLon,
     profile: str = DEFAULT_PROFILE,
+    options: dict[str, object] | None = None,
     session: requests.Session | None = None,
     url: str = ROUTING_URL,
     use_cache: bool = True,
 ) -> RoutedLeg:
     """Routes a single leg between two points and returns its polyline.
 
-    Cached on the exact (start, end, profile) triple: dragging a planner
-    anchor away and back, or undoing an edit, is then free rather than
-    another hit on a shared public instance.
+    Cached on the exact (start, end, profile, options): dragging a planner
+    anchor away and back, undoing an edit, or flipping an option back is then
+    free rather than another hit on a shared public instance. Raises
+    ValueError for an unknown profile or invalid options (see
+    resolve_options).
     """
     if profile not in ALLOWED_PROFILES:
         raise ValueError(f"Unknown routing profile: {profile}")
+    encoded = resolve_options(profile, options)
 
-    key = _cache_key(start, end, profile, url)
+    key = _cache_key(start, end, profile, encoded, url)
     if use_cache:
         cached = _cache.get(key)
         if cached is not None:
@@ -141,7 +231,7 @@ def route_leg(
     try:
         response = http.get(
             url,
-            params=build_routing_params(start, end, profile),
+            params=build_routing_params(start, end, profile, encoded),
             headers={"User-Agent": USER_AGENT},
             timeout=30,
         )

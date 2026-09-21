@@ -756,14 +756,17 @@ def test_wahoo_import_route_rejects_lookalike_host():
     assert response.status_code == 400
 
 
-def _route_leg_form(profile: str = "fastbike-lowtraffic") -> dict:
-    return {
+def _route_leg_form(profile: str = "fastbike-lowtraffic", options: str | None = None) -> dict:
+    form = {
         "start_lat": 47.376899,
         "start_lon": 8.541699,
         "end_lat": 47.38,
         "end_lon": 8.55,
         "profile": profile,
     }
+    if options is not None:
+        form["options"] = options
+    return form
 
 
 @responses.activate
@@ -781,6 +784,28 @@ def test_route_leg_returns_polyline_with_elevations(brouter_response_json):
 
 def test_route_leg_rejects_unknown_profile():
     response = client.post("/api/route-leg", data=_route_leg_form(profile="car-fast"))
+    assert response.status_code == 400
+
+
+@responses.activate
+def test_route_leg_forwards_routing_options(brouter_response_json):
+    responses.add(responses.GET, ROUTING_URL, json=brouter_response_json, status=200)
+    response = client.post(
+        "/api/route-leg", data=_route_leg_form(options='{"allow_steps": true, "consider_traffic": 0.5}')
+    )
+
+    assert response.status_code == 200
+    sent = responses.calls[0].request.url
+    assert "profile%3Aallow_steps=1" in sent
+    assert "profile%3Aconsider_traffic=0.5" in sent
+
+
+@pytest.mark.parametrize(
+    "options",
+    ["not json", "[1, 2]", '{"allow_motorways": true}', '{"allow_steps": "yes"}'],
+)
+def test_route_leg_rejects_invalid_options(options):
+    response = client.post("/api/route-leg", data=_route_leg_form(options=options))
     assert response.status_code == 400
 
 

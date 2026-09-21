@@ -58,6 +58,11 @@ export interface RoutedLeg {
 // inserts before the return, delete, reorder, ...) works unchanged.
 export type RouteShape = "one-way" | "loop" | "out-and-back"
 
+// BRouter profile options (see lib/mapStyles.ts's RoutingOptionSpec) - part
+// of every leg's cache key, since the same two points route differently
+// under different options.
+export type RoutingOptions = Record<string, boolean | number>
+
 export interface PlannerState {
   // The route's first point, held separately from the segments because the
   // first click has nothing to route to yet. Representing it as a
@@ -71,6 +76,7 @@ export interface PlannerState {
   // edit, reuses geometry already fetched instead of re-requesting it.
   legs: Record<string, RoutedLeg>
   profile: string
+  options: RoutingOptions
   shape: RouteShape
 }
 
@@ -83,20 +89,22 @@ export const MAX_ROUTE_DISTANCE_M = 300_000
 // to detect closing a loop by clicking back on the start anchor.
 export const ANCHOR_SNAP_M = 25
 
-export function emptyPlannerState(profile: string): PlannerState {
-  return { start: null, segments: [], legs: {}, profile, shape: "one-way" }
+export function emptyPlannerState(profile: string, options: RoutingOptions = {}): PlannerState {
+  return { start: null, segments: [], legs: {}, profile, options, shape: "one-way" }
 }
 
 export function plannerStateFromImport(
   coords: LatLon[],
   elevations: (number | null)[],
-  profile: string
+  profile: string,
+  options: RoutingOptions = {}
 ): PlannerState {
   return {
     start: coords.length > 0 ? coords[0] : null,
     segments: coords.length > 0 ? [{ kind: "fixed", coords, elevations }] : [],
     legs: {},
     profile,
+    options,
     shape: "one-way",
   }
 }
@@ -107,20 +115,77 @@ function coordKey([lat, lon]: LatLon): string {
   return `${lat.toFixed(5)},${lon.toFixed(5)}`
 }
 
-export function legKey(from: LatLon, to: LatLon, profile: string): string {
-  return `${profile}|${coordKey(from)}|${coordKey(to)}`
+function optionsKey(options: RoutingOptions): string {
+  return Object.keys(options)
+    .sort()
+    .map((key) => `${key}=${options[key]}`)
+    .join(",")
+}
+
+export function legKey(from: LatLon, to: LatLon, profile: string, options: RoutingOptions = {}): string {
+  return `${profile}|${optionsKey(options)}|${coordKey(from)}|${coordKey(to)}`
+}
+
+function stateLegKey(state: PlannerState, from: LatLon, to: LatLon): string {
+  return legKey(from, to, state.profile, state.options)
+}
+
+/** Whether this routed segment has its geometry for the state's current profile and options. */
+export function isLegRouted(state: PlannerState, segment: RoutedSegment): boolean {
+  return state.legs[stateLegKey(state, segment.from, segment.to)] !== undefined
+}
+
+/**
+ * Geometry this leg had under other options, if any was fetched - drawn
+ * while it's re-routed under the new ones, so changing an option doesn't
+ * collapse the route into straight lines (and the off-route check doesn't
+ * measure against them) for the few seconds the requests take.
+ */
+function previouslyRoutedLeg(state: PlannerState, from: LatLon, to: LatLon): RoutedLeg | undefined {
+  const prefix = `${state.profile}|`
+  const suffix = `|${coordKey(from)}|${coordKey(to)}`
+  for (const [key, leg] of Object.entries(state.legs)) {
+    if (key.startsWith(prefix) && key.endsWith(suffix)) return leg
+  }
+  return undefined
+}
+
+/**
+ * The routed legs with no geometry at all yet - not even from other
+ * options - so they're drawn as straight placeholders (RouteMap dashes
+ * them). A subset of pendingLegs.
+ */
+export function unroutedLegs(state: PlannerState): RoutedSegment[] {
+  return pendingLegs(state).filter((s) => previouslyRoutedLeg(state, s.from, s.to) === undefined)
+}
+
+/** Switches the routing options; every routed leg is then re-fetched under them. */
+export function setRoutingOptions(state: PlannerState, options: RoutingOptions): PlannerState {
+  return { ...state, options }
 }
 
 /** The routed legs in `state` that have no geometry fetched yet. */
 export function pendingLegs(state: PlannerState): RoutedSegment[] {
   const returning = returnLeg(state)
   return [...state.segments, ...(returning ? [returning] : [])].filter(
-    (s): s is RoutedSegment => s.kind === "routed" && state.legs[legKey(s.from, s.to, state.profile)] === undefined
+    (s): s is RoutedSegment => s.kind === "routed" && !isLegRouted(state, s)
   )
 }
 
-export function withLeg(state: PlannerState, from: LatLon, to: LatLon, leg: RoutedLeg): PlannerState {
-  return { ...state, legs: { ...state.legs, [legKey(from, to, state.profile)]: leg } }
+/**
+ * Stores fetched leg geometry. Pass `routedWith` - the profile and options
+ * the request was made with - whenever the state may have changed while it
+ * was in flight: a late response must land under its own options' key, not
+ * whichever options are current by then.
+ */
+export function withLeg(
+  state: PlannerState,
+  from: LatLon,
+  to: LatLon,
+  leg: RoutedLeg,
+  routedWith: { profile: string; options: RoutingOptions } = state
+): PlannerState {
+  return { ...state, legs: { ...state.legs, [legKey(from, to, routedWith.profile, routedWith.options)]: leg } }
 }
 
 function segmentGeometry(
@@ -128,10 +193,11 @@ function segmentGeometry(
   state: PlannerState
 ): { coords: LatLon[]; elevations: (number | null)[] } {
   if (segment.kind === "fixed") return { coords: segment.coords, elevations: segment.elevations }
-  const leg = state.legs[legKey(segment.from, segment.to, state.profile)]
+  const leg =
+    state.legs[stateLegKey(state, segment.from, segment.to)] ?? previouslyRoutedLeg(state, segment.from, segment.to)
   // A leg whose geometry hasn't arrived yet contributes a straight line, so
   // the route stays continuous while the request is in flight. RouteMap
-  // renders these dashed (see pendingLegs above).
+  // renders these dashed (see unroutedLegs).
   if (!leg) return { coords: [segment.from, segment.to], elevations: [null, null] }
   return { coords: leg.coords, elevations: leg.elevations }
 }

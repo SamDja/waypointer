@@ -1,4 +1,10 @@
-import { DEFAULT_MAP_STYLE_KEY, MAP_STYLES } from "@/lib/mapStyles"
+import {
+  DEFAULT_MAP_STYLE_KEY,
+  MAP_STYLES,
+  defaultRoutingOptions,
+  routingOptionSpecsForStyle,
+  type RoutingOptions,
+} from "@/lib/mapStyles"
 import { DEFAULT_VISIBLE_POI_TYPES, POI_TYPES } from "@/lib/poiTypes"
 
 const SETTINGS_KEY = "waypointer.settings"
@@ -6,6 +12,9 @@ const POI_SEARCH_KEY = "waypointer.poiSearch"
 const AVG_SPEED_KEY = "waypointer.avgSpeedKmh"
 const MAP_STYLE_KEY = "waypointer.mapStyle"
 const OFF_ROUTE_THRESHOLD_KEY = "waypointer.offRouteThreshold"
+// Plan-time: the route planner's BRouter options, keyed by map style (each
+// style is an activity with its own profile and options).
+const ROUTING_OPTIONS_KEY = "waypointer.routingOptions"
 
 export interface DeviceSettings {
   device: string
@@ -138,4 +147,37 @@ export function loadOffRouteThresholdM(): number {
 
 export function saveOffRouteThresholdM(thresholdM: number): void {
   localStorage.setItem(OFF_ROUTE_THRESHOLD_KEY, String(thresholdM))
+}
+
+/**
+ * The saved routing options for a style, on top of its defaults. Anything
+ * saved that the style no longer offers, or of the wrong kind or value, is
+ * dropped - the backend would reject it.
+ */
+export function loadRoutingOptions(styleKey: string): RoutingOptions {
+  const specs = routingOptionSpecsForStyle(styleKey)
+  const options = defaultRoutingOptions(specs)
+  try {
+    const raw = localStorage.getItem(ROUTING_OPTIONS_KEY)
+    const saved = raw ? (JSON.parse(raw) as Record<string, Record<string, unknown>>)[styleKey] : undefined
+    if (!saved || typeof saved !== "object") return options
+    for (const spec of specs) {
+      const value = saved[spec.key]
+      if (spec.kind === "toggle" && typeof value === "boolean") options[spec.key] = value
+      if (spec.kind === "choice" && spec.choices.some((c) => c.value === value)) options[spec.key] = value as number
+    }
+  } catch {
+    // Unreadable or blocked storage: fall back to the defaults.
+  }
+  return options
+}
+
+export function saveRoutingOptions(styleKey: string, options: RoutingOptions): void {
+  try {
+    const raw = localStorage.getItem(ROUTING_OPTIONS_KEY)
+    const all = raw ? (JSON.parse(raw) as Record<string, RoutingOptions>) : {}
+    localStorage.setItem(ROUTING_OPTIONS_KEY, JSON.stringify({ ...all, [styleKey]: options }))
+  } catch {
+    // Not remembering a preference is harmless.
+  }
 }

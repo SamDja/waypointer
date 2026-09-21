@@ -19,6 +19,23 @@ export interface RoadLegendCategory {
   properties?: Record<string, unknown>
 }
 
+export type RoutingOptionValue = boolean | number
+export type RoutingOptions = Record<string, RoutingOptionValue>
+
+// One BRouter profile parameter a visitor can change while planning. Must
+// match routing.py's PROFILE_OPTIONS for the style's routingProfile - same
+// key, kind, default and (for a choice) values; the backend rejects anything
+// else with a 400.
+export type RoutingOptionSpec =
+  | { key: string; kind: "toggle"; label: string; default: boolean }
+  | {
+      key: string
+      kind: "choice"
+      label: string
+      default: number
+      choices: { value: number; label: string }[]
+    }
+
 export interface MapStyleConfig {
   key: string
   label: string
@@ -33,6 +50,8 @@ export interface MapStyleConfig {
   // along in the same entry. Must be a member of routing.py's
   // ALLOWED_PROFILES, which the backend checks before forwarding.
   routingProfile: string
+  // The routingProfile's options shown in the planner panel.
+  routingOptions: RoutingOptionSpec[]
   // Road-color legend rows for this style. Omit to hide the "Road colors"
   // section for this style entirely - there's no separate boolean flag to
   // keep in sync with this.
@@ -46,6 +65,32 @@ export interface MapStyleConfig {
 // bad surface, see road-cycling.json's UNSUITABLE_* case expressions) via
 // road_secondary_tertiary specifically, since its case branches on color
 // (motorway's only branches on opacity, which reads poorly as a tiny swatch).
+// fastbike-lowtraffic's options (see routing.py's PROFILE_OPTIONS for what
+// each does to BRouter's cost model). Ferries and steps default off - unlike
+// the profile's own defaults - since a road bike planner shouldn't route onto
+// either unless asked.
+const FASTBIKE_LOWTRAFFIC_OPTIONS: RoutingOptionSpec[] = [
+  {
+    key: "consider_traffic",
+    kind: "choice",
+    label: "How much longer are you willing to ride to avoid traffic?",
+    default: 1,
+    choices: [
+      { value: 0, label: "Not at all" },
+      { value: 0.1, label: "A little" },
+      { value: 0.3, label: "Somewhat" },
+      { value: 0.5, label: "Quite a bit" },
+      { value: 1, label: "As much as it takes" },
+    ],
+  },
+  { key: "allow_ferries", kind: "toggle", label: "Allow ferries", default: false },
+  { key: "allow_steps", kind: "toggle", label: "Allow steps", default: false },
+  { key: "consider_noise", kind: "toggle", label: "Prefer quiet roads", default: false },
+  { key: "consider_river", kind: "toggle", label: "Prefer rivers & lakes", default: false },
+  { key: "consider_forest", kind: "toggle", label: "Prefer forests & parks", default: false },
+  { key: "consider_town", kind: "toggle", label: "Bypass towns", default: false },
+]
+
 const ROAD_CYCLING_LEGEND: RoadLegendCategory[] = [
   { label: "Motorway", fillLayerId: "road_motorway", casingLayerId: "road_motorway_casing" },
   { label: "Primary / trunk road", fillLayerId: "road_trunk_primary", casingLayerId: "road_trunk_primary_casing" },
@@ -95,6 +140,7 @@ export const MAP_STYLES: MapStyleConfig[] = [
     // penalizing high-traffic roads - the same judgement road-cycling.json
     // makes visually by dimming unpaved and bike-prohibited ways.
     routingProfile: "fastbike-lowtraffic",
+    routingOptions: FASTBIKE_LOWTRAFFIC_OPTIONS,
     roadLegend: ROAD_CYCLING_LEGEND,
   },
   // { key: "gravel", label: "Gravel", styleUrl: "https://tiles.openfreemap.org/styles/bright" },
@@ -108,4 +154,12 @@ export const DEFAULT_MAP_STYLE_KEY = "road_cycling"
 
 export function routingProfileForStyle(key: string): string {
   return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).routingProfile
+}
+
+export function routingOptionSpecsForStyle(key: string): RoutingOptionSpec[] {
+  return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).routingOptions
+}
+
+export function defaultRoutingOptions(specs: RoutingOptionSpec[]): RoutingOptions {
+  return Object.fromEntries(specs.map((spec) => [spec.key, spec.default]))
 }

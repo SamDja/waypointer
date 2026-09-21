@@ -12,6 +12,7 @@ import base64
 import os
 import re
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import requests
@@ -93,6 +94,9 @@ _poi_config_adapter = TypeAdapter(list[PoiSearchConfig])
 _discarded_indices_adapter = TypeAdapter(list[int])
 _search_range_adapter = TypeAdapter(SearchRange)
 _existing_waypoint_types_adapter = TypeAdapter(dict[str, str])
+# Values are left as parsed (Any): routing.resolve_options checks each one's
+# kind itself, where a bool | float adapter could quietly coerce 1 to True.
+_routing_options_adapter = TypeAdapter(dict[str, Any])
 
 
 async def _read_gpx_upload(gpx_file: UploadFile) -> tuple[GPX, list[LatLon]]:
@@ -582,6 +586,9 @@ async def route_leg_endpoint(
     end_lat: float = Form(...),
     end_lon: float = Form(...),
     profile: str = Form(...),
+    # JSON object of BRouter profile options (see routing.PROFILE_OPTIONS);
+    # anything omitted takes its default.
+    options: str = Form("{}"),
 ) -> RouteLegResponse:
     """Road-snaps one leg between two route-planner anchors.
 
@@ -591,10 +598,17 @@ async def route_leg_endpoint(
     shared public BRouter instance from this server's one IP.
     """
     try:
+        parsed_options = _routing_options_adapter.validate_json(options)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid routing options: {exc}") from exc
+
+    try:
         # route_leg's requests.get blocks; offload it so a slow routing
         # response doesn't stall the event loop, as find_pois does for
         # query_pois_near_route.
-        leg = await asyncio.to_thread(route_leg, (start_lat, start_lon), (end_lat, end_lon), profile)
+        leg = await asyncio.to_thread(
+            route_leg, (start_lat, start_lon), (end_lat, end_lon), profile, parsed_options
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except RoutingError as exc:

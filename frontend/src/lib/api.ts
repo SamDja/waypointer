@@ -46,6 +46,7 @@ export async function routeLeg(
   start: [number, number],
   end: [number, number],
   profile: string,
+  options: Record<string, boolean | number>,
 ): Promise<RouteLegResponse> {
   const formData = new FormData()
   formData.append("start_lat", String(start[0]))
@@ -53,6 +54,7 @@ export async function routeLeg(
   formData.append("end_lat", String(end[0]))
   formData.append("end_lon", String(end[1]))
   formData.append("profile", profile)
+  formData.append("options", JSON.stringify(options))
 
   const response = await fetch("/api/route-leg", { method: "POST", body: formData })
   if (!response.ok) {
