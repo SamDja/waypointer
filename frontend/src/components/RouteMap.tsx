@@ -39,14 +39,8 @@ import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
 import { buildAddablePoiFilter, resolvePoiTypeFromFeatureProps } from "@/lib/basemapPoiMapping"
 import { cumulativeDistancesM, pointAtDistanceM, projectOntoPolylineM } from "@/lib/geometry"
 import { setHoveredDistanceM, useHoveredDistanceM } from "@/lib/hoverDistance"
-import {
-  CircleMarkerIcon,
-  PLANNER_POINT_COLOR,
-  ROUTE_END_COLOR,
-  ROUTE_START_COLOR,
-  START_FINISH_BACKGROUND,
-  UserLocationMarker,
-} from "@/lib/mapIcons"
+import { PLANNER_POINT_COLOR, ROUTE_END_COLOR, ROUTE_START_COLOR, START_FINISH_BACKGROUND } from "@/lib/mapColors"
+import { CircleMarkerIcon, UserLocationMarker } from "@/lib/mapIcons"
 import { MAP_STYLES } from "@/lib/mapStyles"
 import {
   formatExactDateTime,
@@ -56,6 +50,7 @@ import {
 } from "@/lib/osmTagLabels"
 import { POI_TYPES } from "@/lib/poiTypes"
 import { toast } from "@/lib/toast"
+import { tailwindHex } from "@/lib/color"
 import type { MapInsets } from "@/lib/useMapInsets"
 import type { RouteShape } from "@/lib/routePlanner"
 import type { Candidate, CandidateDetails, ExistingWaypoint, HoveredPoi, PoiLookupResult } from "@/types/candidate"
@@ -179,10 +174,9 @@ const ARROW_ICON_URL = "/arrow-big.png"
 
 // Tailwind v4's palette (tailwindcss/colors) returns oklch() strings, which
 // MapLibre's style validator rejects for paint properties (unlike plain
-// CSS, which resolves oklch() natively). Hardcoded sRGB hex equivalent of
-// colors.violet[600] - Tailwind v4's palette values were chosen to match
-// v3's sRGB colors when converted to OKLCH, so this is the same color.
-const ROUTE_LINE_COLOR = "#7c3aed"
+// CSS, which resolves oklch() natively) - so the violet-600 step is converted
+// to sRGB hex (the same colour the browser paints for it).
+const ROUTE_LINE_COLOR = tailwindHex(colors.violet[600])
 
 // Whether a screen point lands on the route's (invisible, wider) hit layer.
 // The layer only exists while planning a route that already has geometry,

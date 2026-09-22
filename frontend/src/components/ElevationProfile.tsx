@@ -4,6 +4,7 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/component
 import { cumulativeDistancesM } from "@/lib/geometry"
 import { setHoveredDistanceM, useHoveredDistanceM } from "@/lib/hoverDistance"
 import type { SurfaceCategory, SurfaceRun } from "@/lib/routePlanner"
+import colors from "tailwindcss/colors"
 
 export interface ElevationProfileProps {
   coords: [number, number][]
@@ -37,40 +38,40 @@ const MIN_CHUNK_M = 100
 const MIN_CHUNK_PX = 4
 
 // Gradient bands: Wahoo's climb bands and colour order (green 0-4%, yellow
-// 4-8%, orange 8-12%, red 12-20%, brown 20%+), with the colours adjusted so
-// each band stays distinguishable on the light card (validated with the
-// dataviz skill's palette checker - Wahoo's own yellow is ~1.5:1 on it).
-// Descents mirror the same bands as one blue, darker the steeper, so -5% and
-// -15% read as "steeper" at a glance. Each band is [from %, colour].
+// 4-8%, orange 8-12%, red 12-20%, brown 20%+) in Tailwind steps spread in
+// lightness so adjacent bands stay distinguishable, colour-blind readers
+// included (validated with the dataviz skill's palette checker). Descents
+// mirror the same bands as one blue, darker the steeper (a validated ordinal
+// ramp), so -5% and -15% read as "steeper" at a glance. [from %, colour].
 const CLIMB_BANDS: [number, string][] = [
-  [0, "#35A04E"],
-  [4, "#D9B300"],
-  [8, "#E0600C"],
-  [12, "#B01C28"],
-  [20, "#5E2A0A"],
+  [0, colors.green[600]],
+  [4, colors.yellow[500]],
+  [8, colors.orange[600]],
+  [12, colors.red[800]],
+  [20, colors.amber[950]],
 ]
 const DESCENT_BANDS: [number, string][] = [
-  [0, "#6FA6DC"],
-  [4, "#4586CC"],
-  [8, "#2A66AE"],
-  [12, "#1B4A8A"],
-  [20, "#0F3063"],
+  [0, colors.blue[400]],
+  [4, colors.blue[500]],
+  [8, colors.blue[600]],
+  [12, colors.blue[800]],
+  [20, colors.blue[950]],
 ]
 
 // Within +-FLAT_GRADE_PCT the road has basically no grade, so it's drawn in a
 // neutral grey rather than flickering between the gentlest climb and descent
 // bands. Mid grey, not black: it should recede, not compete with the bands.
 const FLAT_GRADE_PCT = 2
-const FLAT_COLOR = "#9A968E"
+const FLAT_COLOR = colors.neutral[400]
 
-// Surface: an ordinal violet ramp, lighter to darker as the ride gets rougher
-// (validated as an ordinal ramp), so it can't be mistaken for any gradient
-// band above it; unknown is a receding neutral.
+// Surface: Tailwind palette steps that look like the surfaces themselves -
+// asphalt grey, the warm light grey of sett, gravel/dirt brown - so the band
+// reads without the legend; unknown is a pale neutral that recedes.
 const SURFACES: { category: SurfaceCategory; label: string; color: string }[] = [
-  { category: "paved", label: "Paved", color: "#A99DE8" },
-  { category: "cobbles", label: "Cobbles", color: "#7462D4" },
-  { category: "unpaved", label: "Unpaved", color: "#3F2F99" },
-  { category: "unknown", label: "Unknown", color: "#D2CEC5" },
+  { category: "paved", label: "Paved", color: colors.zinc[600] },
+  { category: "cobbles", label: "Cobbles", color: colors.stone[500] },
+  { category: "unpaved", label: "Unpaved", color: colors.amber[700] },
+  { category: "unknown", label: "Unknown", color: colors.zinc[200] },
 ]
 const SURFACE_BY_CATEGORY = Object.fromEntries(SURFACES.map((s) => [s.category, s])) as Record<
   SurfaceCategory,

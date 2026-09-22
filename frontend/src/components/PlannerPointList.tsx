@@ -17,7 +17,7 @@ import {
 import { CSS } from "@dnd-kit/utilities"
 import { ArrowRight, Flag, GripVertical, Play, Square, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { PLANNER_POINT_COLOR, ROUTE_END_COLOR, ROUTE_START_COLOR, START_FINISH_BACKGROUND } from "@/lib/mapIcons"
+import { PLANNER_POINT_COLOR, ROUTE_END_COLOR, ROUTE_START_COLOR, START_FINISH_BACKGROUND } from "@/lib/mapColors"
 import { cn } from "@/lib/utils"
 
 export interface PlannerPoint {

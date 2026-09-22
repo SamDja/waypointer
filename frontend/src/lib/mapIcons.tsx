@@ -1,15 +1,6 @@
 import type { LucideIcon } from "lucide-react"
 import colors from "tailwindcss/colors"
 
-export const ROUTE_START_COLOR = "oklch(53.2% 0.157 131.589)"
-export const ROUTE_END_COLOR = "oklch(50.5% 0.213 27.518)"
-// The route planner's numbered points (and its pending-leg line) - shared
-// with PlannerPointList so the list's badges match the map.
-export const PLANNER_POINT_COLOR = "#7c3aed"
-// A route that finishes where it starts (a loop or out-and-back) marks that
-// spot with one marker in both colours, split diagonally.
-export const START_FINISH_BACKGROUND = `linear-gradient(135deg, ${ROUTE_START_COLOR} 50%, ${ROUTE_END_COLOR} 50%)`
-
 interface CircleMarkerIconProps {
   icon: LucideIcon
   bgColor: string

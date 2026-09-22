@@ -3,7 +3,8 @@ import { Info, MapPin, Play, Square } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { CircleMarkerIcon, ROUTE_END_COLOR, ROUTE_START_COLOR } from "@/lib/mapIcons"
+import { ROUTE_END_COLOR, ROUTE_START_COLOR } from "@/lib/mapColors"
+import { CircleMarkerIcon } from "@/lib/mapIcons"
 import { evaluateLineLayerPaint, loadStyleJson } from "@/lib/mapStyleLegend"
 import { MAP_STYLES } from "@/lib/mapStyles"
 import { POI_TYPES } from "@/lib/poiTypes"
@@ -11,12 +12,10 @@ import type { Candidate, ExistingWaypoint } from "@/types/candidate"
 import type { StyleSpecification } from "@maplibre/maplibre-gl-style-spec"
 import colors from "tailwindcss/colors"
 
-// Same hardcoded sRGB hex as RouteMap.tsx's ROUTE_LINE_COLOR - Tailwind v4's
-// oklch() colors.violet[600] isn't usable in MapLibre paint properties, but
-// here it's just a plain CSS swatch, so this could reference the Tailwind
-// token directly; kept as the literal to stay visually identical to the
-// actual route line without importing across files for one constant.
-const ROUTE_LINE_COLOR = "#7c3aed"
+// The route line's colour (RouteMap.tsx's ROUTE_LINE_COLOR). This is a plain
+// CSS swatch, so it can take the Tailwind step directly - RouteMap needs the
+// hex form only because MapLibre paint properties reject oklch().
+const ROUTE_LINE_COLOR = colors.violet[600]
 
 // Zoom at which road-color rows evaluate a layer's line-width - chosen so
 // every category in ROAD_CYCLING_LEGEND has a non-degenerate width (e.g.
