@@ -1396,7 +1396,7 @@ export function RouteMap({
   const center = hasRoute ? routeCoords[0] : DEFAULT_CENTER
   const zoom = hasRoute ? 13 : DEFAULT_ZOOM
   const isHovering = hoveredPoi !== null
-  const styleUrl = MAP_STYLES.find((s) => s.key === mapStyleKey)?.styleUrl ?? MAP_STYLES[0].styleUrl
+  const mapStyle = (MAP_STYLES.find((s) => s.key === mapStyleKey) ?? MAP_STYLES[0]).style
   // Click-added candidates are excluded from FitBounds's input - including
   // one from its lookup popup shouldn't re-fit/re-zoom the map, since the
   // visitor just clicked that exact spot and already has it in view.
@@ -1466,7 +1466,7 @@ export function RouteMap({
         <Map
           ref={mapRef}
           initialViewState={{ longitude: center[1], latitude: center[0], zoom }}
-          mapStyle={styleUrl}
+          mapStyle={mapStyle}
           // isolation: every marker and popup is a descendant of this
           // element and carries its own z-index (up to 1500, see the
           // constants above and index.css) - without a stacking context of

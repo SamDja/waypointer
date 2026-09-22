@@ -1,4 +1,9 @@
+import type { StyleSpecification } from "@maplibre/maplibre-gl-style-spec"
 import { Bike, type LucideIcon } from "lucide-react"
+
+import { composeStyle } from "./mapStyle/compose"
+import { houseStyle } from "./mapStyle/houseStyle"
+import { roadCyclingStyle } from "./mapStyle/roadCycling"
 
 export interface RoadLegendCategory {
   label: string
@@ -42,7 +47,11 @@ export interface MapStyleConfig {
   // Shown next to the label in MapStyleSelect - one per activity, since
   // this registry doubles as the activity list.
   icon: LucideIcon
-  styleUrl: string
+  // The finished MapLibre style, composed from the vendored base plus the
+  // house and activity patches (see lib/mapStyle/compose.ts). Built once at
+  // module load and handed straight to both the map and the legend, so the
+  // legend can't read a different style than the one being drawn.
+  style: StyleSpecification
   // BRouter profile the route planner routes with while this style is
   // active. Deliberately lives here rather than behind its own selector:
   // this registry is already an activity list (see the commented-out gravel/
@@ -153,33 +162,20 @@ const ROAD_CYCLING_LEGEND: RoadLegendCategory[] = [
   },
 ]
 
-// OpenFreeMap (openfreemap.org) only ships 4 generic base styles today -
-// no activity-specific cartography exists yet, apart from road_cycling
-// below. The rest are provisional placeholders; swap styleUrl for a
-// self-hosted, custom-authored style per activity later without touching
-// any callers of this file.
-//
-// road_cycling's style.json (public/map-styles/road-cycling.json) is
-// OpenFreeMap's "liberty" style, forked and hand-edited: it still points at
-// OpenFreeMap's hosted vector tiles/sprite/glyphs (self-hosting those is a
-// much bigger undertaking than editing the style layer definitions), but
-// adds "cycleway"/"tunnel_cycleway"/"bridge_cycleway" layers that highlight
-// class=path/subclass=cycleway ways (OpenMapTiles' tagging for OSM
-// highway=cycleway) in blue at every zoom - road cyclists need to spot
-// dedicated cycling infrastructure while still planning a route, not just
-// once they've zoomed to street level. Any other road/path (motorway down
-// to footpath/track) that's bike-prohibited (bicycle=no, or access=no
-// without a permissive bicycle override) or tagged with a non-paved surface
-// (gravel/dirt/unpaved/etc.) renders grayed-out/dimmed instead of its
-// normal class color, so unsuitable roads visually recede.
+// Each activity's cartography is composed from one vendored copy of
+// OpenFreeMap's "liberty" style plus two patches - see
+// lib/mapStyle/compose.ts for the whole arrangement, houseStyle.ts for the
+// shared look, and each activity's own module for its judgement. Tiles,
+// sprite and glyphs still come from OpenFreeMap; only the layer definitions
+// are ours.
 export const MAP_STYLES: MapStyleConfig[] = [
   {
     key: "road_cycling",
     label: "Road Cycling",
     icon: Bike,
-    styleUrl: "/map-styles/road-cycling.json",
+    style: composeStyle(...houseStyle, ...roadCyclingStyle),
     // Road-bike oriented (prefers paved, avoids tracks) - the same judgement
-    // road-cycling.json makes visually by dimming unpaved and bike-prohibited
+    // roadCycling.ts makes visually by dimming unpaved and bike-prohibited
     // ways. fastbike rather than fastbike-lowtraffic: the two profiles are
     // identical except for consider_traffic's default, and that's an option
     // the visitor sets anyway (see FASTBIKE_OPTIONS).
@@ -187,11 +183,6 @@ export const MAP_STYLES: MapStyleConfig[] = [
     routingOptions: FASTBIKE_OPTIONS,
     roadLegend: ROAD_CYCLING_LEGEND,
   },
-  // { key: "gravel", label: "Gravel", styleUrl: "https://tiles.openfreemap.org/styles/bright" },
-  // { key: "mtb", label: "Mountain Biking", styleUrl: "https://tiles.openfreemap.org/styles/bright" },
-  // { key: "cycloturism", label: "Cycloturism", styleUrl: "https://tiles.openfreemap.org/styles/liberty" },
-  // { key: "hiking", label: "Hiking", styleUrl: "https://tiles.openfreemap.org/styles/positron" },
-  // { key: "multiday", label: "Multi-day (Pedestrian)", styleUrl: "https://tiles.openfreemap.org/styles/positron" },
 ]
 
 export const DEFAULT_MAP_STYLE_KEY = "road_cycling"
