@@ -6,7 +6,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ROUTE_END_COLOR, ROUTE_START_COLOR } from "@/lib/mapColors"
 import { CircleMarkerIcon } from "@/lib/mapIcons"
 import { evaluateLineLayerPaint } from "@/lib/mapStyleLegend"
-import { MAP_STYLES } from "@/lib/mapStyles"
+import { MAP_STYLES, mapStyleFor } from "@/lib/mapStyles"
 import { POI_TYPES } from "@/lib/poiTypes"
 import type { Candidate, ExistingWaypoint } from "@/types/candidate"
 import colors from "tailwindcss/colors"
@@ -78,7 +78,7 @@ function LegendRow({ swatch, label }: { swatch: ReactNode; label: string }) {
 
 export function MapLegend({ candidates, existingWaypoints, mapStyleKey }: MapLegendProps) {
   const styleConfig = MAP_STYLES.find((s) => s.key === mapStyleKey)
-  const styleJson = styleConfig?.style ?? null
+  const styleJson = styleConfig ? mapStyleFor(styleConfig.key) : null
 
   const poiTypeKeys = new Set<string>()
   for (const candidate of candidates) poiTypeKeys.add(candidate.poi_type)

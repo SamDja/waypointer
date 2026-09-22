@@ -41,7 +41,7 @@ import { cumulativeDistancesM, pointAtDistanceM, projectOntoPolylineM } from "@/
 import { setHoveredDistanceM, useHoveredDistanceM } from "@/lib/hoverDistance"
 import { PLANNER_POINT_COLOR, ROUTE_END_COLOR, ROUTE_START_COLOR, START_FINISH_BACKGROUND } from "@/lib/mapColors"
 import { CircleMarkerIcon, SearchedPlacePin, UserLocationMarker } from "@/lib/mapIcons"
-import { MAP_STYLES } from "@/lib/mapStyles"
+import { mapStyleFor } from "@/lib/mapStyles"
 import {
   formatExactDateTime,
   formatRelativeDate,
@@ -1396,7 +1396,7 @@ export function RouteMap({
   const center = hasRoute ? routeCoords[0] : DEFAULT_CENTER
   const zoom = hasRoute ? 13 : DEFAULT_ZOOM
   const isHovering = hoveredPoi !== null
-  const mapStyle = (MAP_STYLES.find((s) => s.key === mapStyleKey) ?? MAP_STYLES[0]).style
+  const mapStyle = mapStyleFor(mapStyleKey)
   // Click-added candidates are excluded from FitBounds's input - including
   // one from its lookup popup shouldn't re-fit/re-zoom the map, since the
   // visitor just clicked that exact spot and already has it in view.

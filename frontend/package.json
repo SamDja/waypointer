@@ -22,6 +22,7 @@
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
     "lucide-react": "^1.24.0",
+    "maplibre-contour": "^0.1.1",
     "maplibre-gl": "^6.10.0",
     "radix-ui": "^1.6.2",
     "react": "^19.2.7",

@@ -1,7 +1,8 @@
 import type { StyleSpecification } from "@maplibre/maplibre-gl-style-spec"
-import { Bike, type LucideIcon } from "lucide-react"
+import { Bike, Footprints, type LucideIcon } from "lucide-react"
 
 import { composeStyle } from "./mapStyle/compose"
+import { hikingStyle } from "./mapStyle/hiking"
 import { houseStyle } from "./mapStyle/houseStyle"
 import { roadCyclingStyle } from "./mapStyle/roadCycling"
 
@@ -47,11 +48,16 @@ export interface MapStyleConfig {
   // Shown next to the label in MapStyleSelect - one per activity, since
   // this registry doubles as the activity list.
   icon: LucideIcon
-  // The finished MapLibre style, composed from the vendored base plus the
-  // house and activity patches (see lib/mapStyle/compose.ts). Built once at
-  // module load and handed straight to both the map and the legend, so the
-  // legend can't read a different style than the one being drawn.
-  style: StyleSpecification
+  // Composes this activity's finished MapLibre style from the vendored base
+  // plus the house and activity patches (see lib/mapStyle/compose.ts).
+  //
+  // A function rather than a value because composing is not free and not
+  // always pure: hiking's contour source starts a web worker and registers
+  // a maplibre protocol the first time it's built. Read it through
+  // mapStyleFor(), which memoises, so only the activity a visitor actually
+  // selects pays for itself - and so the map and the legend are handed the
+  // identical object and can't drift.
+  buildStyle: () => StyleSpecification
   // BRouter profile the route planner routes with while this style is
   // active. Deliberately lives here rather than behind its own selector:
   // this registry is already an activity list (see the commented-out gravel/
@@ -95,14 +101,12 @@ const FASTBIKE_OPTIONS: RoutingOptionSpec[] = [
 
 // hiking-mountain's options (see routing.py's PROFILE_OPTIONS for what each
 // does to BRouter's cost model, and why this profile rather than the
-// hiking-beta the public instance also serves). Exported ahead of the
-// MAP_STYLES entry that will use it: the routing layer lands before the
-// hiking style file exists, so nothing references this yet.
+// hiking-beta the public instance also serves).
 //
 // Unlike FASTBIKE_OPTIONS, steps and ferries keep the profile's own
 // defaults - both are ordinary parts of a walking route rather than things
 // to route around.
-export const HIKING_OPTIONS: RoutingOptionSpec[] = [
+const HIKING_OPTIONS: RoutingOptionSpec[] = [
   {
     key: "SAC_scale_preferred",
     kind: "choice",
@@ -162,6 +166,42 @@ const ROAD_CYCLING_LEGEND: RoadLegendCategory[] = [
   },
 ]
 
+// Hand-mirrors hiking.ts's layer ids, the same way ROAD_CYCLING_LEGEND
+// mirrors roadCycling.ts's. The last row shows the style's "you can't walk
+// here" look via a minor road with foot=no, rather than a motorway - a
+// motorway is always dim in this style, so it wouldn't show that the dimming
+// is a judgement about access.
+const HIKING_LEGEND: RoadLegendCategory[] = [
+  // The style tells the five path subclasses apart by dash pattern, which a
+  // swatch this size can't show (and the legend evaluator only reads colour,
+  // width and whether a line is dashed at all). So these rows show the
+  // distinction it *can* carry - what a way is surfaced with - and leave the
+  // dash vocabulary to the map itself.
+  { label: "Path or trail", fillLayerId: "road_path_pedestrian" },
+  { label: "Paved path or footway", fillLayerId: "road_path_pedestrian", properties: { surface: "paved" } },
+  { label: "Unpaved track", fillLayerId: "road_track", casingLayerId: "road_track_casing" },
+  {
+    label: "Paved track",
+    fillLayerId: "road_track",
+    casingLayerId: "road_track_casing",
+    properties: { surface: "paved" },
+  },
+  { label: "Contour line", fillLayerId: "contour_line", properties: { level: 1 } },
+  { label: "Minor / residential street", fillLayerId: "road_minor", casingLayerId: "road_minor_casing" },
+  {
+    label: "Secondary / tertiary road",
+    fillLayerId: "road_secondary_tertiary",
+    casingLayerId: "road_secondary_tertiary_casing",
+  },
+  { label: "Motorway / trunk road", fillLayerId: "road_trunk_primary", casingLayerId: "road_trunk_primary_casing" },
+  {
+    label: "Closed to walkers",
+    fillLayerId: "road_minor",
+    casingLayerId: "road_minor_casing",
+    properties: { foot: "no" },
+  },
+]
+
 // Each activity's cartography is composed from one vendored copy of
 // OpenFreeMap's "liberty" style plus two patches - see
 // lib/mapStyle/compose.ts for the whole arrangement, houseStyle.ts for the
@@ -173,7 +213,7 @@ export const MAP_STYLES: MapStyleConfig[] = [
     key: "road_cycling",
     label: "Road Cycling",
     icon: Bike,
-    style: composeStyle(...houseStyle, ...roadCyclingStyle),
+    buildStyle: () => composeStyle(...houseStyle, ...roadCyclingStyle()),
     // Road-bike oriented (prefers paved, avoids tracks) - the same judgement
     // roadCycling.ts makes visually by dimming unpaved and bike-prohibited
     // ways. fastbike rather than fastbike-lowtraffic: the two profiles are
@@ -183,9 +223,35 @@ export const MAP_STYLES: MapStyleConfig[] = [
     routingOptions: FASTBIKE_OPTIONS,
     roadLegend: ROAD_CYCLING_LEGEND,
   },
+  {
+    key: "hiking",
+    label: "Hiking",
+    icon: Footprints,
+    buildStyle: () => composeStyle(...houseStyle, ...hikingStyle()),
+    // See routing.py's PROFILE_OPTIONS for why hiking-mountain rather than
+    // the hiking-beta the public BRouter instance also serves.
+    routingProfile: "hiking-mountain",
+    routingOptions: HIKING_OPTIONS,
+    roadLegend: HIKING_LEGEND,
+  },
 ]
 
 export const DEFAULT_MAP_STYLE_KEY = "road_cycling"
+
+// Memoised so repeated renders reuse one style object - MapLibre diffs a
+// new style against the old one on every change, and two structurally
+// identical but distinct objects would make it redo the whole thing.
+const composedStyles = new Map<string, StyleSpecification>()
+
+export function mapStyleFor(key: string): StyleSpecification {
+  const config = MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]
+  let style = composedStyles.get(config.key)
+  if (!style) {
+    style = config.buildStyle()
+    composedStyles.set(config.key, style)
+  }
+  return style
+}
 
 export function routingProfileForStyle(key: string): string {
   return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).routingProfile

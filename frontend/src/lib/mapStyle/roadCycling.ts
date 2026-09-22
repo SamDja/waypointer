@@ -164,7 +164,7 @@ const SURFACE_LEVEL: Expression = ["match", ["get", "brunnel"], ["bridge", "tunn
 const IS_TUNNEL: Expression = ["==", ["get", "brunnel"], "tunnel"]
 const IS_BRIDGE: Expression = ["==", ["get", "brunnel"], "bridge"]
 
-export const roadCyclingStyle: StylePatch[] = [
+export const roadCyclingStyle = (): StylePatch[] => [
   dimColorWhen(CONDITIONALLY_DIMMED, UNSUITABLE, dimColorFor),
   dimOpacityWhen(CONDITIONALLY_DIMMED, UNSUITABLE),
   dimColorWhen(TRACK_AWARE_DIMMED, UNSUITABLE_OR_TRACK, dimColorFor),

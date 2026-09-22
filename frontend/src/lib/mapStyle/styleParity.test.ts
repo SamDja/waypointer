@@ -24,7 +24,7 @@ import { roadCyclingStyle } from "./roadCycling"
  */
 
 const legacy = legacyRoadCycling as unknown as StyleSpecification
-const composed = composeStyle(...houseStyle, ...roadCyclingStyle)
+const composed = composeStyle(...houseStyle, ...roadCyclingStyle())
 
 // Tag combinations that exercise every branch of both styles' predicates:
 // permitted and forbidden access, paved and loose surfaces, tracks, and the

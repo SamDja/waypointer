@@ -158,6 +158,25 @@ export function dimOpacityWhen(
   )
 }
 
+/** Adds a source the base style doesn't have (contours, for hiking). */
+export function addSource(sourceId: string, source: unknown): StylePatch {
+  return (style) => {
+    if (style.sources[sourceId]) throw new Error(`Style patch adds a source that already exists: ${sourceId}`)
+    return { ...style, sources: { ...style.sources, [sourceId]: source as never } }
+  }
+}
+
+/** Inserts layers directly before `anchorId`. */
+export function insertLayersBefore(anchorId: string, ...added: LayerSpecification[]): StylePatch {
+  return (style) => {
+    const at = style.layers.findIndex((layer) => layer.id === anchorId)
+    if (at < 0) throw new Error(`Style patch inserts before unknown layer: ${anchorId}`)
+    const layers = [...style.layers]
+    layers.splice(at, 0, ...added)
+    return { ...style, layers }
+  }
+}
+
 export function removeLayer(layerId: string): StylePatch {
   return (style) => {
     const layers = style.layers.filter((layer) => layer.id !== layerId)
