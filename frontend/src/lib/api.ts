@@ -3,6 +3,7 @@ import type {
   FindPoisResponse,
   PoiLookupResult,
   PoiSearchConfig,
+  PlaceResult,
   RouteLegResponse,
   SearchRange,
 } from "@/types/candidate"
@@ -40,6 +41,27 @@ export async function findPois(
     throw new ApiError(await errorDetail(response, "Request failed."))
   }
   return (await response.json()) as FindPoisResponse
+}
+
+/**
+ * Places matching a typed name, biased towards `near` (the map's centre).
+ * Pass `signal` to cancel a search the visitor has already typed past.
+ */
+export async function searchPlaces(
+  query: string,
+  near: [number, number] | null,
+  signal?: AbortSignal,
+): Promise<PlaceResult[]> {
+  const params = new URLSearchParams({ q: query })
+  if (near) {
+    params.set("lat", String(near[0]))
+    params.set("lon", String(near[1]))
+  }
+  const response = await fetch(`/api/geocode?${params}`, { signal })
+  if (!response.ok) {
+    throw new ApiError(await errorDetail(response, "Place search failed."))
+  }
+  return (await response.json()) as PlaceResult[]
 }
 
 export async function routeLeg(

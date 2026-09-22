@@ -100,14 +100,26 @@ export interface RouteMapProps {
   // Bumped to fit the map to the route once, even while planning (when it
   // otherwise never refits) - e.g. after restoring a saved draft.
   fitRequest?: number
-  // Reported on load and after every zoom, for the route planner's spur
-  // tolerance (routePlanner.spurToleranceM), which depends on how zoomed in
-  // a point was placed.
-  onZoomChange?: (zoom: number) => void
+  // Reported on load and after every move: the zoom, for the route planner's
+  // spur tolerance (routePlanner.spurToleranceM, which depends on how zoomed
+  // in a point was placed), and the centre, to bias the place search towards
+  // where the visitor is looking.
+  onViewChange?: (view: { zoom: number; center: [number, number] }) => void
+  // Frames a place once per new `id` - fitted to its bbox if it's an area,
+  // flown to otherwise (the place search's pick).
+  focusRequest?: FocusRequest | null
   // How much of the map the floating header/sidebar cover. The map itself
   // stays full-page; only its own controls and fit-to-route framing move
   // clear of the covered area.
   insets?: MapInsets
+}
+
+export interface FocusRequest {
+  id: number
+  lat: number
+  lon: number
+  // [west, south, east, north]
+  bbox: [number, number, number, number] | null
 }
 
 export interface PlanningProps {
@@ -271,6 +283,31 @@ function DetachedAttribution({ hostRef }: { hostRef: RefObject<HTMLDivElement | 
  * a render after the request (a restored draft's geometry is synthesized by
  * an effect), so a request waits until there's a route to fit.
  */
+// How close to zoom in on a place that has no area (a village's point, a peak).
+const FOCUS_POINT_ZOOM = 14
+
+function FocusOnRequest({ request, padding }: { request: FocusRequest | null; padding: PaddingOptions }) {
+  const { current: map } = useMap()
+  const handledRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!map || !request || request.id === handledRef.current) return
+    handledRef.current = request.id
+    if (request.bbox) {
+      const [west, south, east, north] = request.bbox
+      map.fitBounds(
+        [
+          [west, south],
+          [east, north],
+        ],
+        { padding, duration: 800, maxZoom: FOCUS_POINT_ZOOM }
+      )
+    } else {
+      map.flyTo({ center: [request.lon, request.lat], zoom: FOCUS_POINT_ZOOM, padding, duration: 800 })
+    }
+  }, [map, request, padding])
+  return null
+}
+
 function FitOnRequest({
   request,
   routeCoords,
@@ -1214,8 +1251,9 @@ export function RouteMap({
   onDismissPendingLookup,
   planning,
   insets = NO_INSETS,
-  onZoomChange,
+  onViewChange,
   fitRequest = 0,
+  focusRequest = null,
 }: RouteMapProps) {
   const [openPopup, setOpenPopup] = useState<{ kind: "candidate" | "waypoint"; id: number } | null>(null)
   const [bearing, setBearing] = useState(0)
@@ -1327,8 +1365,13 @@ export function RouteMap({
           // its own, those would compete with the floating header/sidebar
           // and render on top of them.
           style={{ width: "100%", height: "100%", isolation: "isolate" }}
-          onLoad={(e) => onZoomChange?.(e.target.getZoom())}
-          onZoomEnd={(e) => onZoomChange?.(e.viewState.zoom)}
+          onLoad={(e) => {
+            const center = e.target.getCenter()
+            onViewChange?.({ zoom: e.target.getZoom(), center: [center.lat, center.lng] })
+          }}
+          onMoveEnd={(e) =>
+            onViewChange?.({ zoom: e.viewState.zoom, center: [e.viewState.latitude, e.viewState.longitude] })
+          }
           attributionControl={false}
           // Basemap POI icons stop being clickable while planning: a click
           // on the map there means "add a point", and a POI icon sitting
@@ -1679,6 +1722,7 @@ export function RouteMap({
           )}
           <DetachedAttribution hostRef={attributionHostRef} />
           <FitOnRequest request={fitRequest} routeCoords={routeCoords} padding={fitPadding} />
+          <FocusOnRequest request={focusRequest} padding={fitPadding} />
           <HoveredDistanceMarker routeCoords={routeCoords} />
           <FitBounds
             routeCoords={routeCoords}

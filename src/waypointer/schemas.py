@@ -125,6 +125,17 @@ class RouteLegResponse(BaseModel):
     cycleway_m: float = 0.0
 
 
+class PlaceResult(BaseModel):
+    # One /api/geocode match - see geocode.Place.
+    name: str
+    context: str
+    kind: str
+    lat: float
+    lon: float
+    # [west, south, east, north] for an area; None for a point.
+    bbox: tuple[float, float, float, float] | None
+
+
 class WahooRoutePayload(BaseModel):
     # Everything Wahoo's POST /v1/routes needs alongside the FIT file itself
     # - computed server-side since only the backend has the full-resolution,

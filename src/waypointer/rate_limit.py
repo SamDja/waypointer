@@ -37,6 +37,8 @@ from fastapi import HTTPException, Request, status
 REQUESTS_PER_WINDOW = 60
 LOOKUP_POI_REQUESTS_PER_WINDOW = 30
 ROUTING_REQUESTS_PER_WINDOW = 60
+# The map's search box is a debounced typeahead - a few requests per search.
+GEOCODE_REQUESTS_PER_WINDOW = 30
 
 WINDOW_S = 60.0
 
@@ -81,3 +83,4 @@ def make_rate_limit(bucket: str, requests_per_window: int, window_s: float = WIN
 rate_limit = make_rate_limit("find_pois", REQUESTS_PER_WINDOW)
 lookup_poi_rate_limit = make_rate_limit("lookup_poi", LOOKUP_POI_REQUESTS_PER_WINDOW)
 routing_rate_limit = make_rate_limit("routing", ROUTING_REQUESTS_PER_WINDOW)
+geocode_rate_limit = make_rate_limit("geocode", GEOCODE_REQUESTS_PER_WINDOW)

@@ -1,0 +1,91 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_type": "R",
+        "osm_id": 46663,
+        "osm_key": "place",
+        "osm_value": "city",
+        "type": "city",
+        "name": "Trento",
+        "county": "Provincia di Trento",
+        "state": "Trentino-Alto Adige/Südtirol",
+        "country": "Italia",
+        "countrycode": "IT",
+        "extra": {
+          "admin_level": "8"
+        },
+        "extent": [
+          11.0214591,
+          46.1521927,
+          11.1938775,
+          45.9757038
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          11.1257601,
+          46.0664228
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_type": "N",
+        "osm_id": 3134911289,
+        "osm_key": "place",
+        "osm_value": "hamlet",
+        "type": "district",
+        "name": "Trento",
+        "city": "Ficarolo",
+        "county": "Rovigo",
+        "state": "Veneto",
+        "country": "Italia",
+        "postcode": "45036",
+        "countrycode": "IT"
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          11.4673224,
+          44.9656976
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "osm_type": "R",
+        "osm_id": 3870471,
+        "osm_key": "place",
+        "osm_value": "town",
+        "type": "city",
+        "name": "Trento",
+        "state": "Agusan del Sur",
+        "country": "Philippines",
+        "postcode": "8505",
+        "countrycode": "PH",
+        "extra": {
+          "admin_level": "6"
+        },
+        "extent": [
+          126.00048,
+          8.292381,
+          126.2585307,
+          7.9378193
+        ]
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          126.0633157,
+          8.043508
+        ]
+      }
+    }
+  ]
+}

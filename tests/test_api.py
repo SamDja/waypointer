@@ -948,3 +948,28 @@ def test_rate_limit_buckets_are_independent(sample_route_bytes, brouter_response
 
     routing_response = client.post("/api/route-leg", data=_route_leg_form())
     assert routing_response.status_code == 200
+
+
+@responses.activate
+def test_geocode_returns_places(photon_json):
+    from waypointer.geocode import GEOCODE_URL
+
+    responses.add(responses.GET, GEOCODE_URL, json=photon_json, status=200)
+    response = client.get("/api/geocode", params={"q": "Trento", "lat": 46.07, "lon": 11.12})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data[0]["name"] == "Trento"
+    assert len(data[0]["bbox"]) == 4
+
+
+def test_geocode_rejects_a_too_short_query():
+    assert client.get("/api/geocode", params={"q": "ab"}).status_code == 400
+
+
+@responses.activate
+def test_geocode_maps_failure_to_502():
+    from waypointer.geocode import GEOCODE_URL
+
+    responses.add(responses.GET, GEOCODE_URL, body="busy", status=503)
+    assert client.get("/api/geocode", params={"q": "Trento"}).status_code == 502

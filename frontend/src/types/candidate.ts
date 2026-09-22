@@ -67,6 +67,17 @@ export interface SurfaceRunResponse {
   distance_m: number
 }
 
+// One /api/geocode match - mirrors schemas.py's PlaceResult.
+export interface PlaceResult {
+  name: string
+  context: string
+  kind: string
+  lat: number
+  lon: number
+  // [west, south, east, north] for an area; null for a point.
+  bbox: [number, number, number, number] | null
+}
+
 export interface RouteLegResponse {
   coords: [number, number][]
   elevations: (number | null)[]

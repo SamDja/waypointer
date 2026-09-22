@@ -1,12 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { CandidateChecklist } from "@/components/CandidateChecklist"
 import { FeedbackWidget } from "@/components/FeedbackWidget"
 import { FindPoisCard } from "@/components/FindPoisCard"
 import { ImportCard } from "@/components/ImportCard"
-import { RouteMap, type PendingPoiLookup } from "@/components/RouteMap"
+import { RouteMap, type FocusRequest, type PendingPoiLookup } from "@/components/RouteMap"
 import { SaveCard } from "@/components/SaveCard"
 import { StepCard } from "@/components/StepCard"
 import { PlannerPanel } from "@/components/PlannerPanel"
+import { PlaceSearch } from "@/components/PlaceSearch"
 import { ElevationProfile } from "@/components/ElevationProfile"
 import type { PlannerPoint } from "@/components/PlannerPointList"
 import { MapStyleSelect } from "@/components/MapStyleSelect"
@@ -89,6 +90,7 @@ import type {
   FailedPoiType,
   FindPoisResponse,
   HoveredPoi,
+  PlaceResult,
   PoiSearchConfig,
   SearchRange,
 } from "@/types/candidate"
@@ -262,6 +264,12 @@ export default function App() {
   // The map's current zoom, for the planner's spur tolerance. A ref, not
   // state: it's only read when a point is placed or moved.
   const mapZoomRef = useRef(14)
+  // The map's centre, to bias the place search towards where the visitor is
+  // looking. Also a ref: read only when a search runs.
+  const mapCenterRef = useRef<[number, number] | null>(null)
+  // The place search's pick, for RouteMap to frame.
+  const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null)
+  const getMapCenter = useCallback(() => mapCenterRef.current, [])
   // Leg keys with a request in flight, so a re-render mid-fetch doesn't fire
   // a duplicate request for the same leg.
   const inFlightLegs = useRef<Set<string>>(new Set())
@@ -862,6 +870,17 @@ export default function App() {
     // Strict mode mounts twice in development; don't leave a duplicate toast.
     return () => dismissToast(id)
   }, [])
+
+  /** The place search's pick: frame it on the map. */
+  function handlePlaceSelect(place: PlaceResult) {
+    setFocusRequest((prev) => ({ id: (prev?.id ?? 0) + 1, lat: place.lat, lon: place.lon, bbox: place.bbox }))
+  }
+
+  /** While planning, a searched place can be added straight to the route. */
+  function handlePlaceAddPoint(place: PlaceResult) {
+    handleAppendAnchor([place.lat, place.lon])
+    handlePlaceSelect(place)
+  }
 
   // Planner keyboard shortcuts. Handled through a ref so the window listener
   // is bound once per planning session yet always sees the current state.
@@ -1517,11 +1536,20 @@ export default function App() {
       />
       <header
         ref={headerRef}
-        className="pointer-events-none absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-2 px-4 pt-4 [&>*]:pointer-events-auto"
+        className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-wrap items-center justify-between gap-2 px-4 pt-4 [&>*]:pointer-events-auto"
       >
         <div className="flex h-11 items-center gap-1.5 rounded-xl bg-card px-3 shadow-lg ring-1 ring-foreground/10">
           <img src="favicon.svg" className="w-6" />
           <h1 className="text-lg font-semibold">Sulla Via</h1>
+        </div>
+        {/* Between the two pills on desktop; on a phone it wraps onto its own
+            full-width row, below them. */}
+        <div className="order-last w-full md:order-none md:w-96">
+          <PlaceSearch
+            getNear={getMapCenter}
+            onSelect={handlePlaceSelect}
+            onAddPoint={plannerState ? handlePlaceAddPoint : undefined}
+          />
         </div>
         <div className="flex h-11 items-center rounded-xl bg-card px-1 shadow-lg ring-1 ring-foreground/10">
           <WahooProfileMenu wahooTokens={wahooTokens} onWahooTokensChange={setWahooTokens} />
@@ -1549,9 +1577,11 @@ export default function App() {
             onDismissPendingLookup={() => setPendingLookup(null)}
             insets={mapInsets}
             fitRequest={fitRequest}
-            onZoomChange={(zoom) => {
-              mapZoomRef.current = zoom
+            onViewChange={(view) => {
+              mapZoomRef.current = view.zoom
+              mapCenterRef.current = view.center
             }}
+            focusRequest={focusRequest}
             planning={
               plannerState
                 ? {

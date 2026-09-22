@@ -47,7 +47,8 @@ from waypointer.gpx_io import (
 )
 from waypointer.poi_db import OsmNode, PoiDbError, query_poi_near_point, query_pois_near_route
 from waypointer.poi_types import DEFAULT_VISIBLE_POI_TYPES, POI_TYPES, clamp_distance_m
-from waypointer.rate_limit import lookup_poi_rate_limit, rate_limit, routing_rate_limit
+from waypointer.rate_limit import geocode_rate_limit, lookup_poi_rate_limit, rate_limit, routing_rate_limit
+from waypointer.geocode import GeocodeError, search_places
 from waypointer.routing import USER_AGENT, RoutingError, route_leg
 from waypointer.schemas import (
     Candidate,
@@ -55,6 +56,7 @@ from waypointer.schemas import (
     ExistingWaypoint,
     FailedPoiType,
     FindPoisResponse,
+    PlaceResult,
     PoiLookupResult,
     PoiSearchConfig,
     RouteLegResponse,
@@ -624,6 +626,37 @@ async def route_leg_endpoint(
         ],
         cycleway_m=leg.cycleway_m,
     )
+
+
+@app.get(
+    "/api/geocode",
+    response_model=list[PlaceResult],
+    dependencies=[Depends(geocode_rate_limit)],
+)
+async def geocode_endpoint(
+    q: str,
+    lat: float | None = None,
+    lon: float | None = None,
+) -> list[PlaceResult]:
+    """Places matching a typed name, for the map's search box, biased
+    towards lat/lon (the map's centre) when given.
+
+    A GET, unlike the other endpoints: it's a pure lookup with no upload.
+    Proxied for the same reasons as /api/route-leg - the provider stays
+    swappable (GEOCODE_URL), the cache is shared, and the rate limit protects
+    the public instance.
+    """
+    near = (lat, lon) if lat is not None and lon is not None else None
+    try:
+        places = await asyncio.to_thread(search_places, q, near)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except GeocodeError as exc:
+        raise HTTPException(status_code=502, detail=f"Place search failed: {exc}") from exc
+    return [
+        PlaceResult(name=p.name, context=p.context, kind=p.kind, lat=p.lat, lon=p.lon, bbox=p.bbox)
+        for p in places
+    ]
 
 
 # Catch-all mount for the built SPA - MUST be registered last. StaticFiles
