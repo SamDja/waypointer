@@ -140,10 +140,11 @@ export function SaveCard({
         discarded_waypoint_count: discardedWaypointIndices.length,
       })
     } catch (err) {
-      const message = err instanceof ApiError ? err.message : "Network error while contacting the server."
+      const message = err instanceof ApiError ? err.message : "Couldn't create the route file - please try again."
       updateToast(toastId, message, "error")
       track("route_save_failed", {
-        reason: err instanceof ApiError ? "api_error" : "network_error",
+        // An ApiError with no status never got a response (see lib/api.ts).
+        reason: err instanceof ApiError && err.status !== undefined ? "api_error" : "network_error",
         format: settings.device,
       })
     } finally {

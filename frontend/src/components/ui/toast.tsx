@@ -46,9 +46,12 @@ function ToastRoot({
       duration={Infinity}
       className={cn(
         "pointer-events-auto flex items-center gap-2 rounded-lg border bg-background p-4 shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-full data-[swipe=end]:animate-out",
-        variant === "destructive" && "border-destructive/40 bg-destructive/10 text-destructive",
+        // Opaque backgrounds: toasts float over the map, and a tinted,
+        // see-through one lets the basemap's labels show through the text.
+        variant === "destructive" &&
+          "border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200",
         variant === "success" &&
-          "border-green-600/40 bg-green-50 text-green-700 dark:bg-green-950/40 dark:text-green-400",
+          "border-green-600/40 bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400",
         className
       )}
       {...props}

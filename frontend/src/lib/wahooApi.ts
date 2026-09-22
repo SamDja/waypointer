@@ -3,12 +3,20 @@
 // api.wahooligan.com to work directly from the browser (Access-Control-
 // Allow-Origin: * on both /oauth/token and /v1/routes) - no backend relay
 // needed.
-import { ApiError } from "@/lib/api"
+import { request } from "@/lib/api"
 import { WAHOO_OAUTH_BASE } from "@/lib/wahooConfig"
 
 // Wahoo's workout_type_family_id taxonomy (confirmed via developer docs):
 // 0 = BIKING. This app only ever produces cycling routes.
 const WORKOUT_TYPE_FAMILY_ID_BIKING = 0
+
+// Every call here already went through getValidWahooAccessToken's refresh,
+// so a 401 means Wahoo no longer accepts this connection at all.
+const UNAUTHORIZED = "Wahoo didn't accept your connection - disconnect and reconnect Wahoo, then try again."
+
+function wahooMessages(failed: string) {
+  return { failed, unauthorized: UNAUTHORIZED, trustDetail: false }
+}
 
 export interface WahooRoutePayload {
   fitBase64: string
@@ -62,14 +70,15 @@ export async function pushRouteToWahoo(payload: WahooRoutePayload, accessToken: 
   formData.append("route[distance]", String(payload.distanceM))
   formData.append("route[ascent]", String(payload.ascentM))
 
-  const response = await fetch(`${WAHOO_OAUTH_BASE}/v1/routes`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}` },
-    body: formData,
-  })
-  if (!response.ok) {
-    throw new ApiError(`Wahoo rejected the route (${response.status}).`)
-  }
+  await request(
+    `${WAHOO_OAUTH_BASE}/v1/routes`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: formData,
+    },
+    wahooMessages("Wahoo couldn't save the route - please try again in a moment."),
+  )
 }
 
 // Wahoo caps unrevoked access tokens per app+user - disconnecting must
@@ -78,13 +87,14 @@ export async function pushRouteToWahoo(payload: WahooRoutePayload, accessToken: 
 // cap and every future token exchange starts failing with "Too many
 // unrevoked access tokens exist for this app and user."
 export async function revokeWahooAccess(accessToken: string): Promise<void> {
-  const response = await fetch(`${WAHOO_OAUTH_BASE}/v1/permissions`, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${accessToken}` },
-  })
-  if (!response.ok) {
-    throw new ApiError(`Failed to revoke Wahoo access (${response.status}).`)
-  }
+  await request(
+    `${WAHOO_OAUTH_BASE}/v1/permissions`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+    wahooMessages("Couldn't disconnect from Wahoo - please try again in a moment."),
+  )
 }
 
 interface RawWahooUser {
@@ -95,23 +105,25 @@ interface RawWahooUser {
 // Requires the "user_read" scope. Wahoo's /v1/user has no profile-picture
 // field at all (checked their docs) - only first/last name is available.
 export async function getWahooUser(accessToken: string): Promise<{ firstName: string; lastName: string }> {
-  const response = await fetch(`${WAHOO_OAUTH_BASE}/v1/user`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  })
-  if (!response.ok) {
-    throw new ApiError(`Failed to load Wahoo user (${response.status}).`)
-  }
+  const response = await request(
+    `${WAHOO_OAUTH_BASE}/v1/user`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+    wahooMessages("Couldn't load your Wahoo profile - please try again in a moment."),
+  )
   const data = (await response.json()) as RawWahooUser
   return { firstName: data.first, lastName: data.last }
 }
 
 export async function listWahooRoutes(accessToken: string): Promise<WahooRoute[]> {
-  const response = await fetch(`${WAHOO_OAUTH_BASE}/v1/routes`, {
-    headers: { Authorization: `Bearer ${accessToken}` },
-  })
-  if (!response.ok) {
-    throw new ApiError(`Failed to load Wahoo routes (${response.status}).`)
-  }
+  const response = await request(
+    `${WAHOO_OAUTH_BASE}/v1/routes`,
+    {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+    wahooMessages("Couldn't load your Wahoo routes - please try again in a moment."),
+  )
   const data = (await response.json()) as RawWahooRoute[]
   return data.map((r) => ({
     id: r.id,
@@ -126,13 +138,14 @@ export async function listWahooRoutes(accessToken: string): Promise<WahooRoute[]
 }
 
 export async function deleteWahooRoute(id: number, accessToken: string): Promise<void> {
-  const response = await fetch(`${WAHOO_OAUTH_BASE}/v1/routes/${id}`, {
-    method: "DELETE",
-    headers: { Authorization: `Bearer ${accessToken}` },
-  })
-  if (!response.ok) {
-    throw new ApiError(`Failed to delete the route (${response.status}).`)
-  }
+  await request(
+    `${WAHOO_OAUTH_BASE}/v1/routes/${id}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+    wahooMessages("Wahoo couldn't delete the route - please try again in a moment."),
+  )
 }
 
 // Wahoo's PUT /v1/routes/:id requires route[provider_updated_at],
@@ -148,12 +161,13 @@ export async function updateWahooRouteName(route: WahooRoute, name: string, acce
   formData.append("route[distance]", String(route.distanceM))
   formData.append("route[ascent]", String(route.ascentM))
 
-  const response = await fetch(`${WAHOO_OAUTH_BASE}/v1/routes/${route.id}`, {
-    method: "PUT",
-    headers: { Authorization: `Bearer ${accessToken}` },
-    body: formData,
-  })
-  if (!response.ok) {
-    throw new ApiError(`Failed to rename the route (${response.status}).`)
-  }
+  await request(
+    `${WAHOO_OAUTH_BASE}/v1/routes/${route.id}`,
+    {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${accessToken}` },
+      body: formData,
+    },
+    wahooMessages("Wahoo couldn't rename the route - please try again in a moment."),
+  )
 }

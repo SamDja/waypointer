@@ -48,8 +48,8 @@ from waypointer.gpx_io import (
 from waypointer.poi_db import OsmNode, PoiDbError, query_poi_near_point, query_pois_near_route
 from waypointer.poi_types import DEFAULT_VISIBLE_POI_TYPES, POI_TYPES, clamp_distance_m
 from waypointer.rate_limit import geocode_rate_limit, lookup_poi_rate_limit, rate_limit, routing_rate_limit
-from waypointer.geocode import GeocodeError, search_places
-from waypointer.routing import USER_AGENT, RoutingError, route_leg
+from waypointer.geocode import GeocodeError, GeocodeRateLimitedError, search_places
+from waypointer.routing import USER_AGENT, RoutingError, RoutingRateLimitedError, route_leg
 from waypointer.schemas import (
     Candidate,
     CandidateDetails,
@@ -79,6 +79,10 @@ SIMPLIFY_TOLERANCE_M = 8.0
 # ever fetches from Wahoo, so it restricts the caller-supplied URL to this
 # host suffix rather than fetching arbitrary URLs (SSRF guard).
 WAHOO_FILE_HOST_SUFFIX = ".wahooligan.com"
+# How long to tell the browser to back off when a shared upstream (BRouter,
+# Photon) throttles us with a 429 - they send no Retry-After of their own.
+# 30s follows the cool-down the OSM wiki recommends for its public services.
+UPSTREAM_RETRY_AFTER_S = 30
 
 app = FastAPI(title="Sulla Via")
 
@@ -107,12 +111,15 @@ async def _read_gpx_upload(gpx_file: UploadFile) -> tuple[GPX, list[LatLon]]:
     try:
         gpx = parse_gpx(content)
     except GPXException as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid GPX file: {exc}") from exc
+        raise HTTPException(
+            status_code=400,
+            detail="This file couldn't be read as a GPX route - check it's a valid .gpx file.",
+        ) from exc
 
     coords = route_coordinates(gpx)
     if not coords:
         raise HTTPException(
-            status_code=400, detail="No track or route points found in the GPX file."
+            status_code=400, detail="This GPX file has no track or route to follow."
         )
     return gpx, coords
 
@@ -518,9 +525,14 @@ def wahoo_import_route(file_url: str = Form(...)) -> Response:
     try:
         gpx_bytes = fit_route_to_gpx_bytes(response.content)
     except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"Could not read the Wahoo route: {exc}") from exc
+        # fit_read's only ValueError: course points but no track.
+        raise HTTPException(
+            status_code=400, detail="This Wahoo route has no track to follow, so it can't be imported."
+        ) from exc
     except Exception as exc:  # noqa: BLE001 - fit-tool raises bare exceptions on malformed input
-        raise HTTPException(status_code=400, detail=f"Invalid Wahoo route file: {exc}") from exc
+        raise HTTPException(
+            status_code=400, detail="This Wahoo route's file couldn't be read, so it can't be imported."
+        ) from exc
 
     return Response(
         content=gpx_bytes,
@@ -614,6 +626,12 @@ async def route_leg_endpoint(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RoutingRateLimitedError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="The routing service is busy - please wait a moment and try again.",
+            headers={"Retry-After": str(UPSTREAM_RETRY_AFTER_S)},
+        ) from exc
     except RoutingError as exc:
         raise HTTPException(status_code=502, detail=f"Failed to plan that leg: {exc}") from exc
 
@@ -651,6 +669,12 @@ async def geocode_endpoint(
         places = await asyncio.to_thread(search_places, q, near)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except GeocodeRateLimitedError as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="Place search is busy - please wait a moment and try again.",
+            headers={"Retry-After": str(UPSTREAM_RETRY_AFTER_S)},
+        ) from exc
     except GeocodeError as exc:
         raise HTTPException(status_code=502, detail=f"Place search failed: {exc}") from exc
     return [

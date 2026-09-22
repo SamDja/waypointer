@@ -58,12 +58,19 @@ export function connectWahoo(): Promise<WahooTokens> {
       const storedRaw = localStorage.getItem(PENDING_KEY)
       const stored = storedRaw ? (JSON.parse(storedRaw) as PendingAuth) : null
       if (!stored || data.state !== stored.state) {
-        settleReject(new Error("Wahoo connection failed (state mismatch)."))
+        // A stale or foreign callback - not something the visitor can act
+        // on beyond trying again.
+        settleReject(new Error("Couldn't connect to Wahoo - please try again."))
         return
       }
       if (data.error || !data.code) {
         settleReject(
-          new Error(data.error ? `Wahoo authorization was denied: ${data.error}` : "Wahoo authorization failed."),
+          new Error(
+            // OAuth's access_denied is the visitor declining on Wahoo's page.
+            data.error === "access_denied"
+              ? "Wahoo connection cancelled - Sulla Via wasn't given access."
+              : "Wahoo didn't authorize the connection - please try again.",
+          ),
         )
         return
       }
