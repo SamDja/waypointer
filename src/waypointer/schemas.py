@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -105,6 +107,11 @@ class FindPoisResponse(BaseModel):
     candidate_details: dict[int, CandidateDetails] = {}
 
 
+class SurfaceRunResponse(BaseModel):
+    category: Literal["paved", "cobbles", "unpaved", "unknown"]
+    distance_m: float
+
+
 class RouteLegResponse(BaseModel):
     # One road-snapped leg between two planner anchors. coords/elevations are
     # index-parallel (see routing.RoutedLeg); elevations carries None where
@@ -112,6 +119,10 @@ class RouteLegResponse(BaseModel):
     coords: list[tuple[float, float]]
     elevations: list[float | None]
     distance_m: float
+    # Surface along the leg, in order (see routing.surface_category), and how
+    # much of it is on dedicated cycleways - for the planner's surface band.
+    surface: list[SurfaceRunResponse] = []
+    cycleway_m: float = 0.0
 
 
 class WahooRoutePayload(BaseModel):

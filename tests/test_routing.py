@@ -9,6 +9,7 @@ from waypointer.routing import (
     build_routing_params,
     resolve_options,
     route_leg,
+    surface_category,
 )
 
 START = (47.376899, 8.541699)
@@ -162,3 +163,47 @@ def test_route_leg_cache_is_keyed_on_options(brouter_response_json):
     # Same options spelled differently (explicit default vs omitted) share an entry.
     route_leg(START, END, options={}, use_cache=True)
     assert len(responses.calls) == 2
+
+
+@responses.activate
+def test_route_leg_parses_surface_runs_and_cycleway(brouter_response_json):
+    responses.add(responses.GET, ROUTING_URL, json=brouter_response_json, status=200)
+    leg = route_leg(START, END, use_cache=False)
+
+    # The fixture's rows: primary asphalt 600, untagged secondary 300, cycleway
+    # asphalt 150 (all paved, merged), sett 200, untagged grade3 track 250 and
+    # gravel 90 (unpaved, merged), untagged unclassified 250.
+    assert [(run.category, run.distance_m) for run in leg.surface] == [
+        ("paved", 1050.0),
+        ("cobbles", 200.0),
+        ("unpaved", 340.0),
+        ("unknown", 250.0),
+    ]
+    assert sum(run.distance_m for run in leg.surface) == pytest.approx(leg.distance_m)
+    assert leg.cycleway_m == 150.0
+
+
+@pytest.mark.parametrize(
+    ("tags", "expected"),
+    [
+        ({"highway": "residential", "surface": "asphalt"}, "paved"),
+        ({"highway": "residential", "surface": "cobblestone"}, "cobbles"),
+        ({"highway": "track", "surface": "compacted"}, "unpaved"),
+        ({"highway": "primary"}, "paved"),  # untagged main road
+        ({"highway": "track", "tracktype": "grade1"}, "paved"),
+        ({"highway": "track", "tracktype": "grade4"}, "unpaved"),
+        ({"highway": "residential"}, "unknown"),  # untagged minor road: no guessing
+        ({"highway": "residential", "surface": "some_new_value"}, "unknown"),
+    ],
+)
+def test_surface_category(tags, expected):
+    assert surface_category(tags) == expected
+
+
+@responses.activate
+def test_route_leg_without_messages_has_no_surface(brouter_response_json):
+    del brouter_response_json["features"][0]["properties"]["messages"]
+    responses.add(responses.GET, ROUTING_URL, json=brouter_response_json, status=200)
+    leg = route_leg(START, END, use_cache=False)
+    assert leg.surface == ()
+    assert leg.cycleway_m == 0.0

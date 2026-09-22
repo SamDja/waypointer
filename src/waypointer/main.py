@@ -58,6 +58,7 @@ from waypointer.schemas import (
     PoiLookupResult,
     PoiSearchConfig,
     RouteLegResponse,
+    SurfaceRunResponse,
     SearchRange,
     WahooRoutePayload,
 )
@@ -615,7 +616,13 @@ async def route_leg_endpoint(
         raise HTTPException(status_code=502, detail=f"Failed to plan that leg: {exc}") from exc
 
     return RouteLegResponse(
-        coords=leg.coords, elevations=leg.elevations, distance_m=leg.distance_m
+        coords=leg.coords,
+        elevations=leg.elevations,
+        distance_m=leg.distance_m,
+        surface=[
+            SurfaceRunResponse(category=run.category, distance_m=run.distance_m) for run in leg.surface
+        ],
+        cycleway_m=leg.cycleway_m,
     )
 
 

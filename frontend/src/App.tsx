@@ -40,6 +40,7 @@ import {
   plannerGeometry,
   plannerLegDistancesM,
   plannerReturnDistanceM,
+  plannerSurface,
   plannerStateFromImport,
   prependAnchor,
   removeAnchor,
@@ -321,7 +322,13 @@ export default function App() {
               prev,
               segment.from,
               segment.to,
-              { coords: response.coords, elevations: response.elevations, distanceM: response.distance_m },
+              {
+                coords: response.coords,
+                elevations: response.elevations,
+                distanceM: response.distance_m,
+                surface: response.surface.map((run) => ({ category: run.category, distanceM: run.distance_m })),
+                cyclewayM: response.cycleway_m,
+              },
               // The options may have changed while this was in flight.
               routedWith
             )
@@ -1312,6 +1319,11 @@ export default function App() {
       }
     })
   }, [plannerState])
+  // The route's surface along the same axis, for the elevation profile's surface band.
+  const plannerSurfaceData = useMemo(
+    () => (plannerState ? plannerSurface(plannerState) : { runs: [], cyclewayM: 0 }),
+    [plannerState]
+  )
   // Where each planner point sits along the route, for the elevation profile's ticks.
   const plannerPointDistancesM = useMemo(() => {
     if (!plannerState) return []
@@ -1436,6 +1448,8 @@ export default function App() {
                 coords={previewRouteCoords}
                 elevations={previewElevations}
                 pointDistancesM={plannerPointDistancesM}
+                surfaceRuns={plannerSurfaceData.runs}
+                cyclewayM={plannerSurfaceData.cyclewayM}
                 gainM={elevationGainM}
                 lossM={elevationLossM}
                 // Open on desktop; collapsed on a phone, where the map is only half the screen.

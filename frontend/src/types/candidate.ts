@@ -59,10 +59,20 @@ export interface SearchRange {
   end_index: number
 }
 
+export type SurfaceCategory = "paved" | "cobbles" | "unpaved" | "unknown"
+
+// Mirrors schemas.py's SurfaceRunResponse.
+export interface SurfaceRunResponse {
+  category: SurfaceCategory
+  distance_m: number
+}
+
 export interface RouteLegResponse {
   coords: [number, number][]
   elevations: (number | null)[]
   distance_m: number
+  surface: SurfaceRunResponse[]
+  cycleway_m: number
 }
 
 export type HoveredPoi = { kind: "candidate"; id: number } | { kind: "waypoint"; id: number } | null

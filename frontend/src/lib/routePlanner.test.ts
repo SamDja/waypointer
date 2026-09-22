@@ -27,6 +27,7 @@ import {
   plannerStateFromImport,
   plannerDistanceM,
   plannerLegDistancesM,
+  plannerSurface,
   prependAnchor,
   removeAnchor,
   reorderAnchors,
@@ -788,5 +789,53 @@ describe("spurToleranceM", () => {
     expect(spurToleranceM(17, 46)).toBeLessThan(15)
     // Each zoom level halves it.
     expect(spurToleranceM(13, 46) / spurToleranceM(14, 46)).toBeCloseTo(2, 6)
+  })
+})
+
+describe("plannerSurface", () => {
+  const a: LatLon = [45.0, 7.0]
+  const b: LatLon = [45.0, 7.01]
+  const c: LatLon = [45.0, 7.02]
+  const legAB = {
+    coords: [a, b],
+    elevations: [1, 2],
+    distanceM: 800,
+    surface: [
+      { category: "paved" as const, distanceM: 600 },
+      { category: "cobbles" as const, distanceM: 200 },
+    ],
+    cyclewayM: 100,
+  }
+  const legBC = { coords: [b, c], elevations: [2, 3], distanceM: 800, surface: [{ category: "unpaved" as const, distanceM: 800 }] }
+
+  function drawnABC(): PlannerState {
+    let state = emptyPlannerState(PROFILE)
+    for (const point of [a, b, c]) state = (appendAnchor(state, point) as { state: PlannerState }).state
+    return withLeg(withLeg(state, a, b, legAB), b, c, legBC)
+  }
+  const total = (runs: { distanceM: number }[]) => runs.reduce((sum, run) => sum + run.distanceM, 0)
+
+  it("lays the legs' surfaces end to end, scaled to the drawn route", () => {
+    const state = drawnABC()
+    const { runs, cyclewayM } = plannerSurface(state)
+    expect(runs.map((run) => run.category)).toEqual(["paved", "cobbles", "unpaved"])
+    expect(total(runs)).toBeCloseTo(plannerDistanceM(state), 6)
+    // Leg AB is ~786m drawn vs BRouter's 800m: shares keep their proportion.
+    expect(runs[0].distanceM / (runs[0].distanceM + runs[1].distanceM)).toBeCloseTo(0.75, 6)
+    expect(cyclewayM).toBeGreaterThan(0)
+  })
+
+  it("counts imported geometry and unrouted legs as unknown", () => {
+    expect(plannerSurface(importedState()).runs.map((r) => r.category)).toEqual(["unknown"])
+    let state = emptyPlannerState(PROFILE)
+    for (const point of [a, b]) state = (appendAnchor(state, point) as { state: PlannerState }).state
+    expect(plannerSurface(state).runs.map((r) => r.category)).toEqual(["unknown"])
+  })
+
+  it("mirrors the surface for an out-and-back's way back", () => {
+    const state = (setRouteShape(drawnABC(), "out-and-back") as { state: PlannerState }).state
+    const { runs } = plannerSurface(state)
+    expect(runs.map((run) => run.category)).toEqual(["paved", "cobbles", "unpaved", "cobbles", "paved"])
+    expect(total(runs)).toBeCloseTo(plannerDistanceM(state), 6)
   })
 })

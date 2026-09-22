@@ -780,6 +780,8 @@ def test_route_leg_returns_polyline_with_elevations(brouter_response_json):
     assert len(data["elevations"]) == len(data["coords"])
     assert data["elevations"][0] == pytest.approx(407.75)
     assert data["distance_m"] == pytest.approx(1840.0)
+    assert data["surface"][0] == {"category": "paved", "distance_m": 1050.0}
+    assert data["cycleway_m"] == pytest.approx(150.0)
 
 
 def test_route_leg_rejects_unknown_profile():

@@ -128,6 +128,61 @@ class RoutingError(RuntimeError):
     """Raised when the routing request fails or returns malformed data."""
 
 
+# Surface categories for the planner's surface band, from each stretch's OSM
+# tags. Cobbles are their own category because they matter to a road bike in
+# a way "paved" hides.
+PAVED_SURFACES = frozenset(
+    {"asphalt", "paved", "concrete", "concrete:plates", "concrete:lanes", "paving_stones", "chipseal", "metal"}
+)
+COBBLE_SURFACES = frozenset({"sett", "cobblestone", "unhewn_cobblestone", "cobblestone:flattened"})
+UNPAVED_SURFACES = frozenset(
+    {
+        "unpaved", "compacted", "fine_gravel", "gravel", "pebblestone", "rock", "ground", "dirt",
+        "earth", "grass", "grass_paver", "mud", "sand", "woodchips", "clay",
+    }
+)
+# Road classes whose surface is almost never tagged but is, in practice,
+# asphalt - counting them as unknown would fill the band with "unknown" on
+# roads that obviously aren't.
+MAJOR_ROADS = frozenset(
+    {"motorway", "trunk", "primary", "secondary", "tertiary"}
+    | {f"{road}_link" for road in ("motorway", "trunk", "primary", "secondary", "tertiary")}
+)
+
+
+def surface_category(tags: dict[str, str]) -> str:
+    """paved / cobbles / unpaved / unknown, from a stretch's OSM tags.
+
+    An explicit `surface` wins. Without one: a major road counts as paved, a
+    track by its `tracktype` (grade1 is paved, grade2+ isn't), and anything
+    else is honestly unknown.
+    """
+    surface = tags.get("surface")
+    if surface in PAVED_SURFACES:
+        return "paved"
+    if surface in COBBLE_SURFACES:
+        return "cobbles"
+    if surface in UNPAVED_SURFACES:
+        return "unpaved"
+    if surface is None:
+        if tags.get("highway") in MAJOR_ROADS:
+            return "paved"
+        tracktype = tags.get("tracktype")
+        if tracktype == "grade1":
+            return "paved"
+        if tracktype is not None:
+            return "unpaved"
+    return "unknown"
+
+
+@dataclass(frozen=True)
+class SurfaceRun:
+    # A stretch of one surface category, in route order. Distances are
+    # BRouter's own per-stretch metres, which sum to the leg's distance_m.
+    category: str
+    distance_m: float
+
+
 @dataclass(frozen=True)
 class RoutedLeg:
     # Index-parallel: elevations[i] is the elevation at coords[i], or None
@@ -137,6 +192,11 @@ class RoutedLeg:
     coords: list[LatLon]
     elevations: list[float | None]
     distance_m: float
+    # Consecutive same-category stretches merged; empty if BRouter sent no
+    # per-stretch data.
+    surface: tuple[SurfaceRun, ...] = ()
+    # How much of the leg is on dedicated cycleways (highway=cycleway).
+    cycleway_m: float = 0.0
 
 
 _cache: TTLCache[RoutedLeg] = TTLCache(CACHE_TTL_S)
@@ -200,7 +260,45 @@ def _parse_leg(payload: dict) -> RoutedLeg:
     if len(coords) < 2:
         raise RoutingError("Routing API returned no usable route between those points.")
 
-    return RoutedLeg(coords=coords, elevations=elevations, distance_m=distance_m)
+    surface, cycleway_m = _parse_surface(feature["properties"].get("messages"))
+    return RoutedLeg(
+        coords=coords, elevations=elevations, distance_m=distance_m, surface=surface, cycleway_m=cycleway_m
+    )
+
+
+def _parse_surface(messages: object) -> tuple[tuple[SurfaceRun, ...], float]:
+    """Surface runs and cycleway metres from BRouter's `messages` table.
+
+    That table is a header row then one row per stretch of road, each with its
+    own `Distance` (metres) and `WayTags` (space-separated `key=value` OSM
+    tags). It's informational, so anything malformed just yields no surface
+    data rather than failing the whole leg.
+    """
+    if not isinstance(messages, list) or len(messages) < 2:
+        return (), 0.0
+    header = messages[0]
+    try:
+        distance_col = header.index("Distance")
+        tags_col = header.index("WayTags")
+    except (ValueError, AttributeError):
+        return (), 0.0
+
+    runs: list[SurfaceRun] = []
+    cycleway_m = 0.0
+    for row in messages[1:]:
+        try:
+            distance = float(row[distance_col])
+            tags = dict(tag.split("=", 1) for tag in str(row[tags_col]).split() if "=" in tag)
+        except (IndexError, TypeError, ValueError):
+            return (), 0.0
+        if tags.get("highway") == "cycleway":
+            cycleway_m += distance
+        category = surface_category(tags)
+        if runs and runs[-1].category == category:
+            runs[-1] = SurfaceRun(category, runs[-1].distance_m + distance)
+        else:
+            runs.append(SurfaceRun(category, distance))
+    return tuple(runs), cycleway_m
 
 
 def route_leg(

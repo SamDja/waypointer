@@ -49,10 +49,22 @@ export interface RoutedSegment {
 
 export type Segment = FixedSegment | RoutedSegment
 
+export type SurfaceCategory = "paved" | "cobbles" | "unpaved" | "unknown"
+
+export interface SurfaceRun {
+  category: SurfaceCategory
+  distanceM: number
+}
+
 export interface RoutedLeg {
   coords: LatLon[]
   elevations: (number | null)[]
   distanceM: number
+  // BRouter's surface along the leg, in order (see routing.surface_category),
+  // and how much of it is on dedicated cycleways. Absent for legs cached
+  // before surface data existed, or when BRouter sent none.
+  surface?: SurfaceRun[]
+  cyclewayM?: number
 }
 
 // What happens after the last point:
@@ -164,6 +176,72 @@ function previouslyRoutedLeg(state: PlannerState, from: LatLon, to: LatLon): Rou
  */
 export function unroutedLegs(state: PlannerState): RoutedSegment[] {
   return pendingLegs(state).filter((s) => previouslyRoutedLeg(state, s.from, s.to) === undefined)
+}
+
+/** The leg geometry a routed segment is drawn with: its own, or a previous options' while re-routing. */
+function drawnLeg(state: PlannerState, segment: RoutedSegment): RoutedLeg | undefined {
+  return state.legs[stateLegKey(state, segment.from, segment.to)] ?? previouslyRoutedLeg(state, segment.from, segment.to)
+}
+
+/**
+ * One segment's surface, as runs that add up to `drawnM` - the length it's
+ * actually drawn with. BRouter's per-stretch distances are scaled to that,
+ * since spur removal can shorten a drawn leg and BRouter's own distances
+ * differ slightly from the drawn polyline's anyway.
+ */
+function scaledSurface(leg: RoutedLeg | undefined, drawnM: number): { runs: SurfaceRun[]; cyclewayM: number } {
+  const totalM = leg?.surface?.reduce((sum, run) => sum + run.distanceM, 0) ?? 0
+  if (!leg?.surface || totalM <= 0) return { runs: [{ category: "unknown", distanceM: drawnM }], cyclewayM: 0 }
+  const scale = drawnM / totalM
+  return {
+    runs: leg.surface.map((run) => ({ category: run.category, distanceM: run.distanceM * scale })),
+    cyclewayM: (leg.cyclewayM ?? 0) * scale,
+  }
+}
+
+function mergeRuns(runs: SurfaceRun[]): SurfaceRun[] {
+  const merged: SurfaceRun[] = []
+  for (const run of runs) {
+    if (run.distanceM <= 0) continue
+    const last = merged[merged.length - 1]
+    if (last && last.category === run.category) last.distanceM += run.distanceM
+    else merged.push({ ...run })
+  }
+  return merged
+}
+
+/**
+ * The route's surface in ride order, as runs along plannerGeometry's
+ * distance axis (so it lines up under the elevation profile), plus the
+ * distance on dedicated cycleways. Imported (`fixed`) geometry carries no
+ * tags, and legs without surface data yet, so both count as "unknown".
+ */
+export function plannerSurface(state: PlannerState): { runs: SurfaceRun[]; cyclewayM: number } {
+  const geometries = segmentGeometries(state)
+  const runs: SurfaceRun[] = []
+  let cyclewayM = 0
+  state.segments.forEach((segment, i) => {
+    const drawnM = totalDistanceM(geometries[i].coords)
+    if (segment.kind === "fixed") {
+      runs.push({ category: "unknown", distanceM: drawnM })
+      return
+    }
+    const scaled = scaledSurface(drawnLeg(state, segment), drawnM)
+    runs.push(...scaled.runs)
+    cyclewayM += scaled.cyclewayM
+  })
+
+  if (state.shape === "out-and-back") {
+    // The way back is the same roads, so the same surface, reversed.
+    return { runs: mergeRuns([...runs, ...[...runs].reverse()]), cyclewayM: cyclewayM * 2 }
+  }
+  const returning = returnLeg(state)
+  if (returning) {
+    const scaled = scaledSurface(drawnLeg(state, returning), totalDistanceM(segmentGeometry(returning, state).coords))
+    runs.push(...scaled.runs)
+    cyclewayM += scaled.cyclewayM
+  }
+  return { runs: mergeRuns(runs), cyclewayM }
 }
 
 /** Switches the routing options; every routed leg is then re-fetched under them. */

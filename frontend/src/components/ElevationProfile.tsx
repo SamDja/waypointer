@@ -3,37 +3,99 @@ import { ChevronDown, TrendingDown, TrendingUp } from "lucide-react"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cumulativeDistancesM } from "@/lib/geometry"
 import { setHoveredDistanceM, useHoveredDistanceM } from "@/lib/hoverDistance"
-import { PLANNER_POINT_COLOR } from "@/lib/mapIcons"
+import type { SurfaceCategory, SurfaceRun } from "@/lib/routePlanner"
 
 export interface ElevationProfileProps {
   coords: [number, number][]
   elevations: (number | null)[]
   // Where each planner point sits along the route, for the ticks under the plot.
   pointDistancesM: number[]
+  // The route's surface in ride order, on the same distance axis (see
+  // routePlanner.plannerSurface), and how much of it is on cycleways.
+  surfaceRuns: SurfaceRun[]
+  cyclewayM: number
   gainM: number
   lossM: number
   defaultOpen: boolean
 }
 
-// Plot geometry, in px. The x-axis band is part of the fixed height, so axis
-// labels never overflow the card.
+// Plot geometry, in px. The surface band and x-axis band are part of the
+// fixed height, so nothing overflows the card.
 const PLOT_HEIGHT = 96
-const MARGIN = { top: 16, right: 12, bottom: 22, left: 44 }
+const SURFACE_BAND_HEIGHT = 8
+const MARGIN = { top: 16, right: 12, bottom: 38, left: 44 }
 // Enough resolution for the widest strip without drawing tens of thousands
 // of vertices for a long imported track.
 const MAX_SAMPLES = 800
-// Gradient is measured over this stretch either side of the crosshair, so it
-// reads as the slope of the road rather than of one DEM step.
-const GRADE_HALF_WINDOW_M = 50
+// The profile is coloured in equal-length chunks, each by its own average
+// gradient (like Wahoo's per-chunk colouring): at least this long, so a
+// gradient reads as the slope of the road rather than of one DEM step...
+const MIN_CHUNK_M = 100
+// ...and at least this wide on screen, so a long route isn't a blur of
+// one-pixel slivers. Each chunk is coloured independently; the tooltip reports
+// the gradient of the chunk under the pointer, so it always matches the colour.
+const MIN_CHUNK_PX = 4
+
+// Gradient bands: Wahoo's climb bands and colour order (green 0-4%, yellow
+// 4-8%, orange 8-12%, red 12-20%, brown 20%+), with the colours adjusted so
+// each band stays distinguishable on the light card (validated with the
+// dataviz skill's palette checker - Wahoo's own yellow is ~1.5:1 on it).
+// Descents mirror the same bands as one blue, darker the steeper, so -5% and
+// -15% read as "steeper" at a glance. Each band is [from %, colour].
+const CLIMB_BANDS: [number, string][] = [
+  [0, "#35A04E"],
+  [4, "#D9B300"],
+  [8, "#E0600C"],
+  [12, "#B01C28"],
+  [20, "#5E2A0A"],
+]
+const DESCENT_BANDS: [number, string][] = [
+  [0, "#6FA6DC"],
+  [4, "#4586CC"],
+  [8, "#2A66AE"],
+  [12, "#1B4A8A"],
+  [20, "#0F3063"],
+]
+
+// Within +-FLAT_GRADE_PCT the road has basically no grade, so it's drawn in a
+// neutral grey rather than flickering between the gentlest climb and descent
+// bands. Mid grey, not black: it should recede, not compete with the bands.
+const FLAT_GRADE_PCT = 2
+const FLAT_COLOR = "#9A968E"
+
+// Surface: an ordinal violet ramp, lighter to darker as the ride gets rougher
+// (validated as an ordinal ramp), so it can't be mistaken for any gradient
+// band above it; unknown is a receding neutral.
+const SURFACES: { category: SurfaceCategory; label: string; color: string }[] = [
+  { category: "paved", label: "Paved", color: "#A99DE8" },
+  { category: "cobbles", label: "Cobbles", color: "#7462D4" },
+  { category: "unpaved", label: "Unpaved", color: "#3F2F99" },
+  { category: "unknown", label: "Unknown", color: "#D2CEC5" },
+]
+const SURFACE_BY_CATEGORY = Object.fromEntries(SURFACES.map((s) => [s.category, s])) as Record<
+  SurfaceCategory,
+  (typeof SURFACES)[number]
+>
+
+function gradientColor(gradePct: number): string {
+  const bands = gradePct >= 0 ? CLIMB_BANDS : DESCENT_BANDS
+  const steepness = Math.abs(gradePct)
+  let color = bands[0][1]
+  for (const [from, bandColor] of bands) if (steepness >= from) color = bandColor
+  return color
+}
 
 // The route's elevation against distance, shown under the map while planning.
-// Hovering (or arrowing through) it moves a marker along the route on the map,
-// and hovering the route on the map moves the crosshair here - both through
+// Coloured by gradient, with the surface in a band underneath. Hovering (or
+// arrowing through) it moves a marker along the route on the map, and
+// hovering the route on the map moves the crosshair here - both through
 // lib/hoverDistance.
 export function ElevationProfile({
   coords,
   elevations,
   pointDistancesM,
+  surfaceRuns,
+  cyclewayM,
   gainM,
   lossM,
   defaultOpen,
@@ -54,7 +116,13 @@ export function ElevationProfile({
         <ChevronDown className="ml-auto size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
       </CollapsibleTrigger>
       <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
-        <ProfilePlot coords={coords} elevations={elevations} pointDistancesM={pointDistancesM} />
+        <ProfilePlot
+          coords={coords}
+          elevations={elevations}
+          pointDistancesM={pointDistancesM}
+          surfaceRuns={surfaceRuns}
+        />
+        <Legends surfaceRuns={surfaceRuns} cyclewayM={cyclewayM} />
       </CollapsibleContent>
     </Collapsible>
   )
@@ -69,7 +137,8 @@ function ProfilePlot({
   coords,
   elevations,
   pointDistancesM,
-}: Pick<ElevationProfileProps, "coords" | "elevations" | "pointDistancesM">) {
+  surfaceRuns,
+}: Pick<ElevationProfileProps, "coords" | "elevations" | "pointDistancesM" | "surfaceRuns">) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   const hoveredM = useHoveredDistanceM()
@@ -112,12 +181,15 @@ function ProfilePlot({
   const yHi = Math.max(yTicks[yTicks.length - 1], maxE)
   const xTicks = niceTicks(0, totalM / 1000, Math.max(2, Math.floor(plotWidth / 90))).filter((km) => km * 1000 <= totalM)
 
+  const baseline = MARGIN.top + PLOT_HEIGHT
   const x = (distanceM: number) => MARGIN.left + (distanceM / totalM) * plotWidth
   const y = (elevation: number) => MARGIN.top + PLOT_HEIGHT - ((elevation - yLo) / (yHi - yLo || 1)) * PLOT_HEIGHT
-  const { line, area } = profilePaths(samples, x, y, MARGIN.top + PLOT_HEIGHT)
+  const chunks = gradeChunks(samples, Math.max(MIN_CHUNK_M, (totalM * MIN_CHUNK_PX) / (plotWidth || 1)))
+  const gradientRuns = coloredRuns(samples, chunks, x, y, baseline)
 
   const peak = samples.reduce((best, s) => (s.elevation !== null && s.elevation > (best.elevation ?? -Infinity) ? s : best))
-  const hovered = hoveredM !== null && hoveredM >= 0 && hoveredM <= totalM ? readout(samples, hoveredM) : null
+  const hovered = hoveredM !== null && hoveredM >= 0 && hoveredM <= totalM ? readout(samples, chunks, hoveredM) : null
+  const hoveredSurface = hovered ? surfaceAt(surfaceRuns, hovered.distanceM) : null
 
   function distanceAtPointer(e: PointerEvent<SVGSVGElement>): number {
     const rect = e.currentTarget.getBoundingClientRect()
@@ -140,9 +212,15 @@ function ProfilePlot({
   }
 
   const height = MARGIN.top + PLOT_HEIGHT + MARGIN.bottom
+  const surfaceY = baseline + 3
+  // Each run's start along the route, so the band's rects can be placed.
+  const surfaceStartsM = surfaceRuns.reduce<number[]>(
+    (starts, _run, i) => [...starts, i === 0 ? 0 : starts[i - 1] + surfaceRuns[i - 1].distanceM],
+    []
+  )
 
   return (
-    <div ref={containerRef} className="relative px-1 pb-2">
+    <div ref={containerRef} className="relative px-1">
       {width > 0 && (
         <svg
           width={width}
@@ -150,7 +228,7 @@ function ProfilePlot({
           className="block touch-none select-none focus-visible:outline-2 focus-visible:outline-ring"
           tabIndex={0}
           role="img"
-          aria-label={`Elevation profile: ${Math.round(minE)} to ${Math.round(maxE)} m over ${(totalM / 1000).toFixed(1)} km. Use the arrow keys to read it point by point.`}
+          aria-label={`Elevation profile: ${Math.round(minE)} to ${Math.round(maxE)} m over ${(totalM / 1000).toFixed(1)} km, coloured by gradient, with the surface underneath. Use the arrow keys to read it point by point.`}
           onPointerMove={(e) => setHoveredDistanceM(distanceAtPointer(e))}
           onPointerLeave={() => setHoveredDistanceM(null)}
           onKeyDown={handleKeyDown}
@@ -159,14 +237,7 @@ function ProfilePlot({
           {/* Hairline gridlines + y labels */}
           {yTicks.map((tick) => (
             <g key={tick}>
-              <line
-                x1={MARGIN.left}
-                x2={MARGIN.left + plotWidth}
-                y1={y(tick)}
-                y2={y(tick)}
-                stroke="var(--border)"
-                strokeWidth={1}
-              />
+              <line x1={MARGIN.left} x2={MARGIN.left + plotWidth} y1={y(tick)} y2={y(tick)} stroke="var(--border)" strokeWidth={1} />
               <text
                 x={MARGIN.left - 6}
                 y={y(tick)}
@@ -178,12 +249,43 @@ function ProfilePlot({
               </text>
             </g>
           ))}
-          {/* x labels */}
+
+          {/* Gradient-coloured area and line, one piece per run of the same band */}
+          {gradientRuns.map((run, i) => (
+            <g key={i}>
+              {/* crispEdges: anti-aliasing leaves hairline seams where two pieces meet */}
+              <path d={run.area} fill={run.color} fillOpacity={0.55} shapeRendering="crispEdges" />
+              <path d={run.line} fill="none" stroke={run.color} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
+            </g>
+          ))}
+
+          {/* Where each planner point falls along the route */}
+          {pointDistancesM.map((d, i) => (
+            <line key={i} x1={x(d)} x2={x(d)} y1={baseline - 5} y2={baseline} stroke="var(--foreground)" strokeOpacity={0.5} strokeWidth={1} />
+          ))}
+
+          {/* Surface band, on the same distance axis */}
+          {surfaceRuns.map((run, i) => {
+            const from = surfaceStartsM[i]
+            const to = Math.min(from + run.distanceM, totalM)
+            return (
+              <rect
+                key={i}
+                x={x(from)}
+                y={surfaceY}
+                width={Math.max(x(to) - x(from), 0)}
+                height={SURFACE_BAND_HEIGHT}
+                fill={SURFACE_BY_CATEGORY[run.category].color}
+              />
+            )
+          })}
+
+          {/* x labels, under the surface band */}
           {xTicks.map((km) => (
             <text
               key={km}
               x={x(km * 1000)}
-              y={MARGIN.top + PLOT_HEIGHT + 16}
+              y={surfaceY + SURFACE_BAND_HEIGHT + 14}
               textAnchor="middle"
               className="fill-muted-foreground text-[10px] tabular-nums"
             >
@@ -191,26 +293,10 @@ function ProfilePlot({
             </text>
           ))}
 
-          <path d={area} fill={PLANNER_POINT_COLOR} fillOpacity={0.1} />
-          <path d={line} fill="none" stroke={PLANNER_POINT_COLOR} strokeWidth={2} strokeLinejoin="round" strokeLinecap="round" />
-
-          {/* Where each planner point falls along the route */}
-          {pointDistancesM.map((d, i) => (
-            <line
-              key={i}
-              x1={x(d)}
-              x2={x(d)}
-              y1={MARGIN.top + PLOT_HEIGHT - 5}
-              y2={MARGIN.top + PLOT_HEIGHT}
-              stroke="var(--muted-foreground)"
-              strokeWidth={1}
-            />
-          ))}
-
           {/* The one direct label: the highest point */}
           {peak.elevation !== null && !hovered && (
             <g>
-              <circle cx={x(peak.distanceM)} cy={y(peak.elevation)} r={4} fill={PLANNER_POINT_COLOR} stroke="var(--card)" strokeWidth={2} />
+              <circle cx={x(peak.distanceM)} cy={y(peak.elevation)} r={4} fill="var(--foreground)" stroke="var(--card)" strokeWidth={2} />
               <text
                 x={Math.min(Math.max(x(peak.distanceM), MARGIN.left + 24), MARGIN.left + plotWidth - 24)}
                 y={y(peak.elevation) - 8}
@@ -229,13 +315,20 @@ function ProfilePlot({
                 x1={x(hovered.distanceM)}
                 x2={x(hovered.distanceM)}
                 y1={MARGIN.top}
-                y2={MARGIN.top + PLOT_HEIGHT}
+                y2={surfaceY + SURFACE_BAND_HEIGHT}
                 stroke="var(--foreground)"
                 strokeOpacity={0.4}
                 strokeWidth={1}
               />
               {hovered.elevation !== null && (
-                <circle cx={x(hovered.distanceM)} cy={y(hovered.elevation)} r={4} fill={PLANNER_POINT_COLOR} stroke="var(--card)" strokeWidth={2} />
+                <circle
+                  cx={x(hovered.distanceM)}
+                  cy={y(hovered.elevation)}
+                  r={4}
+                  fill={hovered.gradePct !== null ? chunkColor(hovered.gradePct) : "var(--foreground)"}
+                  stroke="var(--card)"
+                  strokeWidth={2}
+                />
               )}
             </g>
           )}
@@ -244,17 +337,17 @@ function ProfilePlot({
 
       {hovered && (
         <div
-          className="pointer-events-none absolute top-0 rounded-md bg-popover px-2 py-1 text-xs shadow-md ring-1 ring-foreground/10"
-          style={{
-            left: Math.min(Math.max(x(hovered.distanceM) - 50, 0), Math.max(width - 110, 0)),
-          }}
+          className="pointer-events-none absolute top-0 rounded-md bg-popover px-2 py-1 text-xs whitespace-nowrap shadow-md ring-1 ring-foreground/10"
+          style={{ left: Math.min(Math.max(x(hovered.distanceM) - 70, 0), Math.max(width - 190, 0)) }}
         >
           <span className="font-semibold tabular-nums">
             {hovered.elevation !== null ? `${Math.round(hovered.elevation).toLocaleString()} m` : "No data"}
           </span>
           <span className="ml-2 text-muted-foreground tabular-nums">
             {(hovered.distanceM / 1000).toFixed(1)} km
-            {hovered.gradePct !== null && ` · ${hovered.gradePct > 0 ? "+" : ""}${hovered.gradePct.toFixed(0)}%`}
+            {/* One decimal, so a 1.6% grey stretch doesn't read as "+2%" next to the flat band's edge */}
+            {hovered.gradePct !== null && ` · ${hovered.gradePct > 0 ? "+" : ""}${hovered.gradePct.toFixed(1)}%`}
+            {hoveredSurface && ` · ${SURFACE_BY_CATEGORY[hoveredSurface].label}`}
           </span>
         </div>
       )}
@@ -262,40 +355,140 @@ function ProfilePlot({
   )
 }
 
-/** Line and area paths, broken wherever elevation is missing (gaps, not zero). */
-function profilePaths(
+/** Surface shares and the gradient scale, as text-token legends with colour swatches beside them. */
+function Legends({ surfaceRuns, cyclewayM }: { surfaceRuns: SurfaceRun[]; cyclewayM: number }) {
+  const totalM = surfaceRuns.reduce((sum, run) => sum + run.distanceM, 0)
+  const shares = SURFACES.map((surface) => ({
+    ...surface,
+    pct: totalM > 0 ? (100 * surfaceRuns.filter((r) => r.category === surface.category).reduce((sum, r) => sum + r.distanceM, 0)) / totalM : 0,
+  })).filter((surface) => surface.pct >= 0.5)
+  const cyclewayPct = totalM > 0 ? (100 * cyclewayM) / totalM : 0
+
+  return (
+    <div className="flex flex-col gap-1.5 px-4 pb-3 text-[11px] text-muted-foreground">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-medium text-foreground">Surface</span>
+        {shares.map((surface) => (
+          <span key={surface.category} className="flex items-center gap-1">
+            <span className="h-2 w-3 rounded-[2px]" style={{ backgroundColor: surface.color }} />
+            {surface.label} {Math.round(surface.pct)}%
+          </span>
+        ))}
+        {cyclewayPct >= 0.5 && <span>· on cycleways {Math.round(cyclewayPct)}%</span>}
+      </div>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <span className="font-medium text-foreground">Gradient</span>
+        <GradientScale />
+        <span className="flex items-center gap-1">
+          <span className="h-2 w-3 rounded-[2px]" style={{ backgroundColor: FLAT_COLOR }} />
+          Flat (within ±{FLAT_GRADE_PCT}%)
+        </span>
+      </div>
+    </div>
+  )
+}
+
+// Steep descent -> steep climb, each band a swatch, labelled at the band edges.
+function GradientScale() {
+  const swatches = [...DESCENT_BANDS].reverse().map(([, color]) => color).concat(CLIMB_BANDS.map(([, color]) => color))
+  const edges = ["-20", "-12", "-8", "-4", "0", "4", "8", "12", "20"]
+  return (
+    <span className="flex flex-col">
+      <span className="flex">
+        {swatches.map((color, i) => (
+          <span key={i} className="h-2 w-6" style={{ backgroundColor: color }} />
+        ))}
+      </span>
+      <span className="relative h-3 tabular-nums" style={{ width: swatches.length * 24 }}>
+        {edges.map((edge, i) => (
+          <span key={edge} className="absolute -translate-x-1/2 text-[9px]" style={{ left: (i + 1) * 24 }}>
+            {edge}
+          </span>
+        ))}
+        <span className="absolute text-[9px]" style={{ left: swatches.length * 24 + 4 }}>
+          %
+        </span>
+      </span>
+    </span>
+  )
+}
+
+interface GradeChunk {
+  fromM: number
+  toM: number
+  // Average gradient over the chunk; null where elevation is missing.
+  gradePct: number | null
+}
+
+/** Equal-length chunks along the route, each with its own average gradient. */
+function gradeChunks(samples: Sample[], chunkM: number): GradeChunk[] {
+  const endM = samples[samples.length - 1].distanceM
+  const chunks: GradeChunk[] = []
+  for (let fromM = 0; fromM < endM; fromM += chunkM) {
+    const toM = Math.min(fromM + chunkM, endM)
+    const a = elevationAt(samples, fromM)
+    const b = elevationAt(samples, toM)
+    chunks.push({ fromM, toM, gradePct: a !== null && b !== null && toM > fromM ? ((b - a) / (toM - fromM)) * 100 : null })
+  }
+  return chunks
+}
+
+function chunkColor(gradePct: number | null): string {
+  if (gradePct === null) return "var(--muted-foreground)"
+  return Math.abs(gradePct) < FLAT_GRADE_PCT ? FLAT_COLOR : gradientColor(gradePct)
+}
+
+/**
+ * Area and line paths, one per run of consecutive chunks in the same band.
+ * Each chunk's colour comes from its own gradient only - never from a
+ * neighbour's - so a steep stretch can't be swallowed by the colour before it.
+ * The outline inside a chunk still follows every sample, so the shape is exact.
+ */
+function coloredRuns(
   samples: Sample[],
+  chunks: GradeChunk[],
   x: (d: number) => number,
   y: (e: number) => number,
   baseline: number
-): { line: string; area: string } {
-  let line = ""
-  let area = ""
-  let run: Sample[] = []
-  const flush = () => {
-    if (run.length >= 2) {
-      const pts = run.map((s) => `${x(s.distanceM).toFixed(1)},${y(s.elevation as number).toFixed(1)}`)
-      line += `M${pts.join("L")}`
-      area += `M${x(run[0].distanceM).toFixed(1)},${baseline}L${pts.join("L")}L${x(run[run.length - 1].distanceM).toFixed(1)},${baseline}Z`
+): { color: string; line: string; area: string }[] {
+  const runs: { color: string; points: [number, number][] }[] = []
+  for (const chunk of chunks) {
+    const a = elevationAt(samples, chunk.fromM)
+    const b = elevationAt(samples, chunk.toM)
+    if (a === null || b === null) continue
+    const inside = samples
+      .filter((s) => s.distanceM > chunk.fromM && s.distanceM < chunk.toM && s.elevation !== null)
+      .map((s): [number, number] => [s.distanceM, s.elevation as number])
+    const points: [number, number][] = [[chunk.fromM, a], ...inside, [chunk.toM, b]]
+    const color = chunkColor(chunk.gradePct)
+    const last = runs[runs.length - 1]
+    if (last && last.color === color && last.points[last.points.length - 1][0] === chunk.fromM) {
+      last.points.push(...points.slice(1))
+    } else {
+      runs.push({ color, points })
     }
-    run = []
   }
-  for (const s of samples) {
-    if (s.elevation === null) flush()
-    else run.push(s)
-  }
-  flush()
-  return { line, area }
+  return runs.map(({ color, points }) => {
+    const pts = points.map(([d, e]) => `${x(d).toFixed(1)},${y(e).toFixed(1)}`)
+    const first = x(points[0][0]).toFixed(1)
+    const lastX = x(points[points.length - 1][0]).toFixed(1)
+    return { color, line: `M${pts.join("L")}`, area: `M${first},${baseline}L${pts.join("L")}L${lastX},${baseline}Z` }
+  })
 }
 
-/** Elevation (interpolated) and road gradient at a distance along the route. */
-function readout(samples: Sample[], distanceM: number) {
-  const elevation = elevationAt(samples, distanceM)
-  const behind = elevationAt(samples, distanceM - GRADE_HALF_WINDOW_M)
-  const ahead = elevationAt(samples, distanceM + GRADE_HALF_WINDOW_M)
-  const span = Math.min(distanceM + GRADE_HALF_WINDOW_M, samples[samples.length - 1].distanceM) - Math.max(distanceM - GRADE_HALF_WINDOW_M, 0)
-  const gradePct = behind !== null && ahead !== null && span > 0 ? ((ahead - behind) / span) * 100 : null
-  return { distanceM, elevation, gradePct }
+/** Elevation (interpolated) and the gradient of the chunk under a distance along the route. */
+function readout(samples: Sample[], chunks: GradeChunk[], distanceM: number) {
+  const chunk = chunks.find((c) => distanceM >= c.fromM && distanceM <= c.toM) ?? chunks[chunks.length - 1]
+  return { distanceM, elevation: elevationAt(samples, distanceM), gradePct: chunk?.gradePct ?? null }
+}
+
+function surfaceAt(runs: SurfaceRun[], distanceM: number): SurfaceCategory | null {
+  let walkedM = 0
+  for (const run of runs) {
+    walkedM += run.distanceM
+    if (distanceM <= walkedM) return run.category
+  }
+  return runs.length > 0 ? runs[runs.length - 1].category : null
 }
 
 function elevationAt(samples: Sample[], distanceM: number): number | null {
