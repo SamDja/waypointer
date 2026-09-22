@@ -16,10 +16,10 @@ END = (47.380000, 8.550000)
 
 
 def test_build_routing_params_flips_to_lon_lat():
-    params = build_routing_params(START, END, "fastbike-lowtraffic")
+    params = build_routing_params(START, END, "fastbike")
     # BRouter takes lon,lat pairs; this codebase stores (lat, lon) everywhere.
     assert params["lonlats"] == "8.541699,47.376899|8.55,47.38"
-    assert params["profile"] == "fastbike-lowtraffic"
+    assert params["profile"] == "fastbike"
     assert params["format"] == "geojson"
 
 
@@ -105,19 +105,19 @@ def test_route_leg_cache_is_keyed_on_endpoints(brouter_response_json):
 
 def test_resolve_options_fills_every_default_explicitly():
     # Ferries and steps are deliberately off, unlike the profile's own defaults.
-    assert resolve_options("fastbike-lowtraffic", None) == {
+    assert resolve_options("fastbike", None) == {
         "allow_ferries": "0",
         "allow_steps": "0",
         "consider_forest": "0",
         "consider_noise": "0",
         "consider_river": "0",
         "consider_town": "0",
-        "consider_traffic": "1",
+        "consider_traffic": "0.1",
     }
 
 
 def test_resolve_options_encodes_booleans_as_1_0_and_numbers_as_decimals():
-    encoded = resolve_options("fastbike-lowtraffic", {"allow_ferries": True, "consider_traffic": 0.1})
+    encoded = resolve_options("fastbike", {"allow_ferries": True, "consider_traffic": 0.1})
     # BRouter answers `true` with an empty body - it has to be 1/0.
     assert encoded["allow_ferries"] == "1"
     assert encoded["consider_traffic"] == "0.1"
@@ -135,11 +135,11 @@ def test_resolve_options_encodes_booleans_as_1_0_and_numbers_as_decimals():
 )
 def test_resolve_options_rejects_invalid_options(options):
     with pytest.raises(ValueError):
-        resolve_options("fastbike-lowtraffic", options)
+        resolve_options("fastbike", options)
 
 
 def test_build_routing_params_passes_options_as_profile_overrides():
-    params = build_routing_params(START, END, "fastbike-lowtraffic", {"allow_ferries": "1"})
+    params = build_routing_params(START, END, "fastbike", {"allow_ferries": "1"})
     assert params["profile:allow_ferries"] == "1"
 
 
@@ -151,13 +151,13 @@ def test_route_leg_sends_every_option(brouter_response_json):
     query = parse_qs(urlparse(responses.calls[0].request.url).query)
     assert query["profile:consider_town"] == ["1"]
     assert query["profile:allow_ferries"] == ["0"]
-    assert query["profile:consider_traffic"] == ["1"]
+    assert query["profile:consider_traffic"] == ["0.1"]
 
 
 @responses.activate
 def test_route_leg_cache_is_keyed_on_options(brouter_response_json):
     responses.add(responses.GET, ROUTING_URL, json=brouter_response_json, status=200)
-    route_leg(START, END, options={"consider_traffic": 1.0}, use_cache=True)
+    route_leg(START, END, options={"consider_traffic": 0.1}, use_cache=True)
     route_leg(START, END, options={"consider_traffic": 0.3}, use_cache=True)
     # Same options spelled differently (explicit default vs omitted) share an entry.
     route_leg(START, END, options={}, use_cache=True)

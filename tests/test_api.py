@@ -756,7 +756,7 @@ def test_wahoo_import_route_rejects_lookalike_host():
     assert response.status_code == 400
 
 
-def _route_leg_form(profile: str = "fastbike-lowtraffic", options: str | None = None) -> dict:
+def _route_leg_form(profile: str = "fastbike", options: str | None = None) -> dict:
     form = {
         "start_lat": 47.376899,
         "start_lon": 8.541699,

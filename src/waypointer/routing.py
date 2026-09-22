@@ -41,8 +41,8 @@ CACHE_TTL_S = 3600.0
 # its server happens to host. Mirrors the routingProfile values in
 # frontend/src/lib/mapStyles.ts (same hand-mirroring convention as
 # poi_types.py/poiTypes.ts).
-ALLOWED_PROFILES = frozenset({"fastbike-lowtraffic"})
-DEFAULT_PROFILE = "fastbike-lowtraffic"
+ALLOWED_PROFILES = frozenset({"fastbike"})
+DEFAULT_PROFILE = "fastbike"
 
 
 @dataclass(frozen=True)
@@ -67,15 +67,18 @@ RoutingOption = BoolOption | ChoiceOption
 # profile's own default. Mirrors the routingOptions in
 # frontend/src/lib/mapStyles.ts, labels and all, by hand.
 #
-# Two defaults deliberately differ from fastbike-lowtraffic's own: ferries
-# and steps are off, since a road bike planner shouldn't route onto either
-# unless asked.
+# Two defaults deliberately differ from fastbike's own: ferries and steps are
+# off, since a road bike planner shouldn't route onto either unless asked.
+#
+# fastbike rather than fastbike-lowtraffic: the two profiles are identical
+# except for consider_traffic's default (0.1 vs 1), and since that's an
+# option always sent explicitly, the profile choice only sets the default.
 PROFILE_OPTIONS: dict[str, dict[str, RoutingOption]] = {
-    "fastbike-lowtraffic": {
+    "fastbike": {
         # How much longer a detour is worth to avoid busy roads: BRouter
-        # scales its traffic penalty by this (1 = the profile's full
-        # avoidance, 0 = ignore traffic).
-        "consider_traffic": ChoiceOption(choices=(0.0, 0.1, 0.3, 0.5, 1.0), default=1.0),
+        # scales its traffic penalty by this (1 = strongest avoidance,
+        # 0 = ignore traffic).
+        "consider_traffic": ChoiceOption(choices=(0.0, 0.1, 0.3, 0.5, 1.0), default=0.1),
         "allow_ferries": BoolOption(default=False),
         "allow_steps": BoolOption(default=False),
         "consider_noise": BoolOption(default=False),

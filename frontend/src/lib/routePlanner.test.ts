@@ -37,7 +37,7 @@ import {
   withLeg,
 } from "@/lib/routePlanner"
 
-const PROFILE = "fastbike-lowtraffic"
+const PROFILE = "fastbike"
 
 /** A west-to-east line of `n` points at ~79m spacing, starting at (45, 7). */
 function line(n: number, startLon = 7.0): LatLon[] {

@@ -58,23 +58,16 @@ export interface MapStyleConfig {
   roadLegend?: RoadLegendCategory[]
 }
 
-// Hand-mirrors road-cycling.json's layer ids (not its colors - see
-// RoadLegendCategory above) so the legend's road-color rows always reflect
-// whatever road-cycling.json currently renders. The last row surfaces the
-// style's unified "not suitable for road cycling" look (bike-prohibited OR
-// bad surface, see road-cycling.json's UNSUITABLE_* case expressions) via
-// road_secondary_tertiary specifically, since its case branches on color
-// (motorway's only branches on opacity, which reads poorly as a tiny swatch).
-// fastbike-lowtraffic's options (see routing.py's PROFILE_OPTIONS for what
-// each does to BRouter's cost model). Ferries and steps default off - unlike
-// the profile's own defaults - since a road bike planner shouldn't route onto
-// either unless asked.
-const FASTBIKE_LOWTRAFFIC_OPTIONS: RoutingOptionSpec[] = [
+// fastbike's options (see routing.py's PROFILE_OPTIONS for what each does to
+// BRouter's cost model). Ferries and steps default off - unlike the profile's
+// own defaults - since a road bike planner shouldn't route onto either unless
+// asked. Traffic defaults to fastbike's own 0.1 ("A little").
+const FASTBIKE_OPTIONS: RoutingOptionSpec[] = [
   {
     key: "consider_traffic",
     kind: "choice",
     label: "How much longer are you willing to ride to avoid traffic?",
-    default: 1,
+    default: 0.1,
     choices: [
       { value: 0, label: "Not at all" },
       { value: 0.1, label: "A little" },
@@ -91,6 +84,13 @@ const FASTBIKE_LOWTRAFFIC_OPTIONS: RoutingOptionSpec[] = [
   { key: "consider_town", kind: "toggle", label: "Bypass towns", default: false },
 ]
 
+// Hand-mirrors road-cycling.json's layer ids (not its colors - see
+// RoadLegendCategory above) so the legend's road-color rows always reflect
+// whatever road-cycling.json currently renders. The last row surfaces the
+// style's unified "not suitable for road cycling" look (bike-prohibited OR
+// bad surface, see road-cycling.json's UNSUITABLE_* case expressions) via
+// road_secondary_tertiary specifically, since its case branches on color
+// (motorway's only branches on opacity, which reads poorly as a tiny swatch).
 const ROAD_CYCLING_LEGEND: RoadLegendCategory[] = [
   { label: "Motorway", fillLayerId: "road_motorway", casingLayerId: "road_motorway_casing" },
   { label: "Primary / trunk road", fillLayerId: "road_trunk_primary", casingLayerId: "road_trunk_primary_casing" },
@@ -136,11 +136,13 @@ export const MAP_STYLES: MapStyleConfig[] = [
     label: "Road Cycling",
     icon: Bike,
     styleUrl: "/map-styles/road-cycling.json",
-    // Road-bike oriented (prefers paved, avoids tracks) while explicitly
-    // penalizing high-traffic roads - the same judgement road-cycling.json
-    // makes visually by dimming unpaved and bike-prohibited ways.
-    routingProfile: "fastbike-lowtraffic",
-    routingOptions: FASTBIKE_LOWTRAFFIC_OPTIONS,
+    // Road-bike oriented (prefers paved, avoids tracks) - the same judgement
+    // road-cycling.json makes visually by dimming unpaved and bike-prohibited
+    // ways. fastbike rather than fastbike-lowtraffic: the two profiles are
+    // identical except for consider_traffic's default, and that's an option
+    // the visitor sets anyway (see FASTBIKE_OPTIONS).
+    routingProfile: "fastbike",
+    routingOptions: FASTBIKE_OPTIONS,
     roadLegend: ROAD_CYCLING_LEGEND,
   },
   // { key: "gravel", label: "Gravel", styleUrl: "https://tiles.openfreemap.org/styles/bright" },
