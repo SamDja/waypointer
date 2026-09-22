@@ -16,6 +16,7 @@ import { WahooProfileMenu } from "@/components/WahooProfileMenu"
 import { OffRouteDialog, type OffRouteItem } from "@/components/OffRouteDialog"
 import { ApiError, findPois, lookupPoi, routeLeg } from "@/lib/api"
 import { track } from "@/lib/analytics"
+import { encodePolyline } from "@/lib/polyline"
 import { elevationGainLossM, projectOntoPolylineM, totalDistanceM } from "@/lib/geometry"
 import {
   buildGpxFile,
@@ -124,6 +125,10 @@ const PLANNER_HISTORY_LIMIT = 100
 
 // How long after the last planner change the draft is saved (see lib/plannerDraft).
 const DRAFT_SAVE_DEBOUNCE_MS = 1000
+// Analytics: planned points are rounded to 2 decimals (~1km) before they
+// leave the browser, and Umami cuts strings at 500 characters.
+const ANALYTICS_POINT_PRECISION = 2
+const ANALYTICS_MAX_STRING_LENGTH = 500
 
 // Space between the elevation profile and the map's bottom/left edges.
 const PROFILE_GAP_PX = 16
@@ -633,6 +638,7 @@ export default function App() {
       resetPlannerSession()
       setPlannerState(state)
       setTrackedPositions(seedTracked(plannerGeometry(state).coords))
+      trackPlanningStarted(parkedPlan.mode, "reopened", state)
       return
     }
     const coords = findResult?.route_coords ?? previewRouteCoords
@@ -646,6 +652,43 @@ export default function App() {
     resetPlannerSession()
     setPlannerState(state)
     setTrackedPositions(seedTracked(coords))
+    trackPlanningStarted(coords.length > 0 ? "edit" : "new", "fresh", state)
+  }
+
+  /**
+   * `mode` is what's being planned (a new route, or edits to a loaded one);
+   * `from` is how the session began - from scratch or the loaded file, the
+   * plan "Done" parked, or a draft restored after a reload.
+   */
+  function trackPlanningStarted(mode: "new" | "edit", from: "fresh" | "reopened" | "draft", state: PlannerState) {
+    track("route_planning_started", { mode, from, point_count: plannerAnchors(state).length })
+  }
+
+  /**
+   * The finished plan's summary. The points go as one encoded polyline
+   * rounded to ~1km (ANALYTICS_POINT_PRECISION), so Umami - a third party -
+   * sees where people plan without pinpointing where they live; the figures
+   * are the same filtered ones the app shows.
+   */
+  function trackPlanningDone(state: PlannerState) {
+    const anchors = plannerAnchors(state)
+    const geometry = plannerGeometry(state)
+    const { gainM, lossM } = elevationGainLossM(geometry.elevations)
+    const points = encodePolyline(anchors, ANALYTICS_POINT_PRECISION)
+    const options = Object.fromEntries(Object.entries(state.options).map(([key, value]) => [`opt_${key}`, value]))
+    track("route_planning_done", {
+      mode: plannerMode,
+      point_count: anchors.length,
+      // A cut polyline would decode to wrong points, so an oversized one is
+      // left out rather than truncated.
+      ...(points.length <= ANALYTICS_MAX_STRING_LENGTH ? { points } : {}),
+      distance_m: Math.round(totalDistanceM(geometry.coords)),
+      ascent_m: Math.round(gainM),
+      descent_m: Math.round(lossM),
+      shape: state.shape,
+      style: mapStyleKey,
+      ...options,
+    })
   }
 
   function handleExitPlanning() {
@@ -657,7 +700,10 @@ export default function App() {
       handleRemoveRoute()
       return
     }
-    if (plannerState) setParkedPlan({ state: plannerState, mode: plannerMode })
+    if (plannerState) {
+      trackPlanningDone(plannerState)
+      setParkedPlan({ state: plannerState, mode: plannerMode })
+    }
     setPlannerState(null)
     resetPlannerSession()
     // Planning is step 1's work; once it's done, a route that actually
@@ -759,6 +805,10 @@ export default function App() {
    * as the preference for this style.
    */
   function handleRoutingOptionsChange(options: RoutingOptions) {
+    const previous = plannerState?.options ?? routingOptions
+    for (const [option, value] of Object.entries(options)) {
+      if (previous[option] !== value) track("routing_options_changed", { option, value, style: mapStyleKey })
+    }
     setRoutingOptionsPreference(options)
     saveRoutingOptions(mapStyleKey, options)
     if (plannerState) applyEditWithFullReprojection(setRoutingOptions(plannerState, options))
@@ -771,7 +821,10 @@ export default function App() {
       toast(result.error, "error")
       return
     }
-    if (result.state !== plannerState) applyEditWithFullReprojection(result.state)
+    if (result.state !== plannerState) {
+      applyEditWithFullReprojection(result.state)
+      track("route_shape_changed", { shape })
+    }
   }
 
   /** A point-list drag: move the point at `from` to position `to` in ride order. */
@@ -848,6 +901,7 @@ export default function App() {
     plannedFilenameRef.current = draft.filename
     setPlannerMode(draft.mode)
     setPlannerState(state)
+    trackPlanningStarted(draft.mode, "draft", state)
     setTrackedPositions(
       trackPositions(
         waypoints.map((w) => ({ key: `w:${w.index}`, lat: w.lat, lon: w.lon })),
@@ -884,11 +938,14 @@ export default function App() {
     // re-picking the same result reopens a popup that was closed.
     setSearchedPlace({ ...place })
     focusOnPlace(place)
+    track("place_search_picked", { name: place.name, kind: place.kind, planning: plannerState !== null })
   }
 
   /** While planning, a searched place can be added straight to the route. */
   function handlePlaceAddPoint(place: PlaceResult) {
-    handleAppendAnchor([place.lat, place.lon])
+    if (handleAppendAnchor([place.lat, place.lon])) {
+      track("place_added_to_route", { where: "end", source: "list", name: place.name, kind: place.kind })
+    }
     focusOnPlace(place)
   }
 
@@ -898,7 +955,10 @@ export default function App() {
     const point: [number, number] = [searchedPlace.lat, searchedPlace.lon]
     const added = where === "start" ? handlePrependAnchor(point) : handleAppendAnchor(point)
     // Now a route point, so the pin would only sit on top of its marker.
-    if (added) setSearchedPlace(null)
+    if (added) {
+      setSearchedPlace(null)
+      track("place_added_to_route", { where, source: "pin", name: searchedPlace.name, kind: searchedPlace.kind })
+    }
   }
 
   // Planner keyboard shortcuts. Handled through a ref so the window listener
