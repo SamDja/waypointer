@@ -28,6 +28,7 @@ budget below is sized to comfortably cover a full-registry search (~50
 searchable types) plus a couple of re-searches within the window.
 """
 
+import math
 import threading
 import time
 from collections import defaultdict
@@ -70,9 +71,14 @@ def make_rate_limit(bucket: str, requests_per_window: int, window_s: float = WIN
             timestamps = [t for t in _requests_by_ip[key] if t > cutoff]
             if len(timestamps) >= requests_per_window:
                 _requests_by_ip[key] = timestamps
+                # The window frees a slot once its oldest request ages out -
+                # Retry-After tells the frontend exactly how long to hold off
+                # (lib/api.ts pauses that endpoint for this long).
+                retry_after_s = max(1, math.ceil(timestamps[0] + window_s - now))
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail="Too many requests - please wait a moment and try again.",
+                    headers={"Retry-After": str(retry_after_s)},
                 )
             timestamps.append(now)
             _requests_by_ip[key] = timestamps

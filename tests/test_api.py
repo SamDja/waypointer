@@ -13,9 +13,9 @@ from fit_tool.profile.messages.course_point_message import CoursePointMessage
 from waypointer import main, poi_types
 from waypointer.fit_io import build_course_fit_bytes
 from waypointer.geometry import project_onto_polyline_m
-from waypointer.main import app
+from waypointer.main import UPSTREAM_RETRY_AFTER_S, app
 from waypointer.poi_db import OsmNode, PoiDbError
-from waypointer.rate_limit import REQUESTS_PER_WINDOW
+from waypointer.rate_limit import REQUESTS_PER_WINDOW, WINDOW_S
 from waypointer.routing import ROUTING_URL
 
 client = TestClient(app)
@@ -818,6 +818,16 @@ def test_route_leg_maps_routing_failure_to_502():
     assert response.status_code == 502
 
 
+@responses.activate
+def test_route_leg_passes_upstream_throttling_on_as_429():
+    """A 429 from BRouter means back off, not "the service is broken" - the
+    browser gets a 429 with a Retry-After so it pauses routing requests."""
+    responses.add(responses.GET, ROUTING_URL, body="slow down", status=429)
+    response = client.post("/api/route-leg", data=_route_leg_form())
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == str(UPSTREAM_RETRY_AFTER_S)
+
+
 def _record_route_query_coords(monkeypatch) -> list[list[tuple[float, float]]]:
     """Like _stub_route_query, but records the route_coords each PostGIS
     query was handed - which is exactly what search_range is meant to scope."""
@@ -929,6 +939,9 @@ def test_rate_limit_blocks_after_threshold(sample_route_bytes, monkeypatch):
         )
         last_status = resp.status_code
     assert last_status == 429
+    # The whole window's budget was spent just now, so a slot frees up
+    # within the window - never "retry immediately" (0) or past it.
+    assert 1 <= int(resp.headers["Retry-After"]) <= WINDOW_S
 
 
 @responses.activate
@@ -973,3 +986,13 @@ def test_geocode_maps_failure_to_502():
 
     responses.add(responses.GET, GEOCODE_URL, body="busy", status=503)
     assert client.get("/api/geocode", params={"q": "Trento"}).status_code == 502
+
+
+@responses.activate
+def test_geocode_passes_upstream_throttling_on_as_429():
+    from waypointer.geocode import GEOCODE_URL
+
+    responses.add(responses.GET, GEOCODE_URL, body="slow down", status=429)
+    response = client.get("/api/geocode", params={"q": "Trento"})
+    assert response.status_code == 429
+    assert response.headers["Retry-After"] == str(UPSTREAM_RETRY_AFTER_S)

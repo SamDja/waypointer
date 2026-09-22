@@ -1,7 +1,7 @@
 // PKCE OAuth 2.0 helpers for Wahoo's Cloud API (public-client flow, no
 // client_secret - see wahooConfig.ts). Plain fetch calls, matching api.ts's
 // style; no HTTP-client dependency added for this.
-import { ApiError } from "@/lib/api"
+import { ApiError, request } from "@/lib/api"
 import { WAHOO_CLIENT_ID, WAHOO_OAUTH_BASE, WAHOO_SCOPES } from "@/lib/wahooConfig"
 
 export function wahooRedirectUri(): string {
@@ -67,12 +67,13 @@ interface RawWahooTokenResponse {
 }
 
 async function requestTokens(params: URLSearchParams): Promise<WahooTokenResult> {
-  const response = await fetch(`${WAHOO_OAUTH_BASE}/oauth/token?${params.toString()}`, {
-    method: "POST",
-  })
-  if (!response.ok) {
-    throw new ApiError(`Wahoo token request failed (${response.status}).`)
-  }
+  // A failed exchange or refresh (typically an expired or revoked
+  // connection) can only be fixed by connecting again.
+  const response = await request(
+    `${WAHOO_OAUTH_BASE}/oauth/token?${params.toString()}`,
+    { method: "POST" },
+    { failed: "Couldn't connect to Wahoo - please connect Wahoo again.", trustDetail: false },
+  )
   const data = (await response.json()) as RawWahooTokenResponse
   return {
     accessToken: data.access_token,

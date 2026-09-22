@@ -51,9 +51,20 @@ function scheduleAutoDismiss(id: string, variant: ToastVariant, hasActions = fal
 }
 
 export function toast(message: string, variant: ToastVariant = "success", actions?: ToastAction[]): string {
+  // The same message already on screen (e.g. every pending route leg
+  // refused during one outage) restarts its timer instead of stacking a copy.
+  // Loading toasts are each resolved by their own caller, so never merged.
+  const hasActions = actions !== undefined && actions.length > 0
+  const duplicate = hasActions || variant === "loading"
+    ? undefined
+    : toasts.find((t) => t.message === message && t.variant === variant && !t.actions?.length)
+  if (duplicate) {
+    scheduleAutoDismiss(duplicate.id, variant)
+    return duplicate.id
+  }
   const id = crypto.randomUUID()
   toasts = [...toasts, { id, message, variant, actions }]
-  scheduleAutoDismiss(id, variant, actions !== undefined && actions.length > 0)
+  scheduleAutoDismiss(id, variant, hasActions)
   notify()
   return id
 }

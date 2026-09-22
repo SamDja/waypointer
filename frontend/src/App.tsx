@@ -14,7 +14,7 @@ import { MapStyleSelect } from "@/components/MapStyleSelect"
 import { Toaster } from "@/components/Toaster"
 import { WahooProfileMenu } from "@/components/WahooProfileMenu"
 import { OffRouteDialog, type OffRouteItem } from "@/components/OffRouteDialog"
-import { ApiError, findPois, lookupPoi, routeLeg } from "@/lib/api"
+import { ApiError, NETWORK_ERROR_MESSAGE, cooldownRemainingMs, findPois, lookupPoi, routeLeg } from "@/lib/api"
 import { track } from "@/lib/analytics"
 import { encodePolyline } from "@/lib/polyline"
 import { elevationGainLossM, projectOntoPolylineM, totalDistanceM } from "@/lib/geometry"
@@ -281,6 +281,11 @@ export default function App() {
   // Leg keys with a request in flight, so a re-render mid-fetch doesn't fire
   // a duplicate request for the same leg.
   const inFlightLegs = useRef<Set<string>>(new Set())
+  // Bumped once a routing cool-down (429) ends, to re-run the leg fetch
+  // effect - otherwise legs that failed while throttled would stay unrouted
+  // until the next edit. One timer however many legs were refused.
+  const [legRetryTick, setLegRetryTick] = useState(0)
+  const legRetryTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Captured at the moment planning starts, so re-synthesizing the route on
   // every edit doesn't rename the file or lose the imported document.
   const plannedFilenameRef = useRef<string>("route.gpx")
@@ -372,10 +377,16 @@ export default function App() {
             err instanceof ApiError ? err.message : "Couldn't plan that stretch of route.",
             "error",
           )
+          if (err instanceof ApiError && err.status === 429 && legRetryTimer.current === null) {
+            legRetryTimer.current = setTimeout(() => {
+              legRetryTimer.current = null
+              setLegRetryTick((tick) => tick + 1)
+            }, cooldownRemainingMs("/api/route-leg"))
+          }
         })
         .finally(() => inFlightLegs.current.delete(key))
     }
-  }, [plannerState])
+  }, [plannerState, legRetryTick])
 
   // The single place a planner state is written through to everything
   // downstream: the map preview, the route stats, and above all `file`,
@@ -1427,6 +1438,10 @@ export default function App() {
       ),
     }
     let hasSucceeded = toSkip.length > 0
+    // The first request's failure, readable as-is (see lib/api.ts) - if every
+    // type fails it's usually for one shared reason (offline, throttled, the
+    // database down), which says more than "every type failed".
+    let firstErrorMessage: string | null = null
     let newCandidateCount = 0
     if (toSkip.length > 0) setFindResult({ ...aggregate })
 
@@ -1476,7 +1491,8 @@ export default function App() {
           })
           setSearchProgress((prev) => prev && { ...prev, doneTypes: new Set(prev.doneTypes).add(entry.poi_type) })
         } catch (err) {
-          const message = err instanceof ApiError ? err.message : "Network error while contacting the server."
+          const message = err instanceof ApiError ? err.message : NETWORK_ERROR_MESSAGE
+          firstErrorMessage ??= message
           aggregate.failed_poi_types = [...aggregate.failed_poi_types, { poi_type: entry.poi_type, error: message }]
           // Only flush into findResult once we have an authoritative
           // point_count/route_coords from a successful chunk to build a
@@ -1490,10 +1506,13 @@ export default function App() {
       }),
     )
 
-    setSearchedPoiTypes(poiConfig)
     const allFailed = aggregate.candidates.length === 0 && !hasSucceeded
+    // A search where every request failed isn't recorded as done - with
+    // nothing flushed into findResult, isAlreadySatisfied would otherwise
+    // take its types as searched and the next click would refuse to retry.
+    if (!allFailed) setSearchedPoiTypes(poiConfig)
     if (allFailed) {
-      updateToast(toastId, "Failed to search OpenStreetMap for any POI type.", "error")
+      updateToast(toastId, firstErrorMessage ?? "Couldn't search for points of interest - please try again.", "error")
       track("find_pois_failed", { reason: "api_error" })
     } else {
       updateToast(

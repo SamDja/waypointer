@@ -4,7 +4,7 @@ import { Command as CommandPrimitive } from "cmdk"
 import { Command, CommandEmpty, CommandItem, CommandList } from "@/components/ui/command"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
-import { searchPlaces } from "@/lib/api"
+import { ApiError, searchPlaces } from "@/lib/api"
 import type { PlaceResult } from "@/types/candidate"
 
 // Wait this long after the last keystroke before searching, and don't search
@@ -36,6 +36,7 @@ export function PlaceSearch({ getNear, onSelect, onAddPoint }: PlaceSearchProps)
   const [query, setQuery] = useState("")
   const [results, setResults] = useState<PlaceResult[]>([])
   const [status, setStatus] = useState<"idle" | "searching" | "done" | "error">("idle")
+  const [errorMessage, setErrorMessage] = useState("")
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -68,9 +69,10 @@ export function PlaceSearch({ getNear, onSelect, onAddPoint }: PlaceSearchProps)
           setResults(places)
           setStatus("done")
         })
-        .catch(() => {
+        .catch((err) => {
           if (controller.signal.aborted) return
           setResults([])
+          setErrorMessage(err instanceof ApiError ? err.message : "Place search isn't available right now.")
           setStatus("error")
         })
     }, SEARCH_DEBOUNCE_MS)
@@ -144,7 +146,7 @@ export function PlaceSearch({ getNear, onSelect, onAddPoint }: PlaceSearchProps)
           <CommandList className="absolute top-full right-0 left-0 z-10 mt-2 max-h-80 overflow-y-auto rounded-xl bg-popover p-1 shadow-lg ring-1 ring-foreground/10">
             {status === "done" && <CommandEmpty>No places found.</CommandEmpty>}
             {status === "error" && (
-              <div className="px-3 py-2 text-sm text-muted-foreground">Place search isn't available right now.</div>
+              <div className="px-3 py-2 text-sm text-muted-foreground">{errorMessage}</div>
             )}
             {results.map((place, i) => (
               <CommandItem

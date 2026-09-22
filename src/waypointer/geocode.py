@@ -38,6 +38,10 @@ class GeocodeError(RuntimeError):
     """Raised when the geocoding request fails or returns malformed data."""
 
 
+class GeocodeRateLimitedError(GeocodeError):
+    """The geocoder answered 429 - see routing.RoutingRateLimitedError."""
+
+
 @dataclass(frozen=True)
 class Place:
     name: str
@@ -120,6 +124,8 @@ def search_places(
         response = http.get(url, params=params, headers={"User-Agent": USER_AGENT}, timeout=15)
     except requests.RequestException as exc:
         raise GeocodeError(f"Place search failed: {exc}") from exc
+    if response.status_code == 429:
+        raise GeocodeRateLimitedError("Place search rate limit reached.")
     if response.status_code != 200:
         raise GeocodeError(f"Place search returned status {response.status_code}: {response.text[:200]}")
     try:

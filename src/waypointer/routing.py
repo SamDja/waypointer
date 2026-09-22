@@ -128,6 +128,11 @@ class RoutingError(RuntimeError):
     """Raised when the routing request fails or returns malformed data."""
 
 
+class RoutingRateLimitedError(RoutingError):
+    """The routing service answered 429 - this server's IP is being throttled
+    upstream, so the caller should back off rather than retry straight away."""
+
+
 # Surface categories for the planner's surface band, from each stretch's OSM
 # tags. Cobbles are their own category because they matter to a road bike in
 # a way "paved" hides.
@@ -339,6 +344,8 @@ def route_leg(
     except requests.RequestException as exc:
         raise RoutingError(f"Routing request failed: {exc}") from exc
 
+    if response.status_code == 429:
+        raise RoutingRateLimitedError("Routing API rate limit reached.")
     if response.status_code != 200:
         raise RoutingError(
             f"Routing API returned status {response.status_code}: {response.text[:200]}"
