@@ -66,6 +66,21 @@ function ToastTitle({ className, ...props }: React.ComponentProps<typeof ToastPr
   )
 }
 
+// A button inside the toast that acts on it (e.g. "Restore"). Radix requires
+// altText: what a screen reader announces as the way to do the same thing.
+function ToastAction({ className, ...props }: React.ComponentProps<typeof ToastPrimitive.Action>) {
+  return (
+    <ToastPrimitive.Action
+      data-slot="toast-action"
+      className={cn(
+        "inline-flex h-7 shrink-0 cursor-pointer items-center rounded-md border bg-background px-2.5 text-xs font-medium transition-colors hover:bg-accent focus:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+        className
+      )}
+      {...props}
+    />
+  )
+}
+
 function ToastClose({ className, ...props }: React.ComponentProps<typeof ToastPrimitive.Close>) {
   return (
     <ToastPrimitive.Close
@@ -82,4 +97,4 @@ function ToastClose({ className, ...props }: React.ComponentProps<typeof ToastPr
   )
 }
 
-export { ToastClose, ToastProvider, ToastRoot, ToastTitle, ToastViewport }
+export { ToastAction, ToastClose, ToastProvider, ToastRoot, ToastTitle, ToastViewport }

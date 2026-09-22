@@ -1,12 +1,24 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode, type RefObject } from "react"
 import { Layer, Map, Marker, Popup, Source, useMap, type MapRef } from "react-map-gl/maplibre"
 import "maplibre-gl/dist/maplibre-gl.css"
+import type {
+  Map as MapLibreMap,
+  MapLayerMouseEvent,
+  MapLayerTouchEvent,
+  MapMouseEvent,
+  MapTouchEvent,
+  PaddingOptions,
+  PointLike,
+} from "maplibre-gl"
+import { AttributionControl, setWorkerUrl } from "maplibre-gl"
+import maplibreWorkerUrl from "maplibre-gl/dist/maplibre-gl-worker.mjs?worker&url"
 import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   ChevronUp,
   Crosshair,
+  Flag,
   Info,
   Locate,
   MapPin,
@@ -15,17 +27,20 @@ import {
   Plus,
   Minus,
   Square,
+  Trash2Icon,
   type LucideIcon,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { MapLegend } from "@/components/MapLegend"
 import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
 import { buildAddablePoiFilter, resolvePoiTypeFromFeatureProps } from "@/lib/basemapPoiMapping"
-import { CircleMarkerIcon, ROUTE_END_COLOR, ROUTE_START_COLOR, UserLocationMarker } from "@/lib/mapIcons"
+import { cumulativeDistancesM, pointAtDistanceM, projectOntoPolylineM } from "@/lib/geometry"
+import { setHoveredDistanceM, useHoveredDistanceM } from "@/lib/hoverDistance"
+import { PLANNER_POINT_COLOR, ROUTE_END_COLOR, ROUTE_START_COLOR, START_FINISH_BACKGROUND } from "@/lib/mapColors"
+import { CircleMarkerIcon, SearchedPlacePin, UserLocationMarker } from "@/lib/mapIcons"
 import { MAP_STYLES } from "@/lib/mapStyles"
 import {
   formatExactDateTime,
@@ -35,8 +50,24 @@ import {
 } from "@/lib/osmTagLabels"
 import { POI_TYPES } from "@/lib/poiTypes"
 import { toast } from "@/lib/toast"
-import type { Candidate, CandidateDetails, ExistingWaypoint, HoveredPoi, PoiLookupResult } from "@/types/candidate"
+import { tailwindHex } from "@/lib/color"
+import type { MapInsets } from "@/lib/useMapInsets"
+import type { RouteShape } from "@/lib/routePlanner"
+import type {
+  Candidate,
+  CandidateDetails,
+  ExistingWaypoint,
+  HoveredPoi,
+  PlaceResult,
+  PoiLookupResult,
+} from "@/types/candidate"
 import colors from "tailwindcss/colors"
+
+// maplibre-gl v6 no longer inlines its worker: it loads it as a sibling file of
+// its own module URL, which Vite's dep pre-bundling (dev) and chunking (build)
+// both break, leaving the map with no tiles. Point it at a Vite-bundled copy
+// instead - this must run before the first <Map> mounts.
+setWorkerUrl(maplibreWorkerUrl)
 
 // A basemap POI icon the visitor clicked, mid-resolution or resolved -
 // rendered as its own Popup (not tied to a Marker, since "not found" has no
@@ -60,7 +91,6 @@ export interface RouteMapProps {
   onChangeWaypointType?: (index: number, poiType: string) => void
   hoveredPoi?: HoveredPoi
   mapStyleKey: string
-  onMapStyleChange: (key: string) => void
   // Tags/last-edited for every candidate with a popup, keyed by osm_id -
   // covers both search-found candidates (via FindPoisResponse.candidate_details)
   // and basemap-click-added ones (see App.tsx's candidateDetails).
@@ -72,12 +102,85 @@ export interface RouteMapProps {
   pendingLookup?: PendingPoiLookup | null
   onConfirmPendingLookup?: () => void
   onDismissPendingLookup?: () => void
+  // Present exactly while the route planner is active - see PlanningProps.
+  planning?: PlanningProps
+  // Bumped to fit the map to the route once, even while planning (when it
+  // otherwise never refits) - e.g. after restoring a saved draft.
+  fitRequest?: number
+  // Reported on load and after every move: the zoom, for the route planner's
+  // spur tolerance (routePlanner.spurToleranceM, which depends on how zoomed
+  // in a point was placed), and the centre, to bias the place search towards
+  // where the visitor is looking.
+  onViewChange?: (view: { zoom: number; center: [number, number] }) => void
+  // Frames a place once per new `id` - fitted to its bbox if it's an area,
+  // flown to otherwise (the place search's pick).
+  focusRequest?: FocusRequest | null
+  // The place search's pick, pinned until it's added or replaced. Clicking
+  // the pin opens a popup with its name and - through onAddSearchedPlace,
+  // present only while planning - where on the route to add it.
+  searchedPlace?: PlaceResult | null
+  onAddSearchedPlace?: (where: "start" | "end") => void
+  // Present only before any route exists (step 1's load-or-plan choice): the
+  // pin's popup then offers to start planning a route from the place.
+  onStartRouteAtSearchedPlace?: () => void
+  // How much of the map the floating header/sidebar cover. The map itself
+  // stays full-page; only its own controls and fit-to-route framing move
+  // clear of the covered area.
+  insets?: MapInsets
 }
+
+export interface FocusRequest {
+  id: number
+  lat: number
+  lon: number
+  // [west, south, east, north]
+  bbox: [number, number, number, number] | null
+}
+
+export interface PlanningProps {
+  // The anchors the visitor placed, in route order - index-aligned with
+  // routePlanner.plannerAnchors(), which is what onMoveAnchor's index means.
+  anchors: [number, number][]
+  // Straight-line stand-ins for legs whose routed geometry is still in
+  // flight, rendered dashed so an in-progress leg reads as provisional.
+  pendingLegs: [number, number][][]
+  onAppendAnchor: (point: [number, number]) => void
+  onMoveAnchor: (anchorIndex: number, point: [number, number]) => void
+  // The route's ends. What this does depends on what the end is attached to:
+  // next to a routed leg it moves, next to imported geometry it extends, or
+  // trims when dropped back onto the route (see App.tsx).
+  // droppedOnRoute is a screen-space hit test against the route line at the
+  // drop position - it's what distinguishes "trim to here" from "start
+  // somewhere new" (see isOnRouteLine).
+  onMoveEndpoint: (which: "start" | "end", point: [number, number], droppedOnRoute: boolean) => void
+  // grabDistanceM says which stretch to split (where the drag started);
+  // dropPoint is where the new point lands.
+  onInsertAnchor: (grabDistanceM: number, dropPoint: [number, number]) => void
+  // The clicked point (index into anchors). Clicking a point selects it,
+  // which opens a popup on it offering to delete it.
+  selectedAnchor: number | null
+  onSelectAnchor: (anchorIndex: number) => void
+  onClearSelection: () => void
+  onDeleteAnchor: (anchorIndex: number) => void
+  // Shared with PlannerPanel's point list: the hovered point glows on the
+  // map, and hovering a marker highlights its row.
+  hoveredAnchor: number | null
+  onHoverAnchor: (anchorIndex: number | null) => void
+  // A loop or out-and-back finishes at its start: the last anchor is then an
+  // ordinary numbered point, and the start is one combined start/finish
+  // marker.
+  shape: RouteShape
+}
+
 
 // Stable empty-Set default for clickAddedCandidateIds - a fresh `new Set()`
 // literal in the destructured default would change identity every render,
 // defeating fitBoundsCandidates' useMemo below.
 const EMPTY_ID_SET: Set<number> = new Set()
+const NO_INSETS: MapInsets = { top: 0, right: 0, bottom: 0 }
+// Breathing room around the route when fitting it into view, on top of
+// whatever the floating header/sidebar cover.
+const FIT_PADDING_PX = 20
 
 const DEFAULT_CENTER: [number, number] = [46.06352, 11.12864]
 const DEFAULT_ZOOM = 14
@@ -101,10 +204,24 @@ const ARROW_ICON_URL = "/arrow-big.png"
 
 // Tailwind v4's palette (tailwindcss/colors) returns oklch() strings, which
 // MapLibre's style validator rejects for paint properties (unlike plain
-// CSS, which resolves oklch() natively). Hardcoded sRGB hex equivalent of
-// colors.violet[600] - Tailwind v4's palette values were chosen to match
-// v3's sRGB colors when converted to OKLCH, so this is the same color.
-const ROUTE_LINE_COLOR = "#7c3aed"
+// CSS, which resolves oklch() natively) - so the violet-600 step is converted
+// to sRGB hex (the same colour the browser paints for it).
+const ROUTE_LINE_COLOR = tailwindHex(colors.violet[600])
+
+// Whether a screen point lands on the route's (invisible, wider) hit layer.
+// The layer only exists while planning a route that already has geometry,
+// and querying a missing layer both throws and logs, so it's checked first.
+//
+// Deliberately a screen-space test rather than a distance in metres: this is
+// what decides whether dropping an endpoint means "end the route here"
+// (trim) or "start somewhere new" (extend), and a metre threshold would be
+// a couple of pixels wide when zoomed out and a huge target when zoomed in.
+// The hit layer is also exactly what the grab cursor highlights, so the
+// gesture matches what the visitor sees.
+function isOnRouteLine(map: MapLibreMap, point: PointLike): boolean {
+  if (!map.getLayer(ROUTE_HIT_LAYER_ID)) return false
+  return map.queryRenderedFeatures(point, { layers: [ROUTE_HIT_LAYER_ID] }).length > 0
+}
 
 // Every coordinate in this codebase is [lat, lon] - GeoJSON/MapLibre
 // expect [lng, lat].
@@ -148,14 +265,100 @@ function getRouteBounds(
   ]
 }
 
+// MapLibre's own attribution control, mounted into a host element outside the
+// map instead of into one of the map's control corners. The map container is
+// its own stacking context (see the <Map> below) so its markers and popups
+// can never rise above the surrounding UI - which would trap a corner
+// control too. This keeps MapLibre's behaviour (attributions collected from
+// the style's sources, shown until the first drag, then collapsed to an "i"
+// button) while letting index.css pin it to the page corner above the
+// sidebar.
+function DetachedAttribution({ hostRef }: { hostRef: RefObject<HTMLDivElement | null> }) {
+  const { current: mapRef } = useMap()
+
+  useEffect(() => {
+    const map = mapRef?.getMap()
+    const host = hostRef.current
+    if (!map || !host) return
+    // Passing options replaces MapLibre's defaults wholesale, so its own
+    // "MapLibre" credit has to be restated.
+    const control = new AttributionControl({
+      compact: true,
+      customAttribution: '<a href="https://maplibre.org/" target="_blank">MapLibre</a>',
+    })
+    host.appendChild(control.onAdd(map))
+    return () => control.onRemove()
+  }, [mapRef, hostRef])
+
+  return null
+}
+
+/**
+ * Fits the map to the route once per bump of `request`. The route can arrive
+ * a render after the request (a restored draft's geometry is synthesized by
+ * an effect), so a request waits until there's a route to fit.
+ */
+// How close to zoom in on a place that has no area (a village's point, a peak).
+const FOCUS_POINT_ZOOM = 14
+
+function FocusOnRequest({ request, padding }: { request: FocusRequest | null; padding: PaddingOptions }) {
+  const { current: map } = useMap()
+  const handledRef = useRef<number | null>(null)
+  useEffect(() => {
+    if (!map || !request || request.id === handledRef.current) return
+    handledRef.current = request.id
+    if (request.bbox) {
+      const [west, south, east, north] = request.bbox
+      map.fitBounds(
+        [
+          [west, south],
+          [east, north],
+        ],
+        { padding, duration: 800, maxZoom: FOCUS_POINT_ZOOM }
+      )
+    } else {
+      map.flyTo({ center: [request.lon, request.lat], zoom: FOCUS_POINT_ZOOM, padding, duration: 800 })
+    }
+  }, [map, request, padding])
+  return null
+}
+
+function FitOnRequest({
+  request,
+  routeCoords,
+  padding,
+}: {
+  request: number
+  routeCoords: [number, number][]
+  padding: PaddingOptions
+}) {
+  const { current: map } = useMap()
+  const handledRef = useRef(0)
+  useEffect(() => {
+    if (!map || request === handledRef.current || routeCoords.length < 2) return
+    const bounds = getRouteBounds(routeCoords, [], [])
+    if (!bounds) return
+    handledRef.current = request
+    map.fitBounds(bounds, { padding, duration: 500 })
+  }, [map, request, routeCoords, padding])
+  return null
+}
+
 function FitBounds({
   routeCoords,
   candidates,
   existingWaypoints,
+  disabled,
+  padding,
 }: {
   routeCoords: [number, number][]
   candidates: Candidate[]
   existingWaypoints: ExistingWaypoint[]
+  padding: PaddingOptions
+  // Suppressed while the route planner is active: routeCoords changes on
+  // every anchor placed or dragged, and refitting on each one yanks the
+  // viewport out from under the visitor mid-edit.
+  disabled?: boolean
 }) {
   const { current: map } = useMap()
   // Tracks the last bounds actually applied, by value rather than by the
@@ -167,14 +370,32 @@ function FitBounds({
   const lastAppliedBoundsRef = useRef<string | null>(null)
 
   useEffect(() => {
-    if (!map) return
+    if (!map || disabled) return
     const bounds = getRouteBounds(routeCoords, candidates, existingWaypoints)
     if (!bounds) return
     const key = JSON.stringify(bounds)
     if (key === lastAppliedBoundsRef.current) return
     lastAppliedBoundsRef.current = key
-    map.fitBounds(bounds, { padding: 20, duration: 0 })
-  }, [map, routeCoords, candidates, existingWaypoints])
+    map.fitBounds(bounds, { padding, duration: 0 })
+  }, [map, routeCoords, candidates, existingWaypoints, disabled, padding])
+
+  return null
+}
+
+// Crosshair while planning, so the map reads as "click to place a point"
+// rather than "drag to pan". Restores the default on exit and on unmount.
+function PlanningCursor({ active }: { active: boolean }) {
+  const { current: map } = useMap()
+
+  useEffect(() => {
+    if (!map) return
+    const canvas = map.getCanvas()
+    const previous = canvas.style.cursor
+    canvas.style.cursor = active ? "crosshair" : previous
+    return () => {
+      canvas.style.cursor = ""
+    }
+  }, [map, active])
 
   return null
 }
@@ -282,43 +503,165 @@ function MapHoverDim({ dimmed }: { dimmed: boolean }) {
   return null
 }
 
-function RouteEndpointMarkers({ routeCoords }: { routeCoords: [number, number][] }) {
+function EndpointMarker({
+  point,
+  icon,
+  color,
+  label,
+  tooltip,
+  onDragEnd,
+  onSelect,
+  highlighted = false,
+  onHover,
+  background,
+}: {
+  point: [number, number]
+  icon: typeof Play
+  color: string
+  background?: string
+  label: string
+  tooltip: string
+  onDragEnd?: (point: [number, number], droppedOnRoute: boolean) => void
+  onSelect?: () => void
+  highlighted?: boolean
+  onHover?: (hovering: boolean) => void
+}) {
+  const { current: mapRef } = useMap()
+  return (
+    <Marker
+      longitude={point[1]}
+      latitude={point[0]}
+      draggable={onDragEnd !== undefined}
+      style={{ zIndex: ROUTE_ENDPOINT_Z_INDEX }}
+      onDragEnd={
+        onDragEnd
+          ? (e) => {
+            // The drag event carries only a lngLat, so project it back to
+            // screen space for the hit test against the route line.
+            const map = mapRef?.getMap()
+            const onRoute = map ? isOnRouteLine(map, map.project(e.lngLat)) : false
+            onDragEnd([e.lngLat.lat, e.lngLat.lng], onRoute)
+          }
+          : undefined
+      }
+      onClick={(e) => {
+        e.originalEvent.stopPropagation()
+        onSelect?.()
+      }}
+    >
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            aria-label={label}
+            className={onDragEnd ? "cursor-grab active:cursor-grabbing" : undefined}
+            onMouseEnter={onHover && (() => onHover(true))}
+            onMouseLeave={onHover && (() => onHover(false))}
+          >
+            <CircleMarkerIcon icon={icon} bgColor={color} background={background} highlighted={highlighted} />
+          </div>
+        </TooltipTrigger>
+        <TooltipContent>{tooltip}</TooltipContent>
+      </Tooltip>
+    </Marker>
+  )
+}
+
+/**
+ * The route's start and end. While planning these are also the drag handles
+ * for both ends - there is deliberately no separate anchor dot or trim
+ * handle stacked on top of them.
+ *
+ * A loop route normally collapses both into one marker, but not while
+ * planning: two coincident ends still have to be independently grabbable.
+ */
+function RouteEndpointMarkers({
+  routeCoords,
+  onMoveEndpoint,
+  onSelect,
+  hovered = null,
+  onHover,
+  finishesAtStart = false,
+}: {
+  routeCoords: [number, number][]
+  // Planning a loop or out-and-back: one combined start/finish marker, which
+  // drags, selects and hovers as the start.
+  finishesAtStart?: boolean
+  onMoveEndpoint?: (which: "start" | "end", point: [number, number], droppedOnRoute: boolean) => void
+  // Planning only: clicking an end selects it (see PlanningProps.selectedAnchor),
+  // and hovering is shared with the point list (PlanningProps.hoveredAnchor).
+  onSelect?: (which: "start" | "end") => void
+  hovered?: "start" | "end" | null
+  onHover?: (which: "start" | "end" | null) => void
+}) {
   if (routeCoords.length === 0) return null
   const start = routeCoords[0]
   const end = routeCoords[routeCoords.length - 1]
   const isLoop = start[0] === end[0] && start[1] === end[1]
+  const dragTooltip = " - drag to move, or onto the route to trim"
 
-  if (isLoop) {
+  // A route that's still just its first planned point has a start and no end
+  // yet - drawing both would stack the end marker on top of the start.
+  if (routeCoords.length === 1) {
     return (
-      <Marker longitude={start[1]} latitude={start[0]} style={{ zIndex: ROUTE_ENDPOINT_Z_INDEX }}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <CircleMarkerIcon icon={Play} bgColor={ROUTE_START_COLOR} />
-          </TooltipTrigger>
-          <TooltipContent>Start / End</TooltipContent>
-        </Tooltip>
-      </Marker>
+      <EndpointMarker
+        point={start}
+        icon={Play}
+        color={ROUTE_START_COLOR}
+        label="Route start"
+        tooltip={onMoveEndpoint ? "Start - drag to move" : "Start"}
+        onDragEnd={onMoveEndpoint ? (point, onRoute) => onMoveEndpoint("start", point, onRoute) : undefined}
+        onSelect={onSelect && (() => onSelect("start"))}
+        highlighted={hovered === "start"}
+        onHover={onHover && ((on) => onHover(on ? "start" : null))}
+      />
+    )
+  }
+
+  // A route that finishes where it starts gets one marker in both colours -
+  // a loaded loop, or a loop/out-and-back being planned. (A one-way route
+  // being planned whose ends happen to meet keeps both, so each end stays
+  // grabbable on its own.)
+  if ((isLoop && !onMoveEndpoint) || finishesAtStart) {
+    return (
+      <EndpointMarker
+        point={start}
+        icon={Flag}
+        color={ROUTE_START_COLOR}
+        background={START_FINISH_BACKGROUND}
+        label="Route start and finish"
+        tooltip={onMoveEndpoint ? "Start / Finish - drag to move" : "Start / Finish"}
+        onDragEnd={onMoveEndpoint ? (point, onRoute) => onMoveEndpoint("start", point, onRoute) : undefined}
+        onSelect={onSelect && (() => onSelect("start"))}
+        highlighted={hovered === "start"}
+        onHover={onHover && ((on) => onHover(on ? "start" : null))}
+      />
     )
   }
 
   return (
     <>
-      <Marker longitude={start[1]} latitude={start[0]} style={{ zIndex: ROUTE_ENDPOINT_Z_INDEX }}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <CircleMarkerIcon icon={Play} bgColor={ROUTE_START_COLOR} />
-          </TooltipTrigger>
-          <TooltipContent>Start</TooltipContent>
-        </Tooltip>
-      </Marker>
-      <Marker longitude={end[1]} latitude={end[0]} style={{ zIndex: ROUTE_ENDPOINT_Z_INDEX }}>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <CircleMarkerIcon icon={Square} bgColor={ROUTE_END_COLOR} />
-          </TooltipTrigger>
-          <TooltipContent>End</TooltipContent>
-        </Tooltip>
-      </Marker>
+      <EndpointMarker
+        point={start}
+        icon={Play}
+        color={ROUTE_START_COLOR}
+        label="Route start"
+        tooltip={onMoveEndpoint ? `Start${dragTooltip}` : "Start"}
+        onDragEnd={onMoveEndpoint ? (point, onRoute) => onMoveEndpoint("start", point, onRoute) : undefined}
+        onSelect={onSelect && (() => onSelect("start"))}
+        highlighted={hovered === "start"}
+        onHover={onHover && ((on) => onHover(on ? "start" : null))}
+      />
+      <EndpointMarker
+        point={end}
+        icon={Square}
+        color={ROUTE_END_COLOR}
+        label="Route end"
+        tooltip={onMoveEndpoint ? `End${dragTooltip}` : "End"}
+        onDragEnd={onMoveEndpoint ? (point, onRoute) => onMoveEndpoint("end", point, onRoute) : undefined}
+        onSelect={onSelect && (() => onSelect("end"))}
+        highlighted={hovered === "end"}
+        onHover={onHover && ((on) => onHover(on ? "end" : null))}
+      />
     </>
   )
 }
@@ -370,7 +713,7 @@ function CompassControl({ bearing, mapRef }: { bearing: number; mapRef: React.Re
         <Button
           variant="outline"
           size="icon-sm"
-          className="bg-background touch-none"
+          className="bg-background shadow-md touch-none"
           onPointerDown={handlePointerDown}
           aria-label="Rotate map"
         >
@@ -379,6 +722,369 @@ function CompassControl({ bearing, mapRef }: { bearing: number; mapRef: React.Re
       </TooltipTrigger>
       <TooltipContent>Drag to rotate, click to reset north</TooltipContent>
     </Tooltip>
+  )
+}
+
+const PLANNER_ANCHOR_COLOR = PLANNER_POINT_COLOR
+const PLANNER_PENDING_SOURCE_ID = "planner-pending"
+// Above the POI markers so anchors stay grabbable while planning over a
+// dense candidate cluster, but below HOVERED_Z_INDEX.
+const PLANNER_ANCHOR_Z_INDEX = 700
+// Above the planner points, so a pin dropped on top of one stays clickable.
+const SEARCHED_PLACE_Z_INDEX = 800
+// Lucide's map-pin tip sits 2 units above the bottom of its 24-unit box:
+// 2.5px at the pin's 30px, so the marker is nudged down by that to put the
+// tip on the place.
+const SEARCHED_PLACE_PIN_TIP_GAP_PX = 2.5
+// Clears the pin above the place.
+const SEARCHED_PLACE_POPUP_OFFSET = 30
+// Big enough to carry a legible two-digit number.
+const PLANNER_ANCHOR_SIZE = 22
+// A transparent, much wider copy of the route line, purely as a pointer
+// target - the visible 3px line is near-impossible to grab.
+const ROUTE_HIT_LAYER_ID = "route-line-hit"
+// Pointer travel below this is a click, not a drag - and a click on the
+// route deliberately does nothing.
+const INSERT_DRAG_THRESHOLD_PX = 4
+
+function PendingLegLines({ pendingLegs }: { pendingLegs: [number, number][][] }) {
+  if (pendingLegs.length === 0) return null
+  return (
+    <Source
+      id={PLANNER_PENDING_SOURCE_ID}
+      type="geojson"
+      data={{
+        type: "FeatureCollection",
+        features: pendingLegs.map((coords) => ({
+          type: "Feature" as const,
+          properties: {},
+          geometry: { type: "LineString" as const, coordinates: coords.map(toLngLat) },
+        })),
+      }}
+    >
+      <Layer
+        id="planner-pending-line"
+        type="line"
+        paint={{
+          "line-color": PLANNER_ANCHOR_COLOR,
+          "line-width": 2,
+          "line-dasharray": [2, 2],
+          "line-opacity": 0.7,
+        }}
+      />
+    </Source>
+  )
+}
+
+/**
+ * A route point the visitor placed, labelled with its position along the
+ * route. Only interior points get one - the start and end are the green/red
+ * endpoint markers, which double as their own drag handles.
+ */
+/**
+ * How a planner point is named - interior points match the number on their
+ * marker, and a route that finishes at its start has no separate end.
+ */
+function anchorLabel(anchorIndex: number, anchorCount: number, shape: RouteShape): string {
+  if (anchorIndex === 0) return shape === "one-way" ? "Start" : "Start / Finish"
+  if (anchorIndex === anchorCount - 1 && shape === "one-way") return "End"
+  return `Point ${anchorIndex}`
+}
+
+// Opened by clicking a planner point, and the only sign it's selected: the
+// one place to delete it by pointer (Delete/Backspace does the same from the
+// keyboard - see App.tsx). Clicking
+// elsewhere on the map closes it, via the Popup's default closeOnClick.
+function SelectedPointPopup({
+  point,
+  label,
+  onDelete,
+  onClose,
+}: {
+  point: [number, number]
+  label: string
+  onDelete: () => void
+  onClose: () => void
+}) {
+  return (
+    <Popup longitude={point[1]} latitude={point[0]} anchor="bottom" offset={20} onClose={onClose}>
+      <div className="flex flex-col gap-2 pr-4 text-sm">
+        <span className="font-medium">{label}</span>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button variant="destructive" size="sm" onClick={onDelete}>
+              <Trash2Icon className="size-4" />
+              Delete point
+            </Button>
+          </TooltipTrigger>
+          {/* To the side: above would cover the popup's title, below the point itself. */}
+          <TooltipContent side="right">Or press Delete</TooltipContent>
+        </Tooltip>
+      </div>
+    </Popup>
+  )
+}
+
+// Opened by clicking the searched-place pin. While planning it's how that
+// place joins the route - at either end, since a searched town is as often
+// where a ride starts as where it goes. Clicking elsewhere closes it (the
+// Popup's default closeOnClick); the pin stays until the place is added or
+// another one is picked.
+function SearchedPlacePopup({
+  place,
+  planning,
+  onAdd,
+  onStartRoute,
+  onClose,
+}: {
+  place: PlaceResult
+  // Absent outside planning, where there's no route to add to.
+  planning?: { anchorCount: number; shape: RouteShape }
+  onAdd?: (where: "start" | "end") => void
+  // Outside planning, before any route exists: start planning a new route
+  // from this place.
+  onStartRoute?: () => void
+  onClose: () => void
+}) {
+  const startLabel = planning?.shape === "one-way" ? "Start here" : "Start and finish here"
+  const endLabel =
+    planning?.shape === "loop" ? "Add as last point" : planning?.shape === "out-and-back" ? "Add as turnaround" : "End here"
+  return (
+    <Popup
+      longitude={place.lon}
+      latitude={place.lat}
+      anchor="bottom"
+      offset={SEARCHED_PLACE_POPUP_OFFSET}
+      onClose={onClose}
+    >
+      <div className="flex max-w-64 flex-col gap-2 pr-4 text-sm">
+        <div className="flex flex-col">
+          <span className="font-medium">{place.name}</span>
+          {place.context && <span className="text-xs text-muted-foreground">{place.context}</span>}
+        </div>
+        {planning && onAdd && (
+          <div className="flex flex-wrap gap-2">
+            {planning.anchorCount === 0 ? (
+              // A lone first point is the start, whichever end it's "added" to.
+              <Button size="sm" onClick={() => onAdd("end")}>
+                <Play className="size-4" />
+                Start the route here
+              </Button>
+            ) : (
+              <>
+                <Button size="sm" variant="outline" onClick={() => onAdd("start")}>
+                  {planning.shape === "one-way" && (
+                    <Play fill={colors.lime[700]} strokeWidth="0" className="size-4" />
+                  )}
+                  {(planning.shape === "loop" || planning.shape === "out-and-back") && (
+                    <Flag fill={colors.black} className="size-4"/>
+                  )}
+                  {startLabel}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => onAdd("end")}>
+                  {planning.shape === "one-way" && (
+                    <Square fill={colors.red[700]} strokeWidth="0" className="size-4" />
+                  )}
+                  {endLabel}
+                </Button>
+              </>
+            )}
+          </div>
+        )}
+        {!planning && onStartRoute && (
+          <Button size="sm" className="self-start" onClick={onStartRoute}>
+            <Play className="size-4" />
+            Start a route here
+          </Button>
+        )}
+      </div>
+    </Popup>
+  )
+}
+
+function PlannerAnchorMarker({
+  number,
+  highlighted,
+  onHover,
+}: {
+  number: number
+  highlighted: boolean
+  onHover: (hovering: boolean) => void
+}) {
+  return (
+    <div
+      aria-label={`Route point ${number}`}
+      onMouseEnter={() => onHover(true)}
+      onMouseLeave={() => onHover(false)}
+      className="flex cursor-grab items-center justify-center rounded-full border-2 border-white text-[11px] font-semibold leading-none text-white active:cursor-grabbing"
+      style={{
+        width: PLANNER_ANCHOR_SIZE,
+        height: PLANNER_ANCHOR_SIZE,
+        backgroundColor: PLANNER_ANCHOR_COLOR,
+        // The same glow CircleMarkerIcon's `highlighted` gives the start/end.
+        boxShadow: highlighted
+          ? `0 1px 3px rgba(0,0,0,0.4), 0 0 0 4px color-mix(in oklch, ${PLANNER_ANCHOR_COLOR} 40%, transparent)`
+          : "0 1px 3px rgba(0,0,0,0.4)",
+      }}
+    >
+      {number}
+    </div>
+  )
+}
+
+/**
+ * Drag anywhere on the route line to insert a point there.
+ *
+ * The line is a GeoJSON layer rather than a DOM marker, so this is wired up
+ * imperatively via useMap(), following the same pattern as FitBounds and
+ * PlanningCursor above, with listener cleanup in the effect's return.
+ *
+ * Two things this has to get right:
+ * - The visible line is 3px, far too thin to grab reliably, so events are
+ *   bound to a wider fully-transparent layer stacked on the same source.
+ * - The insert position comes from where the pointer went DOWN (that's the
+ *   stretch being split), while the new point lands where it came UP.
+ */
+/**
+ * Reports the distance along the route under the pointer while hovering the
+ * route line, so the elevation profile's crosshair follows it (see
+ * lib/hoverDistance). Bound to the same wide hit layer the line-drag uses.
+ */
+function RouteHoverReporter({ routeCoords }: { routeCoords: [number, number][] }) {
+  const { current: map } = useMap()
+  const coordsRef = useRef(routeCoords)
+  useEffect(() => {
+    coordsRef.current = routeCoords
+  }, [routeCoords])
+
+  useEffect(() => {
+    if (!map) return
+    const handleMove = (e: MapLayerMouseEvent) => {
+      const { distanceFromStartM } = projectOntoPolylineM([e.lngLat.lat, e.lngLat.lng], coordsRef.current)
+      setHoveredDistanceM(distanceFromStartM)
+    }
+    const handleLeave = () => setHoveredDistanceM(null)
+    map.on("mousemove", ROUTE_HIT_LAYER_ID, handleMove)
+    map.on("mouseleave", ROUTE_HIT_LAYER_ID, handleLeave)
+    return () => {
+      map.off("mousemove", ROUTE_HIT_LAYER_ID, handleMove)
+      map.off("mouseleave", ROUTE_HIT_LAYER_ID, handleLeave)
+      setHoveredDistanceM(null)
+    }
+  }, [map])
+
+  return null
+}
+
+/** A dot on the route at the distance hovered in the elevation profile (or on the route itself). */
+function HoveredDistanceMarker({ routeCoords }: { routeCoords: [number, number][] }) {
+  const hoveredM = useHoveredDistanceM()
+  const cumulative = useMemo(() => cumulativeDistancesM(routeCoords), [routeCoords])
+  if (hoveredM === null) return null
+  const point = pointAtDistanceM(routeCoords, cumulative, hoveredM)
+  if (!point) return null
+  return (
+    <Marker longitude={point[1]} latitude={point[0]} style={{ zIndex: HOVERED_Z_INDEX, pointerEvents: "none" }}>
+      <div
+        className="rounded-full border-2 border-white"
+        style={{ width: 14, height: 14, backgroundColor: PLANNER_POINT_COLOR, boxShadow: "0 1px 3px rgba(0,0,0,0.4)" }}
+      />
+    </Marker>
+  )
+}
+
+function RouteLineInsertHandle({
+  routeCoords,
+  onInsertAnchor,
+}: {
+  routeCoords: [number, number][]
+  onInsertAnchor: (grabDistanceM: number, dropPoint: [number, number]) => void
+}) {
+  const { current: map } = useMap()
+  const [ghost, setGhost] = useState<[number, number] | null>(null)
+  // Read by listeners that are registered once, so it can't be state.
+  const drag = useRef<{ grabDistanceM: number; startX: number; startY: number; moved: boolean } | null>(null)
+  const coordsRef = useRef(routeCoords)
+  coordsRef.current = routeCoords
+
+  useEffect(() => {
+    if (!map) return
+    // dragPan is a handler object, not a method, so it isn't proxied by
+    // react-map-gl's MapRef - this needs the underlying maplibre Map.
+    const raw = map.getMap()
+
+    const handleDown = (e: MapLayerMouseEvent | MapLayerTouchEvent) => {
+      const coords = coordsRef.current
+      if (coords.length < 2) return
+      const { distanceFromStartM } = projectOntoPolylineM([e.lngLat.lat, e.lngLat.lng], coords)
+      drag.current = { grabDistanceM: distanceFromStartM, startX: e.point.x, startY: e.point.y, moved: false }
+      // Otherwise the map pans out from under the gesture.
+      raw.dragPan.disable()
+      e.preventDefault()
+    }
+
+    const handleMove = (e: MapMouseEvent | MapTouchEvent) => {
+      if (!drag.current) return
+      if (Math.hypot(e.point.x - drag.current.startX, e.point.y - drag.current.startY) > INSERT_DRAG_THRESHOLD_PX) {
+        drag.current.moved = true
+      }
+      if (drag.current.moved) setGhost([e.lngLat.lat, e.lngLat.lng])
+    }
+
+    const handleUp = (e: MapMouseEvent | MapTouchEvent) => {
+      const state = drag.current
+      drag.current = null
+      setGhost(null)
+      raw.dragPan.enable()
+      if (!state) return
+      // A plain click on the route does nothing - only a real drag inserts.
+      if (!state.moved) return
+      onInsertAnchor(state.grabDistanceM, [e.lngLat.lat, e.lngLat.lng])
+    }
+
+    const enter = () => {
+      if (!drag.current) map.getCanvas().style.cursor = "grab"
+    }
+    const leave = () => {
+      if (!drag.current) map.getCanvas().style.cursor = "crosshair"
+    }
+
+    map.on("mousedown", ROUTE_HIT_LAYER_ID, handleDown)
+    map.on("touchstart", ROUTE_HIT_LAYER_ID, handleDown)
+    map.on("mouseenter", ROUTE_HIT_LAYER_ID, enter)
+    map.on("mouseleave", ROUTE_HIT_LAYER_ID, leave)
+    map.on("mousemove", handleMove)
+    map.on("touchmove", handleMove)
+    map.on("mouseup", handleUp)
+    map.on("touchend", handleUp)
+
+    return () => {
+      map.off("mousedown", ROUTE_HIT_LAYER_ID, handleDown)
+      map.off("touchstart", ROUTE_HIT_LAYER_ID, handleDown)
+      map.off("mouseenter", ROUTE_HIT_LAYER_ID, enter)
+      map.off("mouseleave", ROUTE_HIT_LAYER_ID, leave)
+      map.off("mousemove", handleMove)
+      map.off("touchmove", handleMove)
+      map.off("mouseup", handleUp)
+      map.off("touchend", handleUp)
+      // The gesture may be interrupted mid-drag by unmount or a mode change.
+      raw.dragPan.enable()
+    }
+  }, [map, onInsertAnchor])
+
+  if (!ghost) return null
+  return (
+    <Marker longitude={ghost[1]} latitude={ghost[0]} style={{ zIndex: PLANNER_ANCHOR_Z_INDEX }}>
+      <div
+        className="rounded-full border-2 border-white opacity-80"
+        style={{
+          width: PLANNER_ANCHOR_SIZE,
+          height: PLANNER_ANCHOR_SIZE,
+          backgroundColor: PLANNER_ANCHOR_COLOR,
+          boxShadow: "0 1px 3px rgba(0,0,0,0.4)",
+        }}
+      />
+    </Marker>
   )
 }
 
@@ -637,15 +1343,27 @@ export function RouteMap({
   onChangeWaypointType,
   hoveredPoi = null,
   mapStyleKey,
-  onMapStyleChange,
   candidateDetails = {},
   clickAddedCandidateIds = EMPTY_ID_SET,
   onBasemapPoiClick,
   pendingLookup = null,
   onConfirmPendingLookup,
   onDismissPendingLookup,
+  planning,
+  insets = NO_INSETS,
+  onViewChange,
+  fitRequest = 0,
+  focusRequest = null,
+  searchedPlace = null,
+  onAddSearchedPlace,
+  onStartRouteAtSearchedPlace,
 }: RouteMapProps) {
   const [openPopup, setOpenPopup] = useState<{ kind: "candidate" | "waypoint"; id: number } | null>(null)
+  // Which pick's popup was closed. Picking a place in the search list is
+  // already the click that asks about it, so a new pick opens its popup
+  // straight away - with no effect needed to reset this.
+  const [placePopupClosedFor, setPlacePopupClosedFor] = useState<PlaceResult | null>(null)
+  const placePopupOpen = searchedPlace !== null && placePopupClosedFor !== searchedPlace
   const [bearing, setBearing] = useState(0)
   const [locating, setLocating] = useState(false)
   // [lon, lat] - unlike the rest of this file's [lat, lon] convention, this
@@ -663,6 +1381,7 @@ export function RouteMap({
   // fixed pixel guess - MapLibre's popup DOM is a descendant of this
   // wrapper, so the variable cascades to it with no prop plumbing.
   const mapWrapperRef = useRef<HTMLDivElement>(null)
+  const attributionHostRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = mapWrapperRef.current
     if (!el) return
@@ -689,6 +1408,16 @@ export function RouteMap({
     [candidates, clickAddedCandidateIds]
   )
 
+  const fitPadding = useMemo(
+    () => ({
+      top: FIT_PADDING_PX + insets.top,
+      right: FIT_PADDING_PX + insets.right,
+      bottom: FIT_PADDING_PX + insets.bottom,
+      left: FIT_PADDING_PX,
+    }),
+    [insets]
+  )
+
   const pan = (dx: number, dy: number) => {
     mapRef.current?.getMap().panBy([dx, dy], { duration: 200 })
   }
@@ -697,7 +1426,7 @@ export function RouteMap({
     const map = mapRef.current?.getMap()
     const bounds = getRouteBounds(routeCoords, candidates, existingWaypoints)
     if (!map || !bounds) return
-    map.fitBounds(bounds, { padding: 20, duration: 500 })
+    map.fitBounds(bounds, { padding: fitPadding, duration: 500 })
   }
 
   const handleCenterOnLocation = () => {
@@ -728,17 +1457,60 @@ export function RouteMap({
 
   return (
     <TooltipProvider>
-      <div ref={mapWrapperRef} className="relative h-full w-full">
+      <div
+        ref={mapWrapperRef}
+        className="relative h-full w-full"
+        // Read by the overlay controls below.
+        style={{ "--map-inset-top": `${insets.top}px`, "--map-inset-bottom": `${insets.bottom}px` } as CSSProperties}
+      >
         <Map
           ref={mapRef}
           initialViewState={{ longitude: center[1], latitude: center[0], zoom }}
           mapStyle={styleUrl}
-          style={{ width: "100%", height: "100%" }}
-          interactiveLayerIds={BASEMAP_POI_LAYER_IDS}
-          cursor={hoveringPoiLayer ? "pointer" : undefined}
+          // isolation: every marker and popup is a descendant of this
+          // element and carries its own z-index (up to 1500, see the
+          // constants above and index.css) - without a stacking context of
+          // its own, those would compete with the floating header/sidebar
+          // and render on top of them.
+          style={{ width: "100%", height: "100%", isolation: "isolate" }}
+          onLoad={(e) => {
+            const center = e.target.getCenter()
+            onViewChange?.({ zoom: e.target.getZoom(), center: [center.lat, center.lng] })
+          }}
+          onMoveEnd={(e) =>
+            onViewChange?.({ zoom: e.viewState.zoom, center: [e.viewState.latitude, e.viewState.longitude] })
+          }
+          attributionControl={false}
+          // Basemap POI icons stop being clickable while planning: a click
+          // on the map there means "add a point", and a POI icon sitting
+          // where the visitor wants the route to go must not swallow it.
+          interactiveLayerIds={planning ? undefined : BASEMAP_POI_LAYER_IDS}
+          cursor={!planning && hoveringPoiLayer ? "pointer" : undefined}
           onMouseEnter={() => setHoveringPoiLayer(true)}
           onMouseLeave={() => setHoveringPoiLayer(false)}
           onClick={(e) => {
+            // With the pin's popup open, a click elsewhere just dismisses it,
+            // like a planner point's popup.
+            if (placePopupOpen) {
+              setPlacePopupClosedFor(searchedPlace)
+              return
+            }
+            if (planning) {
+              // Clicking the route itself does nothing - that gesture is
+              // reserved for dragging a new point out of the line, and
+              // appending to the far end is never what a click on the
+              // middle of the route meant.
+              if (isOnRouteLine(e.target, e.point)) return
+              // With a point's popup open, a click elsewhere just dismisses
+              // it - adding a point as well would turn every "never mind"
+              // into an edit.
+              if (planning.selectedAnchor !== null) {
+                planning.onClearSelection()
+                return
+              }
+              planning.onAppendAnchor([e.lngLat.lat, e.lngLat.lng])
+              return
+            }
             if (e.features && e.features.length > 0) {
               const feature = e.features[0]
               const props = feature.properties as { class?: string; subclass?: string }
@@ -761,11 +1533,19 @@ export function RouteMap({
         >
           <MapHoverDim dimmed={isHovering} />
           <BearingSync onBearingChange={setBearing} />
+          <PlanningCursor active={planning !== undefined} />
           <BasemapPoiFilter />
 
           {hasRoute && (
             <Source id={ROUTE_SOURCE_ID} type="geojson" data={toRouteLineGeoJson(routeCoords)}>
               <Layer id="route-line" type="line" paint={{ "line-color": ROUTE_LINE_COLOR, "line-width": 3 }} />
+              {planning && (
+                <Layer
+                  id={ROUTE_HIT_LAYER_ID}
+                  type="line"
+                  paint={{ "line-color": ROUTE_LINE_COLOR, "line-width": 16, "line-opacity": 0 }}
+                />
+              )}
             </Source>
           )}
           <RouteDirectionArrows routeCoords={routeCoords} />
@@ -975,42 +1755,142 @@ export function RouteMap({
             )
           })}
 
-          <RouteEndpointMarkers routeCoords={routeCoords} />
+          {planning && (
+            <>
+              <PendingLegLines pendingLegs={planning.pendingLegs} />
+              {/* Interior points only - anchor 0 and the last one are the
+                  start/end markers below, which are their own drag handles.
+                  The anchor index doubles as the displayed number, so points
+                  read 1, 2, 3 in the order they're ridden. */}
+              {/* Interior points - plus the last one when the route finishes at its start. */}
+              {planning.anchors.slice(1, planning.shape === "one-way" ? -1 : undefined).map((anchor, i) => {
+                const index = i + 1
+                return (
+                  <Marker
+                    // Anchors are positional - a key on coordinates would make
+                    // React reuse the wrong marker when one is dragged onto
+                    // another's old position.
+                    key={`anchor-${index}`}
+                    longitude={anchor[1]}
+                    latitude={anchor[0]}
+                    draggable
+                    style={{ zIndex: PLANNER_ANCHOR_Z_INDEX }}
+                    onDragEnd={(e) => planning.onMoveAnchor(index, [e.lngLat.lat, e.lngLat.lng])}
+                    onClick={(e) => {
+                      e.originalEvent.stopPropagation()
+                      planning.onSelectAnchor(index)
+                    }}
+                  >
+                    <PlannerAnchorMarker
+                      number={index}
+                      highlighted={planning.hoveredAnchor === index}
+                      onHover={(on) => planning.onHoverAnchor(on ? index : null)}
+                    />
+                  </Marker>
+                )
+              })}
+              <RouteLineInsertHandle routeCoords={routeCoords} onInsertAnchor={planning.onInsertAnchor} />
+              <RouteHoverReporter routeCoords={routeCoords} />
+              {planning.selectedAnchor !== null && planning.anchors[planning.selectedAnchor] && (
+                <SelectedPointPopup
+                  // Remounted per point, so switching selection re-anchors it.
+                  key={`selected-point-${planning.selectedAnchor}`}
+                  point={planning.anchors[planning.selectedAnchor]}
+                  label={anchorLabel(planning.selectedAnchor, planning.anchors.length, planning.shape)}
+                  onDelete={() => planning.onDeleteAnchor(planning.selectedAnchor!)}
+                  onClose={planning.onClearSelection}
+                />
+              )}
+            </>
+          )}
+
+          <RouteEndpointMarkers
+            routeCoords={routeCoords}
+            onMoveEndpoint={planning?.onMoveEndpoint}
+            finishesAtStart={planning !== undefined && planning.shape !== "one-way"}
+            onSelect={
+              planning &&
+              ((which) => planning.onSelectAnchor(which === "start" ? 0 : planning.anchors.length - 1))
+            }
+            hovered={
+              !planning || planning.hoveredAnchor === null
+                ? null
+                : planning.hoveredAnchor === 0
+                  ? "start"
+                  : planning.hoveredAnchor === planning.anchors.length - 1
+                    ? "end"
+                    : null
+            }
+            onHover={
+              planning &&
+              ((which) =>
+                planning.onHoverAnchor(
+                  which === null ? null : which === "start" ? 0 : planning.anchors.length - 1
+                ))
+            }
+          />
+          {searchedPlace && (
+            <Marker
+              longitude={searchedPlace.lon}
+              latitude={searchedPlace.lat}
+              anchor="bottom"
+              offset={[0, SEARCHED_PLACE_PIN_TIP_GAP_PX]}
+              style={{ zIndex: SEARCHED_PLACE_Z_INDEX }}
+              onClick={(e) => {
+                e.originalEvent.stopPropagation()
+                setPlacePopupClosedFor(placePopupOpen ? searchedPlace : null)
+              }}
+            >
+              <SearchedPlacePin />
+            </Marker>
+          )}
+          {searchedPlace && placePopupOpen && (
+            <SearchedPlacePopup
+              place={searchedPlace}
+              planning={planning && { anchorCount: planning.anchors.length, shape: planning.shape }}
+              onAdd={onAddSearchedPlace}
+              onStartRoute={onStartRouteAtSearchedPlace}
+              onClose={() => setPlacePopupClosedFor(searchedPlace)}
+            />
+          )}
           {userLocation && (
             <Marker longitude={userLocation[0]} latitude={userLocation[1]}>
               <UserLocationMarker />
             </Marker>
           )}
-          <FitBounds routeCoords={routeCoords} candidates={fitBoundsCandidates} existingWaypoints={existingWaypoints} />
+          <DetachedAttribution hostRef={attributionHostRef} />
+          <FitOnRequest request={fitRequest} routeCoords={routeCoords} padding={fitPadding} />
+          <FocusOnRequest request={focusRequest} padding={fitPadding} />
+          <HoveredDistanceMarker routeCoords={routeCoords} />
+          <FitBounds
+            routeCoords={routeCoords}
+            candidates={fitBoundsCandidates}
+            existingWaypoints={existingWaypoints}
+            disabled={planning !== undefined}
+            padding={fitPadding}
+          />
         </Map>
 
-        <div className="absolute left-2 top-2 z-10">
+        {/* Outside the isolated <Map>, so it can sit above the sidebar - see
+            DetachedAttribution. Also carries MapLibre's corner class so the
+            control keeps its stock styling. */}
+        <div ref={attributionHostRef} className="map-attribution-corner maplibregl-ctrl-bottom-right" />
+
+        <div className="absolute left-4 top-[calc(var(--map-inset-top)+0.5rem)] z-10">
           <MapLegend candidates={candidates} existingWaypoints={existingWaypoints} mapStyleKey={mapStyleKey} />
         </div>
 
-        <div className="absolute right-2 top-2 z-10">
-          <Select value={mapStyleKey} onValueChange={onMapStyleChange}>
-            <SelectTrigger className="bg-background">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {MAP_STYLES.map((s) => (
-                <SelectItem key={s.key} value={s.key}>
-                  {s.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-
-        <div className="absolute bottom-2 right-2 z-10 flex flex-col items-end gap-2">
+        {/* Every map control lives in one group on the left: the sidebar
+            floats over the right side, so controls there would hang in the
+            middle of the map. */}
+        <div className="absolute bottom-[calc(var(--map-inset-bottom)+0.5rem)] left-4 z-10 flex flex-col items-start gap-2">
           <div className="grid grid-cols-3 grid-rows-3 gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant="outline"
                   size="icon-sm"
-                  className="bg-background col-start-2 row-start-1"
+                  className="bg-background shadow-md col-start-2 row-start-1"
                   onClick={() => pan(0, -100)}
                   aria-label="Pan up"
                 >
@@ -1024,7 +1904,7 @@ export function RouteMap({
                 <Button
                   variant="outline"
                   size="icon-sm"
-                  className="bg-background col-start-1 row-start-2"
+                  className="bg-background shadow-md col-start-1 row-start-2"
                   onClick={() => pan(-100, 0)}
                   aria-label="Pan left"
                 >
@@ -1038,7 +1918,7 @@ export function RouteMap({
                 <Button
                   variant="outline"
                   size="icon-sm"
-                  className="bg-background col-start-3 row-start-2"
+                  className="bg-background shadow-md col-start-3 row-start-2"
                   onClick={() => pan(100, 0)}
                   aria-label="Pan right"
                 >
@@ -1052,7 +1932,7 @@ export function RouteMap({
                 <Button
                   variant="outline"
                   size="icon-sm"
-                  className="bg-background col-start-2 row-start-3"
+                  className="bg-background shadow-md col-start-2 row-start-3"
                   onClick={() => pan(0, 100)}
                   aria-label="Pan down"
                 >
@@ -1063,13 +1943,13 @@ export function RouteMap({
             </Tooltip>
           </div>
 
-          <div className="flex flex-col gap-1">
+          <div className="grid grid-cols-3 gap-1">
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
                   variant="outline"
                   size="icon-sm"
-                  className="bg-background"
+                  className="bg-background shadow-md"
                   onClick={() => mapRef.current?.getMap().zoomIn({ duration: 200 })}
                   aria-label="Zoom in"
                 >
@@ -1083,7 +1963,7 @@ export function RouteMap({
                 <Button
                   variant="outline"
                   size="icon-sm"
-                  className="bg-background"
+                  className="bg-background shadow-md"
                   onClick={() => mapRef.current?.getMap().zoomOut({ duration: 200 })}
                   aria-label="Zoom out"
                 >
@@ -1093,40 +1973,37 @@ export function RouteMap({
               <TooltipContent>Zoom out</TooltipContent>
             </Tooltip>
             <CompassControl bearing={bearing} mapRef={mapRef} />
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  className="bg-background shadow-md"
+                  onClick={handleCenterOnRoute}
+                  disabled={!hasRoute}
+                  aria-label="Center on route"
+                >
+                  <Crosshair />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Center on route</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="outline"
+                  size="icon-sm"
+                  className="bg-background shadow-md"
+                  loading={locating}
+                  onClick={handleCenterOnLocation}
+                  aria-label="Center on my location"
+                >
+                  <Locate />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Center on my location</TooltipContent>
+            </Tooltip>
           </div>
-        </div>
-
-        <div className="absolute bottom-2 left-2 z-10 flex gap-2">
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                className="bg-background"
-                onClick={handleCenterOnRoute}
-                disabled={!hasRoute}
-                aria-label="Center on route"
-              >
-                <Crosshair />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Center on route</TooltipContent>
-          </Tooltip>
-          <Tooltip>
-            <TooltipTrigger asChild>
-              <Button
-                variant="outline"
-                size="icon-sm"
-                className="bg-background"
-                loading={locating}
-                onClick={handleCenterOnLocation}
-                aria-label="Center on my location"
-              >
-                <Locate />
-              </Button>
-            </TooltipTrigger>
-            <TooltipContent>Center on my location</TooltipContent>
-          </Tooltip>
         </div>
       </div>
     </TooltipProvider>

@@ -1,30 +1,88 @@
-import { useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { CandidateChecklist } from "@/components/CandidateChecklist"
 import { FeedbackWidget } from "@/components/FeedbackWidget"
 import { FindPoisCard } from "@/components/FindPoisCard"
 import { ImportCard } from "@/components/ImportCard"
-import { RouteMap, type PendingPoiLookup } from "@/components/RouteMap"
+import { RouteMap, type FocusRequest, type PendingPoiLookup } from "@/components/RouteMap"
 import { SaveCard } from "@/components/SaveCard"
 import { StepCard } from "@/components/StepCard"
+import { PlannerPanel } from "@/components/PlannerPanel"
+import { PlaceSearch } from "@/components/PlaceSearch"
+import { ElevationProfile } from "@/components/ElevationProfile"
+import type { PlannerPoint } from "@/components/PlannerPointList"
+import { MapStyleSelect } from "@/components/MapStyleSelect"
 import { Toaster } from "@/components/Toaster"
 import { WahooProfileMenu } from "@/components/WahooProfileMenu"
-import { ApiError, findPois, lookupPoi } from "@/lib/api"
+import { OffRouteDialog, type OffRouteItem } from "@/components/OffRouteDialog"
+import { ApiError, findPois, lookupPoi, routeLeg } from "@/lib/api"
 import { track } from "@/lib/analytics"
+import { encodePolyline } from "@/lib/polyline"
 import { elevationGainLossM, projectOntoPolylineM, totalDistanceM } from "@/lib/geometry"
-import { parseExistingWaypointsFromGpx, parseRouteCoordsFromGpx, parseRouteElevationsFromGpx } from "@/lib/gpx"
+import {
+  buildGpxFile,
+  parseExistingWaypointsFromGpx,
+  parseGpxDocument,
+  parseRouteCoordsFromGpx,
+  parseRouteElevationsFromGpx,
+} from "@/lib/gpx"
+import { routingOptionSpecsForStyle, routingProfileForStyle, type RoutingOptions } from "@/lib/mapStyles"
+import {
+  appendAnchor,
+  commonPrefixLength,
+  emptyPlannerState,
+  endpointNeighbourKind,
+  insertAnchorAt,
+  isLegRouted,
+  legKey,
+  moveAnchor,
+  offRouteItems,
+  pendingLegs,
+  plannerAnchors,
+  outboundGeometry,
+  plannerGeometry,
+  plannerLegDistancesM,
+  plannerReturnDistanceM,
+  plannerSurface,
+  plannerStateFromImport,
+  prependAnchor,
+  removeAnchor,
+  reorderAnchors,
+  returnLeg,
+  setRouteShape,
+  setRoutingOptions,
+  spurToleranceM,
+  trackPositions,
+  trackedAfterExtend,
+  trackedAfterTrim,
+  trimEnd,
+  trimStart,
+  unroutedLegs,
+  withLeg,
+  type PlannerState,
+  type RouteShape,
+  type Segment,
+  type TrackedPositions,
+} from "@/lib/routePlanner"
 import {
   loadAvgSpeedKmh,
   loadMapStyleKey,
+  loadOffRouteThresholdM,
+  loadRoutingOptions,
   loadPoiSearchConfig,
   loadSettings,
   saveAvgSpeedKmh,
   saveMapStyleKey,
+  saveOffRouteThresholdM,
+  saveRoutingOptions,
+  sanitizeRoutingOptions,
   savePoiSearchConfig,
   saveSettings,
   type DeviceSettings,
   type PoiSearchEntry,
 } from "@/lib/settings"
-import { toast, updateToast } from "@/lib/toast"
+import { clearDraft, loadDraft, saveDraft, type PlannerDraft } from "@/lib/plannerDraft"
+import { useElementHeight, useMapInsets } from "@/lib/useMapInsets"
+import { dismissToast, toast, updateToast } from "@/lib/toast"
 import { loadWahooTokens, type WahooTokens } from "@/lib/wahooSettings"
 import type {
   Candidate,
@@ -33,7 +91,9 @@ import type {
   FailedPoiType,
   FindPoisResponse,
   HoveredPoi,
+  PlaceResult,
   PoiSearchConfig,
+  SearchRange,
 } from "@/types/candidate"
 
 type Step = "import" | "find"
@@ -46,13 +106,48 @@ type Step = "import" | "find"
 const EMPTY_CANDIDATES: Candidate[] = []
 const EMPTY_FAILED_POI_TYPES: FailedPoiType[] = []
 
-// Firing every per-type /api/find-pois/route request at once seems to make the
-// public Overpass mirror more likely to time out / 502 (it may throttle
-// concurrent connections from our server's single shared IP) - staggering
-// each request's start by this much, smallest search radius first, gives
-// Overpass breathing room while still overlapping in flight rather than
-// waiting for one to fully finish before starting the next.
+// Long enough that placing several anchors in a row collapses into one
+// re-search, short enough that the checklist catches up while the visitor is
+// still looking at the stretch they just added.
+const RE_SEARCH_DEBOUNCE_MS = 1500
+
+// Staggers each per-type /api/find-pois/route request's start by this much,
+// smallest search radius first, so results stream in progressively per type
+// while still overlapping in flight rather than waiting for one to fully
+// finish before starting the next. (Originally added to give the public
+// Overpass mirror breathing room; kept after the move to PostGIS for the
+// progressive per-type streaming.)
 const SEARCH_STAGGER_MS = 200
+
+// Plenty for a planning session; bounds memory, since each entry holds a
+// whole PlannerState (an import's geometry included).
+const PLANNER_HISTORY_LIMIT = 100
+
+// How long after the last planner change the draft is saved (see lib/plannerDraft).
+const DRAFT_SAVE_DEBOUNCE_MS = 1000
+// Analytics: planned points are rounded to 2 decimals (~1km) before they
+// leave the browser, and Umami cuts strings at 500 characters.
+const ANALYTICS_POINT_PRECISION = 2
+const ANALYTICS_MAX_STRING_LENGTH = 500
+
+// Space between the elevation profile and the map's bottom/left edges.
+const PROFILE_GAP_PX = 16
+
+// One step of the planner's undo/redo history: the route to return to, and
+// the POIs/waypoints the edit that left it unchecked (because they ended up
+// off the new route) - returning re-checks them. Tracked positions aren't
+// stored: they're recomputed against the restored route, which also covers
+// anything a search found since.
+interface PlannerHistoryEntry {
+  state: PlannerState
+  uncheckedKeys: string[]
+}
+
+/** Whether a loop's return leg is still waiting for its routed geometry. */
+function returnLegPending(state: PlannerState): boolean {
+  const returning = returnLeg(state)
+  return returning !== null && !isLegRouted(state, returning)
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -101,23 +196,231 @@ export default function App() {
   const [wahooTokens, setWahooTokens] = useState<WahooTokens | null>(() => loadWahooTokens())
   const [avgSpeedKmh, setAvgSpeedKmh] = useState<number>(() => loadAvgSpeedKmh())
   const [mapStyleKey, setMapStyleKey] = useState<string>(() => loadMapStyleKey())
+  // The visitor's saved BRouter options for the current style - what a new
+  // planning session starts with. While planning, the planner state's own
+  // options are what the route (and PlannerPanel) reflect, so an undo that
+  // restores older options shows them without overwriting this preference.
+  const [routingOptions, setRoutingOptionsPreference] = useState<RoutingOptions>(() =>
+    loadRoutingOptions(loadMapStyleKey())
+  )
+
+  // -- Route planner ------------------------------------------------------
+  // Non-null exactly while the planner is active. The planner is the source
+  // of truth for the route's geometry while it is, and every edit
+  // re-synthesizes `file` from it - which is what lets the entire downstream
+  // pipeline (find-pois, save, the Wahoo push) stay untouched.
+  const [plannerState, setPlannerState] = useState<PlannerState | null>(null)
+  // Whether planning opened on an empty map or on an already-loaded route -
+  // only PlannerPanel's wording depends on it.
+  const [plannerMode, setPlannerMode] = useState<"new" | "edit">("new")
+  const [plannerPast, setPlannerPast] = useState<PlannerHistoryEntry[]>([])
+  const [plannerFuture, setPlannerFuture] = useState<PlannerHistoryEntry[]>([])
+  // The planner point clicked on the map, as an index into plannerAnchors -
+  // what Delete/Backspace and the point's map popup act on. Any edit clears
+  // it, since indices shift.
+  const [selectedAnchorIndex, setSelectedAnchorIndex] = useState<number | null>(null)
+  // The planner point hovered in PlannerPanel's point list or on the map,
+  // highlighted in both.
+  const [hoveredAnchorIndex, setHoveredAnchorIndex] = useState<number | null>(null)
+  // The draft couldn't be saved because it's too big for localStorage (a
+  // very long import) - PlannerPanel says so quietly.
+  const [draftTooBig, setDraftTooBig] = useState(false)
+  // The plan behind the current route, kept when "Done" leaves the planner
+  // so "Edit route" reopens it as it was - its points, routed legs (and their
+  // surface), shape and options - instead of rebuilding it from the finished
+  // file as one block of imported geometry. Dropped when the route goes:
+  // removed, replaced by another file, or by a restored draft.
+  const [parkedPlan, setParkedPlan] = useState<{ state: PlannerState; mode: "new" | "edit" } | null>(null)
+  // Bumped to ask RouteMap to fit the route once - it doesn't while
+  // planning, but a restored draft needs framing.
+  const [fitRequest, setFitRequest] = useState(0)
+  // The imported file's parsed document, kept so an edited import is
+  // re-serialized from the original rather than rebuilt - preserving its
+  // pre-existing <wpt> entries and their waypointer: extension markers.
+  const [sourceDoc, setSourceDoc] = useState<Document | null>(null)
+  const [trackedPositions, setTrackedPositions] = useState<TrackedPositions>({})
+  const [offRouteThresholdM, setOffRouteThresholdM] = useState<number>(() => loadOffRouteThresholdM())
+  // An edit held back pending confirmation because it stranded something.
+  // Cancelling drops it and leaves the route exactly as it was.
+  const [pendingEdit, setPendingEdit] = useState<{
+    state: PlannerState
+    tracked: TrackedPositions
+    // Length of the leading coordinates the edit left untouched, or null
+    // when the edit added no new ground (a trim) - see scheduleReSearch.
+    unchangedPrefixLength: number | null
+  } | null>(null)
+  const reSearchTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // The debounced re-search fires after `file` has been replaced by an edit,
+  // so it reads the current one from here rather than from a stale closure.
+  const latestFileRef = useRef<File | null>(null)
+  // The header and sidebar float over the full-page map; RouteMap needs to
+  // know how much of it they cover.
+  const headerRef = useRef<HTMLElement>(null)
+  const asideRef = useRef<HTMLElement>(null)
+  const overlayInsets = useMapInsets(headerRef, asideRef)
+  // The elevation profile floats over the bottom of the map while planning;
+  // its height (plus its gap to the edge) is the map's bottom inset.
+  const [profileEl, setProfileEl] = useState<HTMLDivElement | null>(null)
+  const profileHeight = useElementHeight(profileEl)
+  const mapInsets = useMemo(
+    () => ({ ...overlayInsets, bottom: profileHeight > 0 ? profileHeight + PROFILE_GAP_PX : 0 }),
+    [overlayInsets, profileHeight]
+  )
+  // The map's current zoom, for the planner's spur tolerance. A ref, not
+  // state: it's only read when a point is placed or moved.
+  const mapZoomRef = useRef(14)
+  // The map's centre, to bias the place search towards where the visitor is
+  // looking. Also a ref: read only when a search runs.
+  const mapCenterRef = useRef<[number, number] | null>(null)
+  // The place search's pick, for RouteMap to frame.
+  const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null)
+  // The place search's last pick, pinned on the map until it's added to the
+  // route or another place is picked.
+  const [searchedPlace, setSearchedPlace] = useState<PlaceResult | null>(null)
+  const getMapCenter = useCallback(() => mapCenterRef.current, [])
+  // Leg keys with a request in flight, so a re-render mid-fetch doesn't fire
+  // a duplicate request for the same leg.
+  const inFlightLegs = useRef<Set<string>>(new Set())
+  // Captured at the moment planning starts, so re-synthesizing the route on
+  // every edit doesn't rename the file or lose the imported document.
+  const plannedFilenameRef = useRef<string>("route.gpx")
+  const sourceDocRef = useRef<Document | null>(null)
+  // The planner's current geometry, read by the debounced re-search so it
+  // resolves its index range against the route as it stands when the timer
+  // fires rather than as it stood when the edit was made.
+  const plannerCoordsRef = useRef<[number, number][]>([])
+
+  const routingProfile = routingProfileForStyle(mapStyleKey)
+
+  useEffect(() => {
+    latestFileRef.current = file
+  }, [file])
+
+  useEffect(() => {
+    sourceDocRef.current = sourceDoc
+  }, [sourceDoc])
+
+  useEffect(() => {
+    return () => {
+      if (reSearchTimer.current) clearTimeout(reSearchTimer.current)
+    }
+  }, [])
+
+  // A search run while planning introduces candidates the tracker has never
+  // seen. Without this, an edit could only ever strand things that existed
+  // when planning began - so a fountain found mid-session would survive a
+  // trim that put it kilometres off the route.
+  useEffect(() => {
+    if (!plannerState || !findResult) return
+    setTrackedPositions(
+      trackPositions(
+        [
+          ...findResult.existing_waypoints.map((w) => ({ key: `w:${w.index}`, lat: w.lat, lon: w.lon })),
+          ...findResult.candidates.map((c) => ({ key: `c:${c.osm_id}`, lat: c.lat, lon: c.lon })),
+        ],
+        plannerCoordsRef.current,
+      ),
+    )
+    // Re-seeding is driven by the search result alone; plannerState is read
+    // through a ref so an edit doesn't discard the incremental values this
+    // exists to establish.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [findResult])
+
+  // Fetches routed geometry for any leg that doesn't have it yet. Runs
+  // whenever the planner state changes, which is what makes a dragged anchor
+  // cost exactly the two legs it touches - every other leg is already in the
+  // cache and never reaches here.
+  // Deliberately has no cleanup that discards in-flight responses. This
+  // effect re-runs on every edit, so cancelling would throw away a leg that
+  // had already been paid for and re-request it from a shared public
+  // service on the next render. A routed leg is valid whenever it arrives -
+  // it's keyed on its own endpoints, so a late response either fills a leg
+  // that's still wanted or lands in a state that no longer references it,
+  // and the functional update below no-ops once planning has ended.
+  useEffect(() => {
+    if (!plannerState) return
+
+    for (const segment of pendingLegs(plannerState)) {
+      const key = legKey(segment.from, segment.to, plannerState.profile, plannerState.options)
+      if (inFlightLegs.current.has(key)) continue
+      inFlightLegs.current.add(key)
+
+      const routedWith = { profile: plannerState.profile, options: plannerState.options }
+      routeLeg(segment.from, segment.to, routedWith.profile, routedWith.options)
+        .then((response) => {
+          setPlannerState((prev) => {
+            if (!prev) return prev
+            return withLeg(
+              prev,
+              segment.from,
+              segment.to,
+              {
+                coords: response.coords,
+                elevations: response.elevations,
+                distanceM: response.distance_m,
+                surface: response.surface.map((run) => ({ category: run.category, distanceM: run.distance_m })),
+                cyclewayM: response.cycleway_m,
+              },
+              // The options may have changed while this was in flight.
+              routedWith
+            )
+          })
+        })
+        .catch((err) => {
+          toast(
+            err instanceof ApiError ? err.message : "Couldn't plan that stretch of route.",
+            "error",
+          )
+        })
+        .finally(() => inFlightLegs.current.delete(key))
+    }
+  }, [plannerState])
+
+  // The single place a planner state is written through to everything
+  // downstream: the map preview, the route stats, and above all `file`,
+  // which is what /api/find-pois and /api/save actually consume.
+  // Synthesizing here is what keeps those endpoints unaware the planner
+  // exists at all. Runs on every planner change, including routed geometry
+  // arriving from the effect above.
+  useEffect(() => {
+    if (!plannerState) return
+    const { coords, elevations } = plannerGeometry(plannerState)
+    plannerCoordsRef.current = coords
+    setPreviewRouteCoords(coords)
+    setPreviewElevations(elevations)
+    // Deleting points can take a route back below two - there's no file to
+    // hand downstream until there are two again.
+    if (coords.length < 2) {
+      setFile(null)
+      return
+    }
+    const name = plannedFilenameRef.current
+    setFile(
+      buildGpxFile(
+        { coords, elevations, name: name.replace(/\.gpx$/i, ""), sourceDoc: sourceDocRef.current },
+        name,
+      ),
+    )
+    // Only the planner state drives this; the filename and source document
+    // are captured in refs precisely so re-synthesizing doesn't re-run when
+    // `file` itself changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plannerState])
 
   async function handleFileChange(newFile: File, source: "drop" | "browse" | "wahoo") {
     setFile(newFile)
     setFindResult(null)
     setSelectedIds(new Set())
     setSearchedPoiTypes([])
+    // A newly imported file replaces whatever was being planned.
+    setPlannerState(null)
+    setTrackedPositions({})
+    resetPlannerSession()
+    clearDraft()
+    setParkedPlan(null)
 
-    const text = await newFile.text()
-    const routeCoords = parseRouteCoordsFromGpx(text)
-    setPreviewRouteCoords(routeCoords)
-    setPreviewElevations(parseRouteElevationsFromGpx(text))
-    const waypoints = parseExistingWaypointsFromGpx(text)
-    setPreviewExistingWaypoints(waypoints)
-    // Default to keeping every pre-existing waypoint, matching the
-    // post-search default in handleFind below.
-    setKeptWaypointIndices(new Set(waypoints.map((w) => w.index)))
-    setWaypointTypeOverrides({})
+    const { routeCoords, waypoints } = loadGpxText(await newFile.text())
 
     if (routeCoords.length === 0) {
       track("gpx_parse_failed", { reason: "empty_or_invalid" })
@@ -130,7 +433,29 @@ export default function App() {
     }
   }
 
+  /**
+   * Loads a GPX's text as the working route's source: its parsed document
+   * (which the planner re-serializes from, keeping its <wpt> entries), the
+   * preview line and elevations, and its pre-existing waypoints, all kept.
+   * Shared by importing a file and by restoring a planner draft.
+   */
+  function loadGpxText(text: string) {
+    setSourceDoc(parseGpxDocument(text))
+    const routeCoords = parseRouteCoordsFromGpx(text)
+    setPreviewRouteCoords(routeCoords)
+    setPreviewElevations(parseRouteElevationsFromGpx(text))
+    const waypoints = parseExistingWaypointsFromGpx(text)
+    setPreviewExistingWaypoints(waypoints)
+    // Default to keeping every pre-existing waypoint, matching the
+    // post-search default in handleFind below.
+    setKeptWaypointIndices(new Set(waypoints.map((w) => w.index)))
+    setWaypointTypeOverrides({})
+    return { routeCoords, waypoints }
+  }
+
   function handleRemoveRoute() {
+    clearDraft()
+    setParkedPlan(null)
     setFile(null)
     setPreviewRouteCoords([])
     setPreviewElevations([])
@@ -141,6 +466,743 @@ export default function App() {
     setKeptWaypointIndices(new Set())
     setWaypointTypeOverrides({})
     setOpenStep("import")
+    setPlannerState(null)
+    setSourceDoc(null)
+    setTrackedPositions({})
+    resetPlannerSession()
+  }
+
+  // -- Route planner ------------------------------------------------------
+
+  /** The checked things pinned to the route - the only ones an edit can strand. */
+  function checkedTrackedKeys(): string[] {
+    return [
+      ...existingWaypoints.filter((w) => keptWaypointIndices.has(w.index)).map((w) => `w:${w.index}`),
+      ...(findResult?.candidates ?? []).filter((c) => selectedIds.has(c.osm_id)).map((c) => `c:${c.osm_id}`),
+    ]
+  }
+
+  function offRouteFor(tracked: TrackedPositions, thresholdM: number): OffRouteItem[] {
+    const checked = new Set(checkedTrackedKeys())
+    const stranded = offRouteItems(
+      Object.entries(tracked)
+        .filter(([key]) => checked.has(key))
+        .map(([key, position]) => ({ ...position, key })),
+      thresholdM
+    )
+    return stranded.map((item) => {
+      if (item.key.startsWith("w:")) {
+        const index = Number(item.key.slice(2))
+        const waypoint = existingWaypoints.find((w) => w.index === index)
+        return {
+          key: item.key,
+          kind: "waypoint" as const,
+          name: waypoint?.name ?? null,
+          poiType: waypoint?.poi_type ?? "generic",
+          distanceFromRouteM: item.distanceFromRouteM,
+        }
+      }
+      const osmId = Number(item.key.slice(2))
+      const candidate = findResult?.candidates.find((c) => c.osm_id === osmId)
+      return {
+        key: item.key,
+        kind: "candidate" as const,
+        name: candidate?.name ?? null,
+        poiType: candidate?.poi_type ?? "generic",
+        distanceFromRouteM: item.distanceFromRouteM,
+      }
+    })
+  }
+
+  function commitPlannerEdit(
+    state: PlannerState,
+    tracked: TrackedPositions,
+    unchangedPrefixLength: number | null,
+    uncheckedKeys: string[] = []
+  ) {
+    if (plannerState) {
+      const entry = { state: plannerState, uncheckedKeys }
+      setPlannerPast((prev) => [...prev, entry].slice(-PLANNER_HISTORY_LIMIT))
+      setPlannerFuture([])
+    }
+    setSelectedAnchorIndex(null)
+    setHoveredAnchorIndex(null)
+    setPlannerState(state)
+    setTrackedPositions(tracked)
+    // The file and map preview follow from the plannerState effect above.
+    // Extending covers ground the POI search never saw. Trimming can't -
+    // the route only shrinks - so it deliberately fires no re-search.
+    if (unchangedPrefixLength !== null) scheduleReSearch(unchangedPrefixLength)
+  }
+
+  /**
+   * Re-runs the POI search over just the stretch an edit added, once edits
+   * settle. The responses still carry whole-route distances (search_range
+   * narrows only the PostGIS query), so merging is the same
+   * selection-preserving logic runFind already uses.
+   *
+   * The range is resolved when the timer *fires*, not when it's scheduled:
+   * an appended leg starts life as a straight-line placeholder and is
+   * replaced by ~100 routed points moments later, so indices captured at
+   * schedule time would point at the wrong stretch by then. What is stable
+   * across that swap is the untouched prefix - appending never renumbers the
+   * coordinates before it.
+   *
+   * Only fires once a search has actually been run: extending a route the
+   * visitor hasn't searched yet shouldn't silently start a POI search.
+   */
+  function scheduleReSearch(unchangedPrefixLength: number) {
+    if (!findResult) return
+    if (reSearchTimer.current) clearTimeout(reSearchTimer.current)
+    reSearchTimer.current = setTimeout(() => {
+      const coords = plannerCoordsRef.current
+      if (coords.length < 2) return
+      void runFind(latestFileRef.current, {
+        start_index: Math.min(Math.max(unchangedPrefixLength - 1, 0), coords.length - 1),
+        end_index: coords.length - 1,
+      })
+    }, RE_SEARCH_DEBOUNCE_MS)
+  }
+
+  /** Checks or unchecks tracked items by key (`w:<index>` / `c:<osm_id>`). */
+  function setKeysChecked(keys: string[], checked: boolean) {
+    const waypointIndices = keys.filter((k) => k.startsWith("w:")).map((k) => Number(k.slice(2)))
+    const osmIds = keys.filter((k) => k.startsWith("c:")).map((k) => Number(k.slice(2)))
+    const apply = <T,>(prev: Set<T>, items: T[]) => {
+      const next = new Set(prev)
+      for (const item of items) {
+        if (checked) next.add(item)
+        else next.delete(item)
+      }
+      return next
+    }
+    if (waypointIndices.length > 0) setKeptWaypointIndices((prev) => apply(prev, waypointIndices))
+    if (osmIds.length > 0) setSelectedIds((prev) => apply(prev, osmIds))
+  }
+
+  /** Keys of the items in `checked` that `tracked` places off the route. */
+  function strandedKeys(tracked: TrackedPositions, checked: Set<string>, thresholdM: number): string[] {
+    return offRouteItems(
+      Object.entries(tracked)
+        .filter(([key]) => checked.has(key))
+        .map(([key, position]) => ({ ...position, key })),
+      thresholdM
+    ).map((item) => item.key)
+  }
+
+  /**
+   * Applies an edit, pausing for confirmation if it stranded anything.
+   * An edit that affects nothing goes through silently.
+   */
+  function applyPlannerEdit(
+    state: PlannerState,
+    tracked: TrackedPositions,
+    unchangedPrefixLength: number | null
+  ) {
+    if (offRouteFor(tracked, offRouteThresholdM).length > 0) {
+      setPendingEdit({ state, tracked, unchangedPrefixLength })
+      return
+    }
+    commitPlannerEdit(state, tracked, unchangedPrefixLength)
+  }
+
+  function handleConfirmPendingEdit() {
+    if (!pendingEdit) return
+    const unchecked = offRouteFor(pendingEdit.tracked, offRouteThresholdM).map((i) => i.key)
+    setKeysChecked(unchecked, false)
+    commitPlannerEdit(pendingEdit.state, pendingEdit.tracked, pendingEdit.unchangedPrefixLength, unchecked)
+    setPendingEdit(null)
+  }
+
+  function handleOffRouteThresholdChange(thresholdM: number) {
+    setOffRouteThresholdM(thresholdM)
+    saveOffRouteThresholdM(thresholdM)
+  }
+
+  function seedTracked(route: [number, number][]): TrackedPositions {
+    return trackPositions(
+      [
+        ...existingWaypoints.map((w) => ({ key: `w:${w.index}`, lat: w.lat, lon: w.lon })),
+        ...(findResult?.candidates ?? []).map((c) => ({ key: `c:${c.osm_id}`, lat: c.lat, lon: c.lon })),
+      ],
+      route
+    )
+  }
+
+  /**
+   * Opens the planner - on the loaded route, or on a new one. `startAt` (the
+   * searched-place pin's "Start a route here", offered only before any route
+   * exists) makes that place the new route's first point.
+   */
+  function handleStartPlanning(startAt?: [number, number]) {
+    if (parkedPlan && file) {
+      // Reopen the plan as it was left (see parkedPlan). The filename and
+      // source document it was synthesized from are unchanged since.
+      const state = withCurrentRouting(parkedPlan.state)
+      setPlannerMode(parkedPlan.mode)
+      resetPlannerSession()
+      setPlannerState(state)
+      setTrackedPositions(seedTracked(plannerGeometry(state).coords))
+      trackPlanningStarted(parkedPlan.mode, "reopened", state)
+      return
+    }
+    const coords = findResult?.route_coords ?? previewRouteCoords
+    plannedFilenameRef.current =
+      file?.name ?? `Planned route ${new Date().toISOString().slice(0, 10)}.gpx`
+    let state =
+      coords.length > 0
+        ? plannerStateFromImport(coords, previewElevations, routingProfile, routingOptions)
+        : emptyPlannerState(routingProfile, routingOptions)
+    if (startAt && coords.length === 0) {
+      // The very first point is just the start: no leg to route yet.
+      const started = appendAnchor(state, startAt)
+      if (started.ok) state = started.state
+    }
+    setPlannerMode(coords.length > 0 ? "edit" : "new")
+    resetPlannerSession()
+    setPlannerState(state)
+    setTrackedPositions(seedTracked(coords))
+    trackPlanningStarted(coords.length > 0 ? "edit" : "new", startAt ? "place" : "fresh", state)
+  }
+
+  /** Step 1's pin popup, before any route exists: plan a new route from the searched place. */
+  function handleStartRouteAtSearchedPlace() {
+    if (!searchedPlace) return
+    handleStartPlanning([searchedPlace.lat, searchedPlace.lon])
+    // Now the route's start, so the pin would only sit on top of its marker.
+    setSearchedPlace(null)
+    track("place_added_to_route", { where: "start", source: "pin", name: searchedPlace.name, kind: searchedPlace.kind })
+  }
+
+  /**
+   * `mode` is what's being planned (a new route, or edits to a loaded one);
+   * `from` is how the session began - from scratch or the loaded file, a
+   * searched place's "Start a route here", the plan "Done" parked, or a
+   * draft restored after a reload.
+   */
+  function trackPlanningStarted(
+    mode: "new" | "edit",
+    from: "fresh" | "place" | "reopened" | "draft",
+    state: PlannerState
+  ) {
+    track("route_planning_started", { mode, from, point_count: plannerAnchors(state).length })
+  }
+
+  /**
+   * The finished plan's summary. The points go as one encoded polyline
+   * rounded to ~1km (ANALYTICS_POINT_PRECISION), so Umami - a third party -
+   * sees where people plan without pinpointing where they live; the figures
+   * are the same filtered ones the app shows.
+   */
+  function trackPlanningDone(state: PlannerState) {
+    const anchors = plannerAnchors(state)
+    const geometry = plannerGeometry(state)
+    const { gainM, lossM } = elevationGainLossM(geometry.elevations)
+    const points = encodePolyline(anchors, ANALYTICS_POINT_PRECISION)
+    const options = Object.fromEntries(Object.entries(state.options).map(([key, value]) => [`opt_${key}`, value]))
+    track("route_planning_done", {
+      mode: plannerMode,
+      point_count: anchors.length,
+      // A cut polyline would decode to wrong points, so an oversized one is
+      // left out rather than truncated.
+      ...(points.length <= ANALYTICS_MAX_STRING_LENGTH ? { points } : {}),
+      distance_m: Math.round(totalDistanceM(geometry.coords)),
+      ascent_m: Math.round(gainM),
+      descent_m: Math.round(lossM),
+      shape: state.shape,
+      style: mapStyleKey,
+      ...options,
+    })
+  }
+
+  function handleExitPlanning() {
+    // The plan is finished: nothing left to restore after a reload.
+    clearDraft()
+    // Every point was deleted: there's no route to carry on with, so leave
+    // the way "Remove route" would rather than with stale search results.
+    if (!file) {
+      handleRemoveRoute()
+      return
+    }
+    if (plannerState) {
+      trackPlanningDone(plannerState)
+      setParkedPlan({ state: plannerState, mode: plannerMode })
+    }
+    setPlannerState(null)
+    resetPlannerSession()
+    // Planning is step 1's work; once it's done, a route that actually
+    // exists moves straight on to finding POIs along it.
+    setOpenStep("find")
+  }
+
+  /** Undo/redo history, point selection and any held-back edit belong to one planning session. */
+  function resetPlannerSession() {
+    setPlannerPast([])
+    setPlannerFuture([])
+    setSelectedAnchorIndex(null)
+    setHoveredAnchorIndex(null)
+    setPendingEdit(null)
+  }
+
+  /**
+   * Undo (or redo) one planner edit.
+   *
+   * Moving through history is itself a route change, so it gets the same
+   * treatment as an edit, minus the confirmation dialog: the visitor asked
+   * for exactly this route back. What the reverted edit unchecked is
+   * re-checked; whatever the restored route now strands is unchecked (with a
+   * toast) and recorded on the opposite stack, so stepping back again
+   * re-checks it in turn.
+   */
+  function stepPlannerHistory(direction: "undo" | "redo") {
+    if (!plannerState || pendingEdit) return
+    const source = direction === "undo" ? plannerPast : plannerFuture
+    const entry = source[source.length - 1]
+    if (!entry) return
+
+    // Keep every leg fetched since the entry was recorded, so stepping back
+    // to a route never re-requests geometry that's already here.
+    const restored = { ...entry.state, legs: { ...entry.state.legs, ...plannerState.legs } }
+    const before = plannerGeometry(plannerState).coords
+    const after = plannerGeometry(restored).coords
+    const tracked = seedTracked(after)
+
+    const checked = new Set([...checkedTrackedKeys(), ...entry.uncheckedKeys])
+    const stranded = strandedKeys(tracked, checked, offRouteThresholdM)
+    const strandedSet = new Set(stranded)
+    setKeysChecked(entry.uncheckedKeys.filter((key) => !strandedSet.has(key)), true)
+    setKeysChecked(stranded, false)
+    if (stranded.length > 0) {
+      toast(
+        `Unchecked ${stranded.length} POI${stranded.length === 1 ? "" : "s"} no longer near the route.`,
+      )
+    }
+
+    const inverse = { state: plannerState, uncheckedKeys: stranded }
+    if (direction === "undo") {
+      setPlannerPast((prev) => prev.slice(0, -1))
+      setPlannerFuture((prev) => [...prev, inverse])
+    } else {
+      setPlannerFuture((prev) => prev.slice(0, -1))
+      setPlannerPast((prev) => [...prev, inverse].slice(-PLANNER_HISTORY_LIMIT))
+    }
+    setSelectedAnchorIndex(null)
+    setPlannerState(restored)
+    setTrackedPositions(tracked)
+    // Search only the ground the restored route adds beyond what it shares
+    // with the current one - none at all if it's just shorter.
+    const prefix = commonPrefixLength(before, after)
+    if (prefix < after.length) scheduleReSearch(prefix)
+  }
+
+  /**
+   * Applies an edit with a full reprojection of tracked items, and a POI
+   * re-search over whatever the new route doesn't share with the old one (none
+   * if it only shrank). For edits with no cheaper notion of what changed -
+   * deleting, reordering, changing shape - and for any edit to a loop or
+   * out-and-back, where the derived return part changes along with the edit,
+   * so the old route is never simply a prefix of the new one.
+   */
+  function applyEditWithFullReprojection(state: PlannerState) {
+    if (!plannerState) return
+    const before = plannerGeometry(plannerState).coords
+    const after = plannerGeometry(state).coords
+    const prefix = commonPrefixLength(before, after)
+    applyPlannerEdit(state, seedTracked(after), prefix < after.length ? prefix : null)
+  }
+
+  function handleRemoveAnchor(anchorIndex: number) {
+    if (!plannerState) return
+    const result = removeAnchor(plannerState, anchorIndex)
+    if (!result.ok) {
+      toast(result.error, "error")
+      return
+    }
+    applyEditWithFullReprojection(result.state)
+  }
+
+  /**
+   * Changing a routing option re-routes every routed leg (imported geometry
+   * is untouched): the options are part of each leg's cache key, so the legs
+   * go pending and are fetched again - one undoable edit, with each leg drawn
+   * with its previous geometry until the new one arrives. Also remembered
+   * as the preference for this style.
+   */
+  function handleRoutingOptionsChange(options: RoutingOptions) {
+    const previous = plannerState?.options ?? routingOptions
+    for (const [option, value] of Object.entries(options)) {
+      if (previous[option] !== value) track("routing_options_changed", { option, value, style: mapStyleKey })
+    }
+    setRoutingOptionsPreference(options)
+    saveRoutingOptions(mapStyleKey, options)
+    if (plannerState) applyEditWithFullReprojection(setRoutingOptions(plannerState, options))
+  }
+
+  function handleSetRouteShape(shape: RouteShape) {
+    if (!plannerState) return
+    const result = setRouteShape(plannerState, shape)
+    if (!result.ok) {
+      toast(result.error, "error")
+      return
+    }
+    if (result.state !== plannerState) {
+      applyEditWithFullReprojection(result.state)
+      track("route_shape_changed", { shape })
+    }
+  }
+
+  /** A point-list drag: move the point at `from` to position `to` in ride order. */
+  function handleReorderAnchor(from: number, to: number) {
+    if (!plannerState) return
+    const result = reorderAnchors(plannerState, from, to)
+    if (!result.ok) {
+      toast(result.error, "error")
+      return
+    }
+    if (result.state !== plannerState) applyEditWithFullReprojection(result.state)
+  }
+
+  // The source GPX as text, for the draft - serialized once per import, not
+  // on every save.
+  const sourceGpxText = useMemo(() => (sourceDoc ? new XMLSerializer().serializeToString(sourceDoc) : null), [sourceDoc])
+
+  // Save the in-progress plan (debounced) so a reload or a closed tab doesn't
+  // lose it. Leaving the planner clears it (handleExitPlanning,
+  // handleRemoveRoute, importing another file), not this effect.
+  useEffect(() => {
+    if (!plannerState) return
+    const timer = setTimeout(() => {
+      if (plannerAnchors(plannerState).length === 0) {
+        // Nothing planned yet: nothing worth offering back.
+        clearDraft()
+        setDraftTooBig(false)
+        return
+      }
+      const result = saveDraft({
+        state: plannerState,
+        mode: plannerMode,
+        filename: plannedFilenameRef.current,
+        sourceGpx: sourceGpxText,
+      })
+      setDraftTooBig(result === "too-big")
+    }, DRAFT_SAVE_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [plannerState, plannerMode, sourceGpxText])
+
+  /**
+   * A plan made earlier - a saved draft, or one parked by "Done" before the
+   * activity was switched - may be under another profile, or carry options
+   * the current style no longer offers; the backend would refuse those legs.
+   * Route it with the current style's profile and sanitized options instead.
+   */
+  function withCurrentRouting(state: PlannerState): PlannerState {
+    return { ...state, profile: routingProfile, options: sanitizeRoutingOptions(mapStyleKey, state.options) }
+  }
+
+  /**
+   * Puts a saved draft back: the imported GPX it started from (if any), then
+   * the plan itself, straight into planning mode. The saved routed geometry
+   * comes back with it, so only legs never fetched are requested again.
+   */
+  function restoreDraft(draft: PlannerDraft) {
+    setFindResult(null)
+    setSelectedIds(new Set())
+    setSearchedPoiTypes([])
+    setClickAddedCandidates([])
+    setClickAddedDetails({})
+    resetPlannerSession()
+    let waypoints: ExistingWaypoint[] = []
+    if (draft.sourceGpx) {
+      waypoints = loadGpxText(draft.sourceGpx).waypoints
+    } else {
+      setSourceDoc(null)
+      setPreviewExistingWaypoints([])
+      setKeptWaypointIndices(new Set())
+      setWaypointTypeOverrides({})
+    }
+    const state = withCurrentRouting(draft.state)
+    setParkedPlan(null)
+    plannedFilenameRef.current = draft.filename
+    setPlannerMode(draft.mode)
+    setPlannerState(state)
+    trackPlanningStarted(draft.mode, "draft", state)
+    setTrackedPositions(
+      trackPositions(
+        waypoints.map((w) => ({ key: `w:${w.index}`, lat: w.lat, lon: w.lon })),
+        plannerGeometry(state).coords
+      )
+    )
+    setFitRequest((n) => n + 1)
+  }
+
+  // Offer a saved draft back once, when the app opens. A toast rather than a
+  // dialog: the visitor may just as well want to start something new.
+  const restoreDraftRef = useRef(restoreDraft)
+  useEffect(() => {
+    restoreDraftRef.current = restoreDraft
+  })
+  useEffect(() => {
+    const draft = loadDraft()
+    if (!draft) return
+    const id = toast("You have an unfinished route. Restore it?", "info", [
+      { label: "Restore", onClick: () => restoreDraftRef.current(draft) },
+      { label: "Discard", onClick: () => clearDraft() },
+    ])
+    // Strict mode mounts twice in development; don't leave a duplicate toast.
+    return () => dismissToast(id)
+  }, [])
+
+  function focusOnPlace(place: PlaceResult) {
+    setFocusRequest((prev) => ({ id: (prev?.id ?? 0) + 1, lat: place.lat, lon: place.lon, bbox: place.bbox }))
+  }
+
+  /** The place search's pick: pin it and frame it on the map. */
+  function handlePlaceSelect(place: PlaceResult) {
+    // A fresh object per pick: RouteMap keys its popup's open state on it, so
+    // re-picking the same result reopens a popup that was closed.
+    setSearchedPlace({ ...place })
+    focusOnPlace(place)
+    track("place_search_picked", { name: place.name, kind: place.kind, planning: plannerState !== null })
+  }
+
+  /** While planning, a searched place can be added straight to the route. */
+  function handlePlaceAddPoint(place: PlaceResult) {
+    if (handleAppendAnchor([place.lat, place.lon])) {
+      track("place_added_to_route", { where: "end", source: "list", name: place.name, kind: place.kind })
+    }
+    focusOnPlace(place)
+  }
+
+  /** The pinned place's popup: add it before the start or after the end. */
+  function handleAddSearchedPlace(where: "start" | "end") {
+    if (!searchedPlace) return
+    const point: [number, number] = [searchedPlace.lat, searchedPlace.lon]
+    const added = where === "start" ? handlePrependAnchor(point) : handleAppendAnchor(point)
+    // Now a route point, so the pin would only sit on top of its marker.
+    if (added) {
+      setSearchedPlace(null)
+      track("place_added_to_route", { where, source: "pin", name: searchedPlace.name, kind: searchedPlace.kind })
+    }
+  }
+
+  // Planner keyboard shortcuts. Handled through a ref so the window listener
+  // is bound once per planning session yet always sees the current state.
+  const plannerKeyDownRef = useRef<(e: KeyboardEvent) => void>(() => {})
+  useEffect(() => {
+    plannerKeyDownRef.current = (e: KeyboardEvent) => {
+      if (pendingEdit) return
+      const target = e.target instanceof Element ? e.target : null
+      // Typing in a field, or anything inside an open dialog, keeps its keys.
+      if (
+        target?.closest("input, textarea, select, [contenteditable=true], [role=dialog], [role=alertdialog]")
+      ) {
+        return
+      }
+      const mod = e.metaKey || e.ctrlKey
+      const key = e.key.toLowerCase()
+      if (mod && key === "z") {
+        e.preventDefault()
+        stepPlannerHistory(e.shiftKey ? "redo" : "undo")
+      } else if (mod && key === "y") {
+        e.preventDefault()
+        stepPlannerHistory("redo")
+      } else if ((e.key === "Delete" || e.key === "Backspace") && selectedAnchorIndex !== null) {
+        e.preventDefault()
+        handleRemoveAnchor(selectedAnchorIndex)
+      } else if (e.key === "Escape" && selectedAnchorIndex !== null) {
+        setSelectedAnchorIndex(null)
+      }
+    }
+  })
+  const isPlanning = plannerState !== null
+  useEffect(() => {
+    if (!isPlanning) return
+    const listener = (e: KeyboardEvent) => plannerKeyDownRef.current(e)
+    window.addEventListener("keydown", listener)
+    return () => window.removeEventListener("keydown", listener)
+  }, [isPlanning])
+
+  /** How long a dead-end spur at a point placed here, at the current zoom, may be and still be cut. */
+  function toleranceAt(point: [number, number]): number {
+    return spurToleranceM(mapZoomRef.current, point[0])
+  }
+
+  /** Adds a point after the end of the route. Returns whether it was added. */
+  function handleAppendAnchor(point: [number, number]): boolean {
+    if (!plannerState) return false
+    const before = plannerGeometry(plannerState).coords
+    const result = appendAnchor(plannerState, point, toleranceAt(point))
+    if (!result.ok) {
+      toast(result.error, "error")
+      return false
+    }
+    if (plannerState.shape !== "one-way") {
+      applyEditWithFullReprojection(result.state)
+      return true
+    }
+    const after = plannerGeometry(result.state).coords
+    const added = after.slice(Math.max(before.length - 1, 0))
+    // Appending never renumbers the coordinates before the join, so
+    // `before.length` stays a valid boundary even after the straight-line
+    // placeholder is replaced by routed geometry.
+    applyPlannerEdit(
+      result.state,
+      trackedAfterExtend(trackedPositions, after, added, false),
+      added.length > 1 ? before.length : null
+    )
+    return true
+  }
+
+  /** Adds a point before the start of the route. Returns whether it was added. */
+  function handlePrependAnchor(point: [number, number]): boolean {
+    if (!plannerState) return false
+    const result = prependAnchor(plannerState, point)
+    if (!result.ok) {
+      toast(result.error, "error")
+      return false
+    }
+    // Prepending shifts every distance-from-start, so it needs a full
+    // reprojection and a re-search of the whole route.
+    if (plannerState.shape !== "one-way") {
+      applyEditWithFullReprojection(result.state)
+    } else {
+      applyPlannerEdit(result.state, seedTracked(plannerGeometry(result.state).coords), 0)
+    }
+    return true
+  }
+
+  function handleMoveAnchor(anchorIndex: number, point: [number, number]) {
+    if (!plannerState) return
+    const result = moveAnchor(plannerState, anchorIndex, point, toleranceAt(point))
+    if (!result.ok) {
+      toast(result.error, "error")
+      // Force the marker back to its real position - the drag already moved
+      // it visually, and a rejected move leaves state unchanged.
+      setPlannerState({ ...plannerState })
+      return
+    }
+    // A moved anchor can shift the route in either direction, so this is the
+    // one edit that genuinely needs a full reprojection - and a re-search
+    // over the whole route, since a prefix boundary can't be established.
+    const after = plannerGeometry(result.state).coords
+    applyPlannerEdit(result.state, seedTracked(after), 0)
+  }
+
+  /**
+   * Dragging the route's start or end marker.
+   *
+   * What that means depends on what the endpoint is attached to, not on
+   * whether the route was drawn or imported:
+   *
+   * - next to a routed leg, it simply moves (re-pointing that one leg);
+   * - next to imported geometry it can't, because on a pristine import that
+   *   single segment spans the whole route - so it extends to the new point
+   *   instead, keeping the import intact, or trims when dropped back onto
+   *   the route.
+   */
+  function handleMoveEndpoint(which: "start" | "end", point: [number, number], droppedOnRoute: boolean) {
+    if (!plannerState) return
+    const anchors = plannerAnchors(plannerState)
+
+    // A lone first point is both ends and has nothing to extend or trim:
+    // dragging it just moves it.
+    if (anchors.length === 1) {
+      handleMoveAnchor(0, point)
+      return
+    }
+
+    if (endpointNeighbourKind(plannerState, which) === "routed") {
+      handleMoveAnchor(which === "start" ? 0 : anchors.length - 1, point)
+      return
+    }
+
+    if (droppedOnRoute) {
+      // Trims cut the outbound route; the return part follows from it.
+      const { distanceFromStartM } = projectOntoPolylineM(point, outboundGeometry(plannerState).coords)
+      if (which === "start") handleTrimStart(distanceFromStartM)
+      else handleTrimEnd(distanceFromStartM)
+      return
+    }
+
+    const added = which === "start" ? handlePrependAnchor(point) : handleAppendAnchor(point)
+    // Force the marker back to its real position - the drag already moved
+    // it visually, and a rejected edit leaves state unchanged.
+    if (!added) setPlannerState({ ...plannerState })
+  }
+
+  /**
+   * Dragging the route line itself inserts a point.
+   *
+   * Splitting at the *grab* distance and only then moving the new point to
+   * where it was dropped is what bounds the re-routing to the two stretches
+   * either side of it - on an imported route, the split alone is lossless
+   * and everything beyond those two stretches keeps its original geometry.
+   */
+  function handleInsertAnchor(grabDistanceM: number, dropPoint: [number, number]) {
+    if (!plannerState) return
+    // The grab distance is measured along the whole route as ridden. Past the
+    // outbound part it's on the derived return: a loop's return leg ends at
+    // the last point, so dragging it adds a point before it; an
+    // out-and-back's way back mirrors the outbound route, so the grab maps to
+    // the same spot on the way out.
+    const outboundM = totalDistanceM(outboundGeometry(plannerState).coords)
+    if (grabDistanceM > outboundM) {
+      if (plannerState.shape === "loop") {
+        handleAppendAnchor(dropPoint)
+        return
+      }
+      if (plannerState.shape === "out-and-back") grabDistanceM = Math.max(2 * outboundM - grabDistanceM, 0)
+    }
+    const inserted = insertAnchorAt(plannerState, grabDistanceM)
+    if (!inserted.ok) {
+      toast(inserted.error, "error")
+      return
+    }
+    const moved = moveAnchor(inserted.state, inserted.anchorIndex, dropPoint, toleranceAt(dropPoint))
+    if (!moved.ok) {
+      toast(moved.error, "error")
+      return
+    }
+    const after = plannerGeometry(moved.state).coords
+    applyPlannerEdit(moved.state, seedTracked(after), 0)
+  }
+
+  function handleTrimStart(distanceFromStartM: number) {
+    if (!plannerState) return
+    const result = trimStart(plannerState, distanceFromStartM)
+    if (!result.ok) {
+      toast(result.error, "error")
+      return
+    }
+    if (plannerState.shape !== "one-way") {
+      applyEditWithFullReprojection(result.state)
+      return
+    }
+    const after = plannerGeometry(result.state).coords
+    applyPlannerEdit(
+      result.state,
+      trackedAfterTrim(trackedPositions, after, result.survivingSegmentRange, result.startMoved),
+      null
+    )
+  }
+
+  function handleTrimEnd(distanceFromStartM: number) {
+    if (!plannerState) return
+    const result = trimEnd(plannerState, distanceFromStartM)
+    if (!result.ok) {
+      toast(result.error, "error")
+      return
+    }
+    if (plannerState.shape !== "one-way") {
+      applyEditWithFullReprojection(result.state)
+      return
+    }
+    const after = plannerGeometry(result.state).coords
+    applyPlannerEdit(
+      result.state,
+      trackedAfterTrim(trackedPositions, after, result.survivingSegmentRange, result.startMoved),
+      null
+    )
   }
 
   function handleAvgSpeedChange(speedKmh: number) {
@@ -151,6 +1213,8 @@ export default function App() {
   function handleMapStyleChange(key: string) {
     setMapStyleKey(key)
     saveMapStyleKey(key)
+    // Each style is an activity with its own profile and options.
+    setRoutingOptionsPreference(loadRoutingOptions(key))
   }
 
   function handleDeviceSettingsChange(settings: DeviceSettings) {
@@ -267,13 +1331,23 @@ export default function App() {
     setHoveredPoi(index === null ? null : { kind: "waypoint", id: index })
   }
 
-  async function handleFind() {
-    if (!file) return
+  function handleFind() {
+    return runFind(file, undefined)
+  }
 
-    const poiConfig = poiSearchEntries.map((entry) => ({
-      poi_type: entry.poiType,
-      max_distance_m: entry.maxDistanceM,
-    }))
+  async function runFind(targetFile: File | null, searchRange: SearchRange | undefined) {
+    if (!targetFile) return
+
+    // A ranged re-search extends the results already on screen, so it
+    // reuses the config those results came from rather than whatever step
+    // 2's inputs currently say - otherwise the new stretch could be searched
+    // at a different radius than the rest of the route.
+    const poiConfig = searchRange
+      ? searchedPoiTypes
+      : poiSearchEntries.map((entry) => ({
+          poi_type: entry.poiType,
+          max_distance_m: entry.maxDistanceM,
+        }))
     if (poiConfig.length === 0) return
 
     const previousCandidateIds = new Set(findResult?.candidates.map((c) => c.osm_id) ?? [])
@@ -285,14 +1359,17 @@ export default function App() {
       ...previewExistingWaypoints.map((w) => w.index),
     ])
 
-    // A type is already satisfied - no need to re-hit Overpass for it - if
-    // the last completed search asked for the exact same radius and didn't
-    // fail for it. searchedPoiTypes is overwritten wholesale at the end of
-    // every search (below), so a removed type or a changed radius naturally
-    // falls out of this check with no extra bookkeeping.
+    // A type is already satisfied - no need to re-query it - if the last
+    // completed search asked for the exact same radius and didn't fail for
+    // it. searchedPoiTypes is overwritten wholesale at the end of every
+    // search (below), so a removed type or a changed radius naturally falls
+    // out of this check with no extra bookkeeping. Never true for a ranged
+    // re-search: the route itself changed, so every type needs the new
+    // stretch searched.
     const previousRadiusByType = new Map(searchedPoiTypes.map((s) => [s.poi_type, s.max_distance_m]))
     const previouslyFailedTypes = new Set((findResult?.failed_poi_types ?? []).map((f) => f.poi_type))
     function isAlreadySatisfied(entry: PoiSearchConfig): boolean {
+      if (searchRange) return false
       return previousRadiusByType.get(entry.poi_type) === entry.max_distance_m && !previouslyFailedTypes.has(entry.poi_type)
     }
     const toSkip = poiConfig.filter(isAlreadySatisfied)
@@ -318,16 +1395,25 @@ export default function App() {
     // carrying every type, so the map/candidate list can fill in type-by-
     // type as each resolves instead of only once the slowest type finishes.
     // Starts are staggered (smallest search radius first - see
-    // SEARCH_STAGGER_MS) rather than all fired at once, since Overpass
-    // seems to time out more when hit with several simultaneous connections
-    // from our one server IP. `aggregate` is a plain, non-state mutable
+    // SEARCH_STAGGER_MS) rather than all fired at once. `aggregate` is a plain, non-state mutable
     // object (not React state) that each chunk appends to synchronously
     // right after its own await resolves - setFindResult(aggregate) is
     // called from there, so the map/list update live with no extra
     // plumbing on their end. Skipped types' candidates are already valid
     // (unchanged radius, no prior failure) and are carried over as-is
     // rather than re-fetched.
-    const carriedCandidates = toSkip.length > 0 ? (findResult?.candidates.filter((c) => toSkip.some((e) => e.poi_type === c.poi_type)) ?? []) : []
+    //
+    // A ranged re-search only looks at the stretch an edit added, so its
+    // responses cover only that stretch - every existing candidate is
+    // carried over and the new ones are merged in, instead of replacing
+    // them. Everything else in each response (route_coords,
+    // existing_waypoints, and every distance) was computed against the full
+    // edited route, so those are authoritative either way.
+    const carriedCandidates = searchRange
+      ? (findResult?.candidates ?? [])
+      : toSkip.length > 0
+        ? (findResult?.candidates.filter((c) => toSkip.some((e) => e.poi_type === c.poi_type)) ?? [])
+        : []
     const aggregate: FindPoisResponse = {
       candidates: carriedCandidates,
       point_count: findResult?.point_count ?? 0,
@@ -341,6 +1427,7 @@ export default function App() {
       ),
     }
     let hasSucceeded = toSkip.length > 0
+    let newCandidateCount = 0
     if (toSkip.length > 0) setFindResult({ ...aggregate })
 
     const staggeredConfig = [...toFetch].sort((a, b) => a.max_distance_m - b.max_distance_m)
@@ -349,9 +1436,16 @@ export default function App() {
       staggeredConfig.map(async (entry, index) => {
         if (index > 0) await sleep(index * SEARCH_STAGGER_MS)
         try {
-          const result = await findPois(file, [entry])
+          const result = await findPois(targetFile, [entry], searchRange)
           hasSucceeded = true
-          aggregate.candidates = [...aggregate.candidates, ...result.candidates]
+          // Same (osm_id, poi_type) as a carried-over candidate means a
+          // ranged re-search found it again - the fresh one wins, since its
+          // distances were measured against the edited route.
+          const isRefreshed = (c: Candidate) =>
+            c.poi_type === entry.poi_type && result.candidates.some((r) => r.osm_id === c.osm_id)
+          newCandidateCount += result.candidates.filter((c) => !previousCandidateIds.has(c.osm_id)).length
+          aggregate.candidates = [...aggregate.candidates.filter((c) => !isRefreshed(c)), ...result.candidates]
+          if (searchRange) aggregate.candidates.sort((x, y) => x.distance_m - y.distance_m)
           aggregate.candidate_details = { ...aggregate.candidate_details, ...result.candidate_details }
           aggregate.failed_poi_types = [...aggregate.failed_poi_types, ...result.failed_poi_types]
           // point_count/existing_waypoints/route_coords are route-derived,
@@ -402,8 +1496,15 @@ export default function App() {
       updateToast(toastId, "Failed to search OpenStreetMap for any POI type.", "error")
       track("find_pois_failed", { reason: "api_error" })
     } else {
-      updateToast(toastId, `Found ${aggregate.candidates.length} candidate(s).`, "success")
+      updateToast(
+        toastId,
+        searchRange
+          ? `Added ${newCandidateCount} candidate(s) along the new stretch.`
+          : `Found ${aggregate.candidates.length} candidate(s).`,
+        "success",
+      )
       track("find_pois_run", {
+        ranged: Boolean(searchRange),
         poi_types: poiConfig.map((e) => e.poi_type).join(","),
         max_distances_m: poiConfig.map((e) => e.max_distance_m).join(","),
         candidate_count: aggregate.candidates.length,
@@ -441,6 +1542,62 @@ export default function App() {
   // turns up there) - this, not findResult?.candidates directly, is what
   // the map/checklist/save flow reads, so a click-added POI flows through
   // the existing selection/export pipeline unchanged.
+  // PlannerPanel's point list: one row per anchor, in ride order.
+  const plannerPoints = useMemo((): PlannerPoint[] => {
+    if (!plannerState) return []
+    const anchors = plannerAnchors(plannerState)
+    const legs = plannerLegDistancesM(plannerState)
+    const pending = new Set<Segment>(pendingLegs(plannerState))
+    // A loop or out-and-back finishes where it started: the start is the
+    // finish too, and the last point is an ordinary numbered one (an
+    // out-and-back's turnaround).
+    const oneWay = plannerState.shape === "one-way"
+    return anchors.map((_, i) => {
+      const kind = i === 0 ? (oneWay ? "start" : "start-finish") : oneWay && i === anchors.length - 1 ? "end" : "point"
+      const isTurnaround = plannerState.shape === "out-and-back" && i === anchors.length - 1
+      return {
+        id: `point-${i}`,
+        label:
+          kind === "start"
+            ? "Start"
+            : kind === "start-finish"
+              ? "Start / Finish"
+              : kind === "end"
+                ? "End"
+                : isTurnaround
+                  ? `Point ${i} (turnaround)`
+                  : `Point ${i}`,
+        kind,
+        number: i,
+        legDistanceM: i === 0 ? null : legs[i - 1],
+        legPending: i > 0 && pending.has(plannerState.segments[i - 1]),
+      }
+    })
+  }, [plannerState])
+  // The route's surface along the same axis, for the elevation profile's surface band.
+  const plannerSurfaceData = useMemo(
+    () => (plannerState ? plannerSurface(plannerState) : { runs: [], cyclewayM: 0 }),
+    [plannerState]
+  )
+  // Where each planner point sits along the route, for the elevation profile's ticks.
+  const plannerPointDistancesM = useMemo(() => {
+    if (!plannerState) return []
+    const distances = [0]
+    for (const legM of plannerLegDistancesM(plannerState)) distances.push(distances[distances.length - 1] + legM)
+    return plannerAnchors(plannerState).length > 0 ? distances : []
+  }, [plannerState])
+  // The derived way back to the start, shown after the point list.
+  const plannerReturn = useMemo(() => {
+    if (!plannerState || plannerState.shape === "one-way") return null
+    const distanceM = plannerReturnDistanceM(plannerState)
+    if (distanceM === null) return null
+    return {
+      label: plannerState.shape === "loop" ? "Back to start" : "Same way back",
+      distanceM,
+      pending: returnLegPending(plannerState),
+    }
+  }, [plannerState])
+
   const allCandidates = useMemo(() => {
     if (clickAddedCandidates.length === 0) return findResult?.candidates ?? EMPTY_CANDIDATES
     const foundIds = new Set((findResult?.candidates ?? []).map((c) => c.osm_id))
@@ -465,19 +1622,45 @@ export default function App() {
   )
 
   return (
-    <div className="flex h-screen flex-col">
+    // The map fills the page and the header/sidebar float over it. Both are
+    // transparent and let clicks through to the map; only their contents
+    // (the header pills, the cards) are opaque and interactive. Below `md`
+    // the sidebar stacks under the map instead.
+    <div className="relative flex h-dvh flex-col overflow-hidden">
       <Toaster />
       <FeedbackWidget />
-      <header className="flex shrink-0 items-center justify-between gap-1.5 border-b px-4 py-2">
-        <div className="flex items-center gap-1.5">
+      <OffRouteDialog
+        open={pendingEdit !== null}
+        items={pendingEdit ? offRouteFor(pendingEdit.tracked, offRouteThresholdM) : []}
+        thresholdM={offRouteThresholdM}
+        onThresholdChange={handleOffRouteThresholdChange}
+        onConfirm={handleConfirmPendingEdit}
+        onCancel={() => setPendingEdit(null)}
+      />
+      <header
+        ref={headerRef}
+        className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-wrap items-center justify-between gap-2 px-4 pt-4 [&>*]:pointer-events-auto"
+      >
+        <div className="flex h-11 items-center gap-1.5 rounded-xl bg-card px-3 shadow-lg ring-1 ring-foreground/10">
           <img src="favicon.svg" className="w-6" />
           <h1 className="text-lg font-semibold">Sulla Via</h1>
         </div>
-        <WahooProfileMenu wahooTokens={wahooTokens} onWahooTokensChange={setWahooTokens} />
+        {/* Between the two pills on desktop; on a phone it wraps onto its own
+            full-width row, below them. */}
+        <div className="order-last w-full md:order-none md:w-96">
+          <PlaceSearch
+            getNear={getMapCenter}
+            onSelect={handlePlaceSelect}
+            onAddPoint={plannerState ? handlePlaceAddPoint : undefined}
+          />
+        </div>
+        <div className="flex h-11 items-center rounded-xl bg-card px-1 shadow-lg ring-1 ring-foreground/10">
+          <WahooProfileMenu wahooTokens={wahooTokens} onWahooTokensChange={setWahooTokens} />
+        </div>
       </header>
 
-      <div className="flex flex-1 flex-col overflow-hidden md:flex-row">
-        <div className="h-[50vh] shrink-0 md:h-auto md:flex-1">
+      <div className="flex min-h-0 flex-1 flex-col md:block">
+        <div className="relative h-[50vh] shrink-0 md:absolute md:inset-0 md:h-auto">
           <RouteMap
             routeCoords={findResult?.route_coords ?? previewRouteCoords}
             candidates={allCandidates}
@@ -489,85 +1672,174 @@ export default function App() {
             onChangeWaypointType={handleAssignWaypointType}
             hoveredPoi={hoveredPoi}
             mapStyleKey={mapStyleKey}
-            onMapStyleChange={handleMapStyleChange}
             candidateDetails={candidateDetails}
             clickAddedCandidateIds={clickAddedCandidateIds}
             onBasemapPoiClick={handleBasemapPoiClick}
             pendingLookup={pendingLookup}
             onConfirmPendingLookup={handleConfirmPendingLookup}
             onDismissPendingLookup={() => setPendingLookup(null)}
+            insets={mapInsets}
+            fitRequest={fitRequest}
+            onViewChange={(view) => {
+              mapZoomRef.current = view.zoom
+              mapCenterRef.current = view.center
+            }}
+            focusRequest={focusRequest}
+            searchedPlace={searchedPlace}
+            onAddSearchedPlace={plannerState ? handleAddSearchedPlace : undefined}
+            onStartRouteAtSearchedPlace={!plannerState && !file ? handleStartRouteAtSearchedPlace : undefined}
+            planning={
+              plannerState
+                ? {
+                    anchors: plannerAnchors(plannerState),
+                    pendingLegs: unroutedLegs(plannerState).map((leg) => [leg.from, leg.to]),
+                    onAppendAnchor: handleAppendAnchor,
+                    onMoveAnchor: handleMoveAnchor,
+                    onMoveEndpoint: handleMoveEndpoint,
+                    onInsertAnchor: handleInsertAnchor,
+                    selectedAnchor: selectedAnchorIndex,
+                    onSelectAnchor: setSelectedAnchorIndex,
+                    onClearSelection: () => setSelectedAnchorIndex(null),
+                    onDeleteAnchor: handleRemoveAnchor,
+                    hoveredAnchor: hoveredAnchorIndex,
+                    shape: plannerState.shape,
+                    onHoverAnchor: setHoveredAnchorIndex,
+                  }
+                : undefined
+            }
           />
+          {plannerState && previewRouteCoords.length >= 2 && (
+            <div
+              ref={setProfileEl}
+              className="absolute z-20"
+              style={{ left: PROFILE_GAP_PX, bottom: PROFILE_GAP_PX, right: mapInsets.right + PROFILE_GAP_PX }}
+            >
+              <ElevationProfile
+                coords={previewRouteCoords}
+                elevations={previewElevations}
+                pointDistancesM={plannerPointDistancesM}
+                surfaceRuns={plannerSurfaceData.runs}
+                cyclewayM={plannerSurfaceData.cyclewayM}
+                gainM={elevationGainM}
+                lossM={elevationLossM}
+                // Open on desktop; collapsed on a phone, where the map is only half the screen.
+                defaultOpen={window.matchMedia("(min-width: 48rem)").matches}
+              />
+            </div>
+          )}
         </div>
 
-        <aside className="flex w-full min-h-0 flex-1 flex-col border-t md:w-1/3 md:min-w-[480px] md:flex-none md:border-t-0 md:border-l">
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0">
-            <StepCard
-              title={"1. Import route" + (file ? " ✅": "")}
-              open={openStep === "import"}
-              onOpenChange={(open) => setOpenStep(open ? "import" : null)}
-            >
-              <ImportCard
-                file={file}
-                onFileChange={handleFileChange}
+        <aside
+          ref={asideRef}
+          className="flex min-h-0 w-full flex-1 flex-col md:pointer-events-none md:absolute md:right-0 md:bottom-0 md:z-20 md:w-1/3 md:min-w-[480px]"
+          // Starts right under the floating header, whose height is measured.
+          style={{ top: mapInsets.top || undefined }}
+        >
+          {/* Everything in here floats over the map on desktop, hence the
+              shadows: a card on its own is too close in tone to the map. */}
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0 [&>*]:shadow-lg md:[&>*]:pointer-events-auto">
+            <MapStyleSelect value={mapStyleKey} onChange={handleMapStyleChange} />
+            {plannerState ? (
+              <PlannerPanel
+                mode={plannerMode}
+                draftTooBig={draftTooBig}
+                hasRoute={file !== null}
+                onDone={handleExitPlanning}
+                canUndo={plannerPast.length > 0}
+                canRedo={plannerFuture.length > 0}
+                onUndo={() => stepPlannerHistory("undo")}
+                onRedo={() => stepPlannerHistory("redo")}
+                points={plannerPoints}
+                returnLeg={plannerReturn}
+                routingOptionSpecs={routingOptionSpecsForStyle(mapStyleKey)}
+                routingOptions={plannerState.options}
+                onRoutingOptionsChange={handleRoutingOptionsChange}
+                shape={plannerState.shape}
+                canChangeShape={plannerPoints.length >= 2}
+                onShapeChange={handleSetRouteShape}
+                onReorderPoint={handleReorderAnchor}
+                onDeletePoint={handleRemoveAnchor}
+                hoveredPoint={hoveredAnchorIndex}
+                onHoverPoint={setHoveredAnchorIndex}
                 onRemove={handleRemoveRoute}
-                onNext={() => setOpenStep("find")}
-                pointCount={pointCount}
-                existingWaypoints={existingWaypoints}
-                onChangeWaypointType={handleAssignWaypointType}
-                keptWaypointIndices={keptWaypointIndices}
-                onToggleExistingWaypoint={handleToggleExistingWaypoint}
-                onToggleAllExistingWaypoints={handleToggleAllExistingWaypoints}
-                onHoverWaypoint={handleHoverWaypoint}
                 distanceM={distanceM}
                 elevationGainM={elevationGainM}
                 elevationLossM={elevationLossM}
                 avgSpeedKmh={avgSpeedKmh}
                 onAvgSpeedChange={handleAvgSpeedChange}
-                wahooTokens={wahooTokens}
-                onWahooTokensChange={setWahooTokens}
               />
-            </StepCard>
-
-            {file && (
-              <StepCard
-                title={"2. Find POIs" + (findResult ? " ✅": "")}
-                open={openStep === "find"}
-                onOpenChange={(open) => setOpenStep(open ? "find" : null)}
-              >
-                <div className="flex flex-col gap-4">
-                  <FindPoisCard
-                    entries={poiSearchEntries}
-                    onChange={handlePoiSearchChange}
-                    onFind={handleFind}
-                    disabled={!file || poiSearchEntries.length === 0}
-                    isFinding={isFinding}
-                    progress={searchProgress}
+            ) : (
+              <>
+                <StepCard
+                  title={"1. Get a route" + (file ? " ✅": "")}
+                  open={openStep === "import"}
+                  onOpenChange={(open) => setOpenStep(open ? "import" : null)}
+                >
+                  <ImportCard
+                    file={file}
+                    onFileChange={handleFileChange}
+                    onRemove={handleRemoveRoute}
+                    onNext={() => setOpenStep("find")}
+                    pointCount={pointCount}
+                    existingWaypoints={existingWaypoints}
+                    onChangeWaypointType={handleAssignWaypointType}
+                    keptWaypointIndices={keptWaypointIndices}
+                    onToggleExistingWaypoint={handleToggleExistingWaypoint}
+                    onToggleAllExistingWaypoints={handleToggleAllExistingWaypoints}
+                    onHoverWaypoint={handleHoverWaypoint}
+                    distanceM={distanceM}
+                    elevationGainM={elevationGainM}
+                    elevationLossM={elevationLossM}
+                    avgSpeedKmh={avgSpeedKmh}
+                    onAvgSpeedChange={handleAvgSpeedChange}
+                    wahooTokens={wahooTokens}
+                    onWahooTokensChange={setWahooTokens}
+                    onStartPlanning={() => handleStartPlanning()}
                   />
-                  <CandidateChecklist
+                </StepCard>
+
+                {file && (
+                  <StepCard
+                    title={"2. Find POIs" + (findResult ? " ✅": "")}
+                    open={openStep === "find"}
+                    onOpenChange={(open) => setOpenStep(open ? "find" : null)}
+                  >
+                    <div className="flex flex-col gap-4">
+                      <FindPoisCard
+                        entries={poiSearchEntries}
+                        onChange={handlePoiSearchChange}
+                        onFind={handleFind}
+                        disabled={!file || poiSearchEntries.length === 0}
+                        isFinding={isFinding}
+                        progress={searchProgress}
+                      />
+                      <CandidateChecklist
+                        candidates={allCandidates}
+                        selectedIds={selectedIds}
+                        onToggle={handleToggle}
+                        onToggleAll={handleToggleAllCandidates}
+                        searchedPoiTypes={searchedPoiTypes}
+                        failedPoiTypes={findResult?.failed_poi_types ?? EMPTY_FAILED_POI_TYPES}
+                        onHoverCandidate={handleHoverCandidate}
+                      />
+                    </div>
+                  </StepCard>
+                )}
+
+                {file && (
+                  <SaveCard
+                    file={file}
                     candidates={allCandidates}
                     selectedIds={selectedIds}
-                    onToggle={handleToggle}
-                    onToggleAll={handleToggleAllCandidates}
-                    searchedPoiTypes={searchedPoiTypes}
-                    failedPoiTypes={findResult?.failed_poi_types ?? EMPTY_FAILED_POI_TYPES}
-                    onHoverCandidate={handleHoverCandidate}
+                    existingWaypoints={existingWaypoints}
+                    keptWaypointIndices={keptWaypointIndices}
+                    settings={deviceSettings}
+                    onSettingsChange={handleDeviceSettingsChange}
+                    wahooTokens={wahooTokens}
+                    onWahooTokensChange={setWahooTokens}
                   />
-                </div>
-              </StepCard>
-            )}
-
-            {file && (
-              <SaveCard
-                file={file}
-                candidates={allCandidates}
-                selectedIds={selectedIds}
-                existingWaypoints={existingWaypoints}
-                keptWaypointIndices={keptWaypointIndices}
-                settings={deviceSettings}
-                onSettingsChange={handleDeviceSettingsChange}
-                wahooTokens={wahooTokens}
-                onWahooTokensChange={setWahooTokens}
-              />
+                )}
+              </>
             )}
           </div>
         </aside>

@@ -16,6 +16,7 @@ from waypointer.geometry import project_onto_polyline_m
 from waypointer.main import app
 from waypointer.poi_db import OsmNode, PoiDbError
 from waypointer.rate_limit import REQUESTS_PER_WINDOW
+from waypointer.routing import ROUTING_URL
 
 client = TestClient(app)
 
@@ -755,6 +756,169 @@ def test_wahoo_import_route_rejects_lookalike_host():
     assert response.status_code == 400
 
 
+def _route_leg_form(profile: str = "fastbike", options: str | None = None) -> dict:
+    form = {
+        "start_lat": 47.376899,
+        "start_lon": 8.541699,
+        "end_lat": 47.38,
+        "end_lon": 8.55,
+        "profile": profile,
+    }
+    if options is not None:
+        form["options"] = options
+    return form
+
+
+@responses.activate
+def test_route_leg_returns_polyline_with_elevations(brouter_response_json):
+    responses.add(responses.GET, ROUTING_URL, json=brouter_response_json, status=200)
+    response = client.post("/api/route-leg", data=_route_leg_form())
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["coords"][0] == pytest.approx([47.376899, 8.541699])
+    assert len(data["elevations"]) == len(data["coords"])
+    assert data["elevations"][0] == pytest.approx(407.75)
+    assert data["distance_m"] == pytest.approx(1840.0)
+    assert data["surface"][0] == {"category": "paved", "distance_m": 1050.0}
+    assert data["cycleway_m"] == pytest.approx(150.0)
+
+
+def test_route_leg_rejects_unknown_profile():
+    response = client.post("/api/route-leg", data=_route_leg_form(profile="car-fast"))
+    assert response.status_code == 400
+
+
+@responses.activate
+def test_route_leg_forwards_routing_options(brouter_response_json):
+    responses.add(responses.GET, ROUTING_URL, json=brouter_response_json, status=200)
+    response = client.post(
+        "/api/route-leg", data=_route_leg_form(options='{"allow_steps": true, "consider_traffic": 0.5}')
+    )
+
+    assert response.status_code == 200
+    sent = responses.calls[0].request.url
+    assert "profile%3Aallow_steps=1" in sent
+    assert "profile%3Aconsider_traffic=0.5" in sent
+
+
+@pytest.mark.parametrize(
+    "options",
+    ["not json", "[1, 2]", '{"allow_motorways": true}', '{"allow_steps": "yes"}'],
+)
+def test_route_leg_rejects_invalid_options(options):
+    response = client.post("/api/route-leg", data=_route_leg_form(options=options))
+    assert response.status_code == 400
+
+
+@responses.activate
+def test_route_leg_maps_routing_failure_to_502():
+    responses.add(responses.GET, ROUTING_URL, body="upstream exploded", status=500)
+    response = client.post("/api/route-leg", data=_route_leg_form())
+    assert response.status_code == 502
+
+
+def _record_route_query_coords(monkeypatch) -> list[list[tuple[float, float]]]:
+    """Like _stub_route_query, but records the route_coords each PostGIS
+    query was handed - which is exactly what search_range is meant to scope."""
+    received: list[list[tuple[float, float]]] = []
+
+    def _query(poi_type, route_coords, radius_m):
+        received.append([tuple(pt) for pt in route_coords])
+        return _water_nodes()
+
+    monkeypatch.setattr(main, "query_pois_near_route", _query)
+    return received
+
+
+FULL_ROUTE = [(48.8566, 2.3522), (48.857, 2.353), (48.8575, 2.354)]
+
+
+def test_find_pois_search_range_narrows_db_query_only(sample_route_bytes, monkeypatch):
+    """The whole point of search_range: the PostGIS query covers only the
+    requested slice, while every distance still comes from the full route.
+
+    Node 1001 sits by the route's *first* point, so a search_range covering
+    only the last two points must leave that point out of the query - yet
+    the candidate that is returned must still report a distance_from_start_m
+    measured from the full route's start, not from the slice's start.
+    """
+    received = _record_route_query_coords(monkeypatch)
+    response = client.post(
+        "/api/find-pois/route",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={
+            "poi_config": json.dumps([{"poi_type": "water", "max_distance_m": 100}]),
+            "search_range": json.dumps({"start_index": 1, "end_index": 2}),
+        },
+    )
+    assert response.status_code == 200
+    assert received == [FULL_ROUTE[1:3]]
+
+    _, expected_from_start = project_onto_polyline_m((48.8567, 2.3524), FULL_ROUTE)
+    candidate = next(c for c in response.json()["candidates"] if c["osm_id"] == 1001)
+    assert candidate["distance_from_start_m"] == pytest.approx(expected_from_start)
+
+
+def test_find_pois_search_range_still_returns_the_whole_route_coords(
+    sample_route_bytes, monkeypatch
+):
+    """route_coords is what the frontend draws as *the route*, so a ranged
+    search must still describe the whole thing - returning the sub-range
+    here would visibly truncate the map's route line after a re-search."""
+    _stub_route_query(monkeypatch)
+    ranged = client.post(
+        "/api/find-pois/route",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"search_range": json.dumps({"start_index": 2, "end_index": 2})},
+    )
+    whole = client.post(
+        "/api/find-pois/route",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+    )
+    assert ranged.status_code == 200
+    assert ranged.json()["route_coords"] == whole.json()["route_coords"]
+    assert ranged.json()["point_count"] == whole.json()["point_count"]
+
+
+def test_find_pois_without_search_range_queries_whole_route(sample_route_bytes, monkeypatch):
+    received = _record_route_query_coords(monkeypatch)
+    client.post(
+        "/api/find-pois/route",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"poi_config": json.dumps([{"poi_type": "water", "max_distance_m": 100}])},
+    )
+    assert received == [FULL_ROUTE]
+
+
+@pytest.mark.parametrize(
+    "bad_range",
+    [
+        {"start_index": 1, "end_index": 0},
+        {"start_index": -1, "end_index": 2},
+        {"start_index": 0, "end_index": 99},
+    ],
+)
+def test_find_pois_rejects_out_of_range_search_range(sample_route_bytes, bad_range, monkeypatch):
+    _stub_route_query(monkeypatch)
+    response = client.post(
+        "/api/find-pois/route",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"search_range": json.dumps(bad_range)},
+    )
+    assert response.status_code == 400
+
+
+def test_find_pois_rejects_malformed_search_range(sample_route_bytes, monkeypatch):
+    _stub_route_query(monkeypatch)
+    response = client.post(
+        "/api/find-pois/route",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"search_range": "not json"},
+    )
+    assert response.status_code == 400
+
+
 def test_rate_limit_blocks_after_threshold(sample_route_bytes, monkeypatch):
     _stub_route_query(monkeypatch, {})
     last_status = None
@@ -765,3 +929,47 @@ def test_rate_limit_blocks_after_threshold(sample_route_bytes, monkeypatch):
         )
         last_status = resp.status_code
     assert last_status == 429
+
+
+@responses.activate
+def test_rate_limit_buckets_are_independent(sample_route_bytes, brouter_response_json, monkeypatch):
+    """Exhausting the POI search budget must leave route planning usable, and
+    vice versa - the whole reason rate_limit.py keys on (bucket, ip)."""
+    _stub_route_query(monkeypatch, {})
+    responses.add(responses.GET, ROUTING_URL, json=brouter_response_json, status=200)
+
+    last_status = None
+    for _ in range(REQUESTS_PER_WINDOW + 1):
+        last_status = client.post(
+            "/api/find-pois/route",
+            files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        ).status_code
+    assert last_status == 429
+
+    routing_response = client.post("/api/route-leg", data=_route_leg_form())
+    assert routing_response.status_code == 200
+
+
+@responses.activate
+def test_geocode_returns_places(photon_json):
+    from waypointer.geocode import GEOCODE_URL
+
+    responses.add(responses.GET, GEOCODE_URL, json=photon_json, status=200)
+    response = client.get("/api/geocode", params={"q": "Trento", "lat": 46.07, "lon": 11.12})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data[0]["name"] == "Trento"
+    assert len(data[0]["bbox"]) == 4
+
+
+def test_geocode_rejects_a_too_short_query():
+    assert client.get("/api/geocode", params={"q": "ab"}).status_code == 400
+
+
+@responses.activate
+def test_geocode_maps_failure_to_502():
+    from waypointer.geocode import GEOCODE_URL
+
+    responses.add(responses.GET, GEOCODE_URL, body="busy", status=503)
+    assert client.get("/api/geocode", params={"q": "Trento"}).status_code == 502

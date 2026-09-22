@@ -1,3 +1,5 @@
+import { Bike, type LucideIcon } from "lucide-react"
+
 export interface RoadLegendCategory {
   label: string
   // Real layer id in the style JSON providing the fill (top) line - the
@@ -17,15 +19,70 @@ export interface RoadLegendCategory {
   properties?: Record<string, unknown>
 }
 
+export type RoutingOptionValue = boolean | number
+export type RoutingOptions = Record<string, RoutingOptionValue>
+
+// One BRouter profile parameter a visitor can change while planning. Must
+// match routing.py's PROFILE_OPTIONS for the style's routingProfile - same
+// key, kind, default and (for a choice) values; the backend rejects anything
+// else with a 400.
+export type RoutingOptionSpec =
+  | { key: string; kind: "toggle"; label: string; default: boolean }
+  | {
+      key: string
+      kind: "choice"
+      label: string
+      default: number
+      choices: { value: number; label: string }[]
+    }
+
 export interface MapStyleConfig {
   key: string
   label: string
+  // Shown next to the label in MapStyleSelect - one per activity, since
+  // this registry doubles as the activity list.
+  icon: LucideIcon
   styleUrl: string
+  // BRouter profile the route planner routes with while this style is
+  // active. Deliberately lives here rather than behind its own selector:
+  // this registry is already an activity list (see the commented-out gravel/
+  // MTB/hiking entries below), so enabling one of those brings its routing
+  // along in the same entry. Must be a member of routing.py's
+  // ALLOWED_PROFILES, which the backend checks before forwarding.
+  routingProfile: string
+  // The routingProfile's options shown in the planner panel.
+  routingOptions: RoutingOptionSpec[]
   // Road-color legend rows for this style. Omit to hide the "Road colors"
   // section for this style entirely - there's no separate boolean flag to
   // keep in sync with this.
   roadLegend?: RoadLegendCategory[]
 }
+
+// fastbike's options (see routing.py's PROFILE_OPTIONS for what each does to
+// BRouter's cost model). Ferries and steps default off - unlike the profile's
+// own defaults - since a road bike planner shouldn't route onto either unless
+// asked. Traffic defaults to fastbike's own 0.1 ("A little").
+const FASTBIKE_OPTIONS: RoutingOptionSpec[] = [
+  {
+    key: "consider_traffic",
+    kind: "choice",
+    label: "How much longer are you willing to ride to avoid traffic?",
+    default: 0.1,
+    choices: [
+      { value: 0, label: "Not at all" },
+      { value: 0.1, label: "A little" },
+      { value: 0.3, label: "Somewhat" },
+      { value: 0.5, label: "Quite a bit" },
+      { value: 1, label: "As much as it takes" },
+    ],
+  },
+  { key: "allow_ferries", kind: "toggle", label: "Allow ferries", default: false },
+  { key: "allow_steps", kind: "toggle", label: "Allow steps", default: false },
+  { key: "consider_noise", kind: "toggle", label: "Prefer quiet roads", default: false },
+  { key: "consider_river", kind: "toggle", label: "Prefer rivers & lakes", default: false },
+  { key: "consider_forest", kind: "toggle", label: "Prefer forests & parks", default: false },
+  { key: "consider_town", kind: "toggle", label: "Bypass towns", default: false },
+]
 
 // Hand-mirrors road-cycling.json's layer ids (not its colors - see
 // RoadLegendCategory above) so the legend's road-color rows always reflect
@@ -77,7 +134,15 @@ export const MAP_STYLES: MapStyleConfig[] = [
   {
     key: "road_cycling",
     label: "Road Cycling",
+    icon: Bike,
     styleUrl: "/map-styles/road-cycling.json",
+    // Road-bike oriented (prefers paved, avoids tracks) - the same judgement
+    // road-cycling.json makes visually by dimming unpaved and bike-prohibited
+    // ways. fastbike rather than fastbike-lowtraffic: the two profiles are
+    // identical except for consider_traffic's default, and that's an option
+    // the visitor sets anyway (see FASTBIKE_OPTIONS).
+    routingProfile: "fastbike",
+    routingOptions: FASTBIKE_OPTIONS,
     roadLegend: ROAD_CYCLING_LEGEND,
   },
   // { key: "gravel", label: "Gravel", styleUrl: "https://tiles.openfreemap.org/styles/bright" },
@@ -88,3 +153,15 @@ export const MAP_STYLES: MapStyleConfig[] = [
 ]
 
 export const DEFAULT_MAP_STYLE_KEY = "road_cycling"
+
+export function routingProfileForStyle(key: string): string {
+  return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).routingProfile
+}
+
+export function routingOptionSpecsForStyle(key: string): RoutingOptionSpec[] {
+  return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).routingOptions
+}
+
+export function defaultRoutingOptions(specs: RoutingOptionSpec[]): RoutingOptions {
+  return Object.fromEntries(specs.map((spec) => [spec.key, spec.default]))
+}

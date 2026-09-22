@@ -4,12 +4,20 @@
 // action happens; components subscribe via useToasts().
 import { useEffect, useState } from "react"
 
-export type ToastVariant = "loading" | "success" | "error"
+// "info" is a neutral message - e.g. a question offered with actions.
+export type ToastVariant = "loading" | "success" | "error" | "info"
+
+export interface ToastAction {
+  label: string
+  onClick: () => void
+}
 
 export interface ToastEntry {
   id: string
   message: string
   variant: ToastVariant
+  // Buttons that act on the toast; clicking one also dismisses it.
+  actions?: ToastAction[]
 }
 
 const AUTO_DISMISS_MS = 5000
@@ -30,21 +38,22 @@ function clearTimer(id: string) {
   }
 }
 
-function scheduleAutoDismiss(id: string, variant: ToastVariant) {
+function scheduleAutoDismiss(id: string, variant: ToastVariant, hasActions = false) {
   clearTimer(id)
   // "loading" toasts persist until explicitly resolved via updateToast/
-  // dismissToast - only success/error auto-dismiss.
-  if (variant === "loading") return
+  // dismissToast, and a toast offering actions stays until one is chosen
+  // (or it's closed) - a question shouldn't vanish before it's answered.
+  if (variant === "loading" || hasActions) return
   timers.set(
     id,
     setTimeout(() => dismissToast(id), AUTO_DISMISS_MS),
   )
 }
 
-export function toast(message: string, variant: ToastVariant = "success"): string {
+export function toast(message: string, variant: ToastVariant = "success", actions?: ToastAction[]): string {
   const id = crypto.randomUUID()
-  toasts = [...toasts, { id, message, variant }]
-  scheduleAutoDismiss(id, variant)
+  toasts = [...toasts, { id, message, variant, actions }]
+  scheduleAutoDismiss(id, variant, actions !== undefined && actions.length > 0)
   notify()
   return id
 }

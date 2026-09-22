@@ -1,3 +1,5 @@
+from typing import Literal
+
 from pydantic import BaseModel
 
 
@@ -25,6 +27,22 @@ class CandidateDetails(BaseModel):
 class PoiSearchConfig(BaseModel):
     poi_type: str
     max_distance_m: float
+
+
+class SearchRange(BaseModel):
+    # An inclusive index range into the submitted route's coordinate list
+    # (gpx_io.route_coordinates order). When given, /api/find-pois/route runs
+    # its PostGIS query against only this slice of the route - used by the
+    # route planner after extending a route, so a re-search only returns POIs
+    # along the newly added stretch, which the frontend merges into what it
+    # already has.
+    #
+    # Deliberately scopes *only* the database query: every distance in the
+    # response is still measured against the full route, so there remains
+    # exactly one place (geometry.project_onto_polyline_indexed_m) that
+    # computes distance-from-route and distance-from-start.
+    start_index: int
+    end_index: int
 
 
 class PoiLookupResult(BaseModel):
@@ -87,6 +105,35 @@ class FindPoisResponse(BaseModel):
     route_coords: list[tuple[float, float]]
     failed_poi_types: list[FailedPoiType] = []
     candidate_details: dict[int, CandidateDetails] = {}
+
+
+class SurfaceRunResponse(BaseModel):
+    category: Literal["paved", "cobbles", "unpaved", "unknown"]
+    distance_m: float
+
+
+class RouteLegResponse(BaseModel):
+    # One road-snapped leg between two planner anchors. coords/elevations are
+    # index-parallel (see routing.RoutedLeg); elevations carries None where
+    # the routing engine gave a 2D point, matching route_elevations().
+    coords: list[tuple[float, float]]
+    elevations: list[float | None]
+    distance_m: float
+    # Surface along the leg, in order (see routing.surface_category), and how
+    # much of it is on dedicated cycleways - for the planner's surface band.
+    surface: list[SurfaceRunResponse] = []
+    cycleway_m: float = 0.0
+
+
+class PlaceResult(BaseModel):
+    # One /api/geocode match - see geocode.Place.
+    name: str
+    context: str
+    kind: str
+    lat: float
+    lon: float
+    # [west, south, east, north] for an area; None for a point.
+    bbox: tuple[float, float, float, float] | None
 
 
 class WahooRoutePayload(BaseModel):

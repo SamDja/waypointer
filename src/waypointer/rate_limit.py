@@ -1,18 +1,27 @@
-"""Minimal per-IP rate limiting for the POI-database-backed endpoints.
+"""Minimal per-IP rate limiting for the POI-database- and routing-backed
+endpoints.
 
 Now that POI lookups hit a local PostGIS database (see poi_db.py) instead
-of a shared, rate-limit-sensitive public Overpass mirror, this limiter's
+of a shared, rate-limit-sensitive public Overpass mirror, the POI buckets'
 job is just guarding this app's own DB/CPU usage against a burst of
 traffic (accidental or not) from one IP - not protecting a third party's
-quota. Still a small in-memory sliding window log, not a distributed
-limiter - sufficient for a single instance and intentionally not backed by
-Redis/a database.
+quota. Route planning is different: /api/route-leg still proxies BRouter's
+shared public instance (see routing.py), so a burst there does risk getting
+this server's one IP throttled upstream. Still a small in-memory sliding
+window log, not a distributed limiter - sufficient for a single instance and
+intentionally not backed by Redis/a database.
+
+Each endpoint gets its own named bucket with its own budget, so one
+endpoint's traffic can never consume another's: route planning is
+inherently chatty (dragging an anchor re-requests its two adjacent legs),
+and sharing one budget would let a planning session starve the search it
+exists to feed.
 
 The frontend fans a single "Find POIs" click out into one
 /api/find-pois/route request per selected POI type (fired in parallel)
 rather than one request carrying every type, so progress/results can be
 shown per type instead of only once the slowest type finishes - see
-FindPoisCard.tsx / App.tsx's handleFind. That doesn't change how much real
+FindPoisCard.tsx / App.tsx's runFind. That doesn't change how much real
 DB work happens (still one query per type, same as before), just how many
 times this dependency gets checked for the same amount of work - so the
 budget below is sized to comfortably cover a full-registry search (~50
@@ -27,10 +36,15 @@ from fastapi import HTTPException, Request, status
 
 REQUESTS_PER_WINDOW = 60
 LOOKUP_POI_REQUESTS_PER_WINDOW = 30
+ROUTING_REQUESTS_PER_WINDOW = 60
+# The map's search box is a debounced typeahead - a few requests per search.
+GEOCODE_REQUESTS_PER_WINDOW = 30
 
 WINDOW_S = 60.0
 
 _lock = threading.Lock()
+# Keyed on (bucket, ip) rather than ip alone, so one endpoint's traffic can
+# never consume another's budget.
 _requests_by_ip: dict[tuple[str, str], list[float]] = defaultdict(list)
 
 
@@ -68,3 +82,5 @@ def make_rate_limit(bucket: str, requests_per_window: int, window_s: float = WIN
 
 rate_limit = make_rate_limit("find_pois", REQUESTS_PER_WINDOW)
 lookup_poi_rate_limit = make_rate_limit("lookup_poi", LOOKUP_POI_REQUESTS_PER_WINDOW)
+routing_rate_limit = make_rate_limit("routing", ROUTING_REQUESTS_PER_WINDOW)
+geocode_rate_limit = make_rate_limit("geocode", GEOCODE_REQUESTS_PER_WINDOW)

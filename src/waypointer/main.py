@@ -12,6 +12,7 @@ import base64
 import os
 import re
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlparse
 
 import requests
@@ -46,15 +47,21 @@ from waypointer.gpx_io import (
 )
 from waypointer.poi_db import OsmNode, PoiDbError, query_poi_near_point, query_pois_near_route
 from waypointer.poi_types import DEFAULT_VISIBLE_POI_TYPES, POI_TYPES, clamp_distance_m
-from waypointer.rate_limit import lookup_poi_rate_limit, rate_limit
+from waypointer.rate_limit import geocode_rate_limit, lookup_poi_rate_limit, rate_limit, routing_rate_limit
+from waypointer.geocode import GeocodeError, search_places
+from waypointer.routing import USER_AGENT, RoutingError, route_leg
 from waypointer.schemas import (
     Candidate,
     CandidateDetails,
     ExistingWaypoint,
     FailedPoiType,
     FindPoisResponse,
+    PlaceResult,
     PoiLookupResult,
     PoiSearchConfig,
+    RouteLegResponse,
+    SurfaceRunResponse,
+    SearchRange,
     WahooRoutePayload,
 )
 
@@ -72,10 +79,6 @@ SIMPLIFY_TOLERANCE_M = 8.0
 # ever fetches from Wahoo, so it restricts the caller-supplied URL to this
 # host suffix rather than fetching arbitrary URLs (SSRF guard).
 WAHOO_FILE_HOST_SUFFIX = ".wahooligan.com"
-# Used only for the Wahoo FIT download below now that OSM lookups go through
-# poi_db.py (a local PostGIS query, no HTTP involved) instead of osm.py's
-# Overpass client.
-USER_AGENT = "waypointer/0.1 (+https://github.com/SamDja/waypointer)"
 
 app = FastAPI(title="Sulla Via")
 
@@ -92,7 +95,11 @@ Instrumentator().instrument(app).expose(app)
 _selected_candidates_adapter = TypeAdapter(list[Candidate])
 _poi_config_adapter = TypeAdapter(list[PoiSearchConfig])
 _discarded_indices_adapter = TypeAdapter(list[int])
+_search_range_adapter = TypeAdapter(SearchRange)
 _existing_waypoint_types_adapter = TypeAdapter(dict[str, str])
+# Values are left as parsed (Any): routing.resolve_options checks each one's
+# kind itself, where a bool | float adapter could quietly coerce 1 to True.
+_routing_options_adapter = TypeAdapter(dict[str, Any])
 
 
 async def _read_gpx_upload(gpx_file: UploadFile) -> tuple[GPX, list[LatLon]]:
@@ -123,6 +130,7 @@ def _default_poi_config() -> list[PoiSearchConfig]:
 async def find_pois(
     gpx_file: UploadFile,
     poi_config: str | None = Form(None),
+    search_range: str | None = Form(None),
 ) -> FindPoisResponse:
     gpx, coords = await _read_gpx_upload(gpx_file)
 
@@ -134,7 +142,32 @@ async def find_pois(
         except ValidationError as exc:
             raise HTTPException(status_code=400, detail=f"Invalid poi_config: {exc}") from exc
 
-    simplified = simplify_rdp(coords, tolerance_m=SIMPLIFY_TOLERANCE_M)
+    # search_range narrows only which part of the route the PostGIS query
+    # covers (the route planner uses it to re-search just a newly appended
+    # stretch). Every distance below is still measured against the full
+    # route, and is_duplicate_candidate still sees the whole file, so a
+    # ranged search returns exactly the same values a whole-route search
+    # would for the POIs it does find.
+    search_coords = coords
+    if search_range is not None:
+        try:
+            parsed_range = _search_range_adapter.validate_json(search_range)
+        except ValidationError as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid search_range: {exc}") from exc
+        if not 0 <= parsed_range.start_index <= parsed_range.end_index < len(coords):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"search_range must satisfy 0 <= start_index <= end_index < {len(coords)}."
+                ),
+            )
+        search_coords = coords[parsed_range.start_index : parsed_range.end_index + 1]
+
+    # Always simplified from the whole route, never from search_coords:
+    # route_coords below is what the frontend draws as *the route*, so
+    # feeding it the sub-range would visibly truncate the map's route line
+    # after a ranged re-search.
+    route_simplified = simplify_rdp(coords, tolerance_m=SIMPLIFY_TOLERANCE_M)
     route_index = build_polyline_index(coords)
 
     # Validate every entry up front - bad poi_type/tag_filter input must
@@ -156,16 +189,18 @@ async def find_pois(
     # psycopg calls to a worker thread so they run in parallel and stop
     # hogging the event loop. Errors are caught per-call so one type
     # failing doesn't take the others down with it. Queried against the
-    # full-resolution route (not `simplified`, which is kept only for the
-    # map's route line) - no radius padding needed, unlike the old
-    # Overpass-based query, since a local DB query has no reason to run
-    # against a size-reduced route.
+    # full-resolution route (or its search_range slice - not
+    # `route_simplified`, which is kept only for the map's route line) - no
+    # radius padding needed, unlike the old Overpass-based query, since a
+    # local DB query has no reason to run against a size-reduced route.
     async def _fetch_one(
         entry: PoiSearchConfig, radius_m: float
     ) -> tuple[PoiSearchConfig, list[OsmNode], PoiDbError | None]:
         cfg = POI_TYPES[entry.poi_type]
         try:
-            nodes = await asyncio.to_thread(query_pois_near_route, cfg.key, coords, radius_m)
+            nodes = await asyncio.to_thread(
+                query_pois_near_route, cfg.key, search_coords, radius_m
+            )
             return entry, nodes, None
         except PoiDbError as exc:
             return entry, [], exc
@@ -244,7 +279,7 @@ async def find_pois(
         candidates=candidates,
         point_count=len(coords),
         existing_waypoints=existing_waypoints,
-        route_coords=simplified,
+        route_coords=route_simplified,
         failed_poi_types=failed_poi_types,
         candidate_details=candidate_details,
     )
@@ -541,6 +576,87 @@ async def find_poi_at_location(
         tags=node.tags,
         last_edited=node.timestamp,
     )
+
+
+@app.post(
+    "/api/route-leg",
+    response_model=RouteLegResponse,
+    dependencies=[Depends(routing_rate_limit)],
+)
+async def route_leg_endpoint(
+    start_lat: float = Form(...),
+    start_lon: float = Form(...),
+    end_lat: float = Form(...),
+    end_lon: float = Form(...),
+    profile: str = Form(...),
+    # JSON object of BRouter profile options (see routing.PROFILE_OPTIONS);
+    # anything omitted takes its default.
+    options: str = Form("{}"),
+) -> RouteLegResponse:
+    """Road-snaps one leg between two route-planner anchors.
+
+    Proxied rather than called from the browser so the routing provider stays
+    swappable server-side (ROUTING_URL), the leg cache is shared across
+    visitors, and the per-IP budget in rate_limit.py actually protects the
+    shared public BRouter instance from this server's one IP.
+    """
+    try:
+        parsed_options = _routing_options_adapter.validate_json(options)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid routing options: {exc}") from exc
+
+    try:
+        # route_leg's requests.get blocks; offload it so a slow routing
+        # response doesn't stall the event loop, as find_pois does for
+        # query_pois_near_route.
+        leg = await asyncio.to_thread(
+            route_leg, (start_lat, start_lon), (end_lat, end_lon), profile, parsed_options
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RoutingError as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to plan that leg: {exc}") from exc
+
+    return RouteLegResponse(
+        coords=leg.coords,
+        elevations=leg.elevations,
+        distance_m=leg.distance_m,
+        surface=[
+            SurfaceRunResponse(category=run.category, distance_m=run.distance_m) for run in leg.surface
+        ],
+        cycleway_m=leg.cycleway_m,
+    )
+
+
+@app.get(
+    "/api/geocode",
+    response_model=list[PlaceResult],
+    dependencies=[Depends(geocode_rate_limit)],
+)
+async def geocode_endpoint(
+    q: str,
+    lat: float | None = None,
+    lon: float | None = None,
+) -> list[PlaceResult]:
+    """Places matching a typed name, for the map's search box, biased
+    towards lat/lon (the map's centre) when given.
+
+    A GET, unlike the other endpoints: it's a pure lookup with no upload.
+    Proxied for the same reasons as /api/route-leg - the provider stays
+    swappable (GEOCODE_URL), the cache is shared, and the rate limit protects
+    the public instance.
+    """
+    near = (lat, lon) if lat is not None and lon is not None else None
+    try:
+        places = await asyncio.to_thread(search_places, q, near)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except GeocodeError as exc:
+        raise HTTPException(status_code=502, detail=f"Place search failed: {exc}") from exc
+    return [
+        PlaceResult(name=p.name, context=p.context, kind=p.kind, lat=p.lat, lon=p.lon, bbox=p.bbox)
+        for p in places
+    ]
 
 
 # Catch-all mount for the built SPA - MUST be registered last. StaticFiles

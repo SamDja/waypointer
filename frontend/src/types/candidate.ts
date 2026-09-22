@@ -51,6 +51,41 @@ export interface ExistingWaypoint {
   distance_from_start_m: number
 }
 
+// Inclusive index range into the submitted route's coordinate list, scoping
+// /api/find-pois/route's PostGIS query to part of the route (see schemas.py's
+// SearchRange - distances are still measured against the whole route).
+export interface SearchRange {
+  start_index: number
+  end_index: number
+}
+
+export type SurfaceCategory = "paved" | "cobbles" | "unpaved" | "unknown"
+
+// Mirrors schemas.py's SurfaceRunResponse.
+export interface SurfaceRunResponse {
+  category: SurfaceCategory
+  distance_m: number
+}
+
+// One /api/geocode match - mirrors schemas.py's PlaceResult.
+export interface PlaceResult {
+  name: string
+  context: string
+  kind: string
+  lat: number
+  lon: number
+  // [west, south, east, north] for an area; null for a point.
+  bbox: [number, number, number, number] | null
+}
+
+export interface RouteLegResponse {
+  coords: [number, number][]
+  elevations: (number | null)[]
+  distance_m: number
+  surface: SurfaceRunResponse[]
+  cycleway_m: number
+}
+
 export type HoveredPoi = { kind: "candidate"; id: number } | { kind: "waypoint"; id: number } | null
 
 export interface FailedPoiType {

@@ -72,6 +72,9 @@ export function PoiTypeCombobox({
                     key={cfg.key}
                     value={cfg.label}
                     data-checked={cfg.key === value}
+                    // Only the checked row has a tick to push right, so keep
+                    // the label next to its icon on the others.
+                    className="justify-start"
                     onSelect={() => {
                       onChange(cfg.key)
                       setOpen(false)

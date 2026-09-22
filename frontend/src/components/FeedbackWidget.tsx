@@ -19,7 +19,9 @@ export function FeedbackWidget() {
       // codebase (current max is z-[1210] on Popover/Select content, see
       // components/ui/popover.tsx/select.tsx) - this button must stay
       // clickable above any open Dialog/AlertDialog/toast.
-      className="fixed right-4 bottom-4 z-[1300] rounded-full shadow-lg"
+      // bottom-12: sits just above MapLibre's attribution button, which
+      // index.css pins to the page's bottom-right corner.
+      className="fixed right-4 bottom-12 z-[1300] rounded-full shadow-lg"
       aria-label="Send feedback"
       title="Send feedback"
     >

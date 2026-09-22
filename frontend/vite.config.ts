@@ -16,6 +16,11 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  // maplibre-gl v6 spawns its worker with { type: "module" }, so the bundled
+  // copy RouteMap.tsx hands to setWorkerUrl() must stay an ES module.
+  worker: {
+    format: "es",
+  },
   server: {
     proxy: {
       "/api": "http://localhost:8000",

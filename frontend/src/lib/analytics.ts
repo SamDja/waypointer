@@ -33,6 +33,12 @@ export type AnalyticsEvent =
   | "wahoo_connect_initiated"
   | "wahoo_connect_succeeded"
   | "wahoo_connect_failed"
+  | "route_planning_started"
+  | "route_shape_changed"
+  | "routing_options_changed"
+  | "route_planning_done"
+  | "place_search_picked"
+  | "place_added_to_route"
 
 // Never throws and never assumes window.umami is present - it may be
 // missing from an ad-blocker, an unset website id, or the script still
