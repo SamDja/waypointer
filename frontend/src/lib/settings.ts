@@ -155,19 +155,30 @@ export function saveOffRouteThresholdM(thresholdM: number): void {
  * dropped - the backend would reject it.
  */
 export function loadRoutingOptions(styleKey: string): RoutingOptions {
-  const specs = routingOptionSpecsForStyle(styleKey)
-  const options = defaultRoutingOptions(specs)
   try {
     const raw = localStorage.getItem(ROUTING_OPTIONS_KEY)
-    const saved = raw ? (JSON.parse(raw) as Record<string, Record<string, unknown>>)[styleKey] : undefined
-    if (!saved || typeof saved !== "object") return options
-    for (const spec of specs) {
-      const value = saved[spec.key]
-      if (spec.kind === "toggle" && typeof value === "boolean") options[spec.key] = value
-      if (spec.kind === "choice" && spec.choices.some((c) => c.value === value)) options[spec.key] = value as number
-    }
+    const saved = raw ? (JSON.parse(raw) as Record<string, unknown>)[styleKey] : undefined
+    return sanitizeRoutingOptions(styleKey, saved)
   } catch {
     // Unreadable or blocked storage: fall back to the defaults.
+    return sanitizeRoutingOptions(styleKey, undefined)
+  }
+}
+
+/**
+ * Stored routing options made safe for a style: its defaults, overlaid with
+ * whatever `saved` has that the style still offers, of the right kind and
+ * value. Anything else is dropped - the backend would reject it.
+ */
+export function sanitizeRoutingOptions(styleKey: string, saved: unknown): RoutingOptions {
+  const specs = routingOptionSpecsForStyle(styleKey)
+  const options = defaultRoutingOptions(specs)
+  if (!saved || typeof saved !== "object") return options
+  const values = saved as Record<string, unknown>
+  for (const spec of specs) {
+    const value = values[spec.key]
+    if (spec.kind === "toggle" && typeof value === "boolean") options[spec.key] = value
+    if (spec.kind === "choice" && spec.choices.some((c) => c.value === value)) options[spec.key] = value as number
   }
   return options
 }

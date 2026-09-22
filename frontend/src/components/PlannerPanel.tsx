@@ -17,6 +17,8 @@ export interface PlannerPanelProps {
   // "new" when planning started from an empty map, "edit" when it opened on
   // a route that was already loaded - only the wording differs.
   mode: "new" | "edit"
+  // The plan is too big to keep as a draft across reloads (see lib/plannerDraft).
+  draftTooBig: boolean
   hasRoute: boolean
   onDone: () => void
   onRemove: () => void
@@ -55,6 +57,7 @@ const ROUTE_SHAPES: { value: RouteShape; label: string; icon: LucideIcon }[] = [
 // the sidebar. "Done" hands back to the step cards.
 export function PlannerPanel({
   mode,
+  draftTooBig,
   hasRoute,
   onDone,
   onRemove,
@@ -144,6 +147,12 @@ export function PlannerPanel({
             avgSpeedKmh={avgSpeedKmh}
             onAvgSpeedChange={onAvgSpeedChange}
           />
+        )}
+
+        {draftTooBig && (
+          <p className="text-xs text-muted-foreground">
+            This route is too large to keep as a draft, so it won't be offered back if the page reloads.
+          </p>
         )}
 
         {hasRoute && <RemoveRouteButton onRemove={onRemove} />}

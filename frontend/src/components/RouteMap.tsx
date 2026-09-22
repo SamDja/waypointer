@@ -97,6 +97,9 @@ export interface RouteMapProps {
   onDismissPendingLookup?: () => void
   // Present exactly while the route planner is active - see PlanningProps.
   planning?: PlanningProps
+  // Bumped to fit the map to the route once, even while planning (when it
+  // otherwise never refits) - e.g. after restoring a saved draft.
+  fitRequest?: number
   // Reported on load and after every zoom, for the route planner's spur
   // tolerance (routePlanner.spurToleranceM), which depends on how zoomed in
   // a point was placed.
@@ -260,6 +263,32 @@ function DetachedAttribution({ hostRef }: { hostRef: RefObject<HTMLDivElement | 
     return () => control.onRemove()
   }, [mapRef, hostRef])
 
+  return null
+}
+
+/**
+ * Fits the map to the route once per bump of `request`. The route can arrive
+ * a render after the request (a restored draft's geometry is synthesized by
+ * an effect), so a request waits until there's a route to fit.
+ */
+function FitOnRequest({
+  request,
+  routeCoords,
+  padding,
+}: {
+  request: number
+  routeCoords: [number, number][]
+  padding: PaddingOptions
+}) {
+  const { current: map } = useMap()
+  const handledRef = useRef(0)
+  useEffect(() => {
+    if (!map || request === handledRef.current || routeCoords.length < 2) return
+    const bounds = getRouteBounds(routeCoords, [], [])
+    if (!bounds) return
+    handledRef.current = request
+    map.fitBounds(bounds, { padding, duration: 500 })
+  }, [map, request, routeCoords, padding])
   return null
 }
 
@@ -1186,6 +1215,7 @@ export function RouteMap({
   planning,
   insets = NO_INSETS,
   onZoomChange,
+  fitRequest = 0,
 }: RouteMapProps) {
   const [openPopup, setOpenPopup] = useState<{ kind: "candidate" | "waypoint"; id: number } | null>(null)
   const [bearing, setBearing] = useState(0)
@@ -1648,6 +1678,7 @@ export function RouteMap({
             </Marker>
           )}
           <DetachedAttribution hostRef={attributionHostRef} />
+          <FitOnRequest request={fitRequest} routeCoords={routeCoords} padding={fitPadding} />
           <HoveredDistanceMarker routeCoords={routeCoords} />
           <FitBounds
             routeCoords={routeCoords}

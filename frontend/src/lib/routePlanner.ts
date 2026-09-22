@@ -244,6 +244,26 @@ export function plannerSurface(state: PlannerState): { runs: SurfaceRun[]; cycle
   return { runs: mergeRuns(runs), cyclewayM }
 }
 
+/**
+ * The state with its leg cache cut down to the legs the route currently
+ * uses (its routed segments and a loop's return leg, under the current
+ * options). The cache otherwise keeps every leg ever fetched - every drag
+ * position, every option tried - which is worth it in memory but not in a
+ * saved draft.
+ */
+export function withPrunedLegs(state: PlannerState): PlannerState {
+  const returning = returnLeg(state)
+  const inUse = [...state.segments, ...(returning ? [returning] : [])].filter(
+    (s): s is RoutedSegment => s.kind === "routed"
+  )
+  const legs: Record<string, RoutedLeg> = {}
+  for (const segment of inUse) {
+    const key = stateLegKey(state, segment.from, segment.to)
+    if (state.legs[key]) legs[key] = state.legs[key]
+  }
+  return { ...state, legs }
+}
+
 /** Switches the routing options; every routed leg is then re-fetched under them. */
 export function setRoutingOptions(state: PlannerState, options: RoutingOptions): PlannerState {
   return { ...state, options }

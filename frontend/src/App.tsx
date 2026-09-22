@@ -72,13 +72,15 @@ import {
   saveMapStyleKey,
   saveOffRouteThresholdM,
   saveRoutingOptions,
+  sanitizeRoutingOptions,
   savePoiSearchConfig,
   saveSettings,
   type DeviceSettings,
   type PoiSearchEntry,
 } from "@/lib/settings"
+import { clearDraft, loadDraft, saveDraft, type PlannerDraft } from "@/lib/plannerDraft"
 import { useElementHeight, useMapInsets } from "@/lib/useMapInsets"
-import { toast, updateToast } from "@/lib/toast"
+import { dismissToast, toast, updateToast } from "@/lib/toast"
 import { loadWahooTokens, type WahooTokens } from "@/lib/wahooSettings"
 import type {
   Candidate,
@@ -117,6 +119,9 @@ const SEARCH_STAGGER_MS = 200
 // Plenty for a planning session; bounds memory, since each entry holds a
 // whole PlannerState (an import's geometry included).
 const PLANNER_HISTORY_LIMIT = 100
+
+// How long after the last planner change the draft is saved (see lib/plannerDraft).
+const DRAFT_SAVE_DEBOUNCE_MS = 1000
 
 // Space between the elevation profile and the map's bottom/left edges.
 const PROFILE_GAP_PX = 16
@@ -210,6 +215,18 @@ export default function App() {
   // The planner point hovered in PlannerPanel's point list or on the map,
   // highlighted in both.
   const [hoveredAnchorIndex, setHoveredAnchorIndex] = useState<number | null>(null)
+  // The draft couldn't be saved because it's too big for localStorage (a
+  // very long import) - PlannerPanel says so quietly.
+  const [draftTooBig, setDraftTooBig] = useState(false)
+  // The plan behind the current route, kept when "Done" leaves the planner
+  // so "Edit route" reopens it as it was - its points, routed legs (and their
+  // surface), shape and options - instead of rebuilding it from the finished
+  // file as one block of imported geometry. Dropped when the route goes:
+  // removed, replaced by another file, or by a restored draft.
+  const [parkedPlan, setParkedPlan] = useState<{ state: PlannerState; mode: "new" | "edit" } | null>(null)
+  // Bumped to ask RouteMap to fit the route once - it doesn't while
+  // planning, but a restored draft needs framing.
+  const [fitRequest, setFitRequest] = useState(0)
   // The imported file's parsed document, kept so an edited import is
   // re-serialized from the original rather than rebuilt - preserving its
   // pre-existing <wpt> entries and their waypointer: extension markers.
@@ -384,18 +401,10 @@ export default function App() {
     setPlannerState(null)
     setTrackedPositions({})
     resetPlannerSession()
+    clearDraft()
+    setParkedPlan(null)
 
-    const text = await newFile.text()
-    setSourceDoc(parseGpxDocument(text))
-    const routeCoords = parseRouteCoordsFromGpx(text)
-    setPreviewRouteCoords(routeCoords)
-    setPreviewElevations(parseRouteElevationsFromGpx(text))
-    const waypoints = parseExistingWaypointsFromGpx(text)
-    setPreviewExistingWaypoints(waypoints)
-    // Default to keeping every pre-existing waypoint, matching the
-    // post-search default in handleFind below.
-    setKeptWaypointIndices(new Set(waypoints.map((w) => w.index)))
-    setWaypointTypeOverrides({})
+    const { routeCoords, waypoints } = loadGpxText(await newFile.text())
 
     if (routeCoords.length === 0) {
       track("gpx_parse_failed", { reason: "empty_or_invalid" })
@@ -408,7 +417,29 @@ export default function App() {
     }
   }
 
+  /**
+   * Loads a GPX's text as the working route's source: its parsed document
+   * (which the planner re-serializes from, keeping its <wpt> entries), the
+   * preview line and elevations, and its pre-existing waypoints, all kept.
+   * Shared by importing a file and by restoring a planner draft.
+   */
+  function loadGpxText(text: string) {
+    setSourceDoc(parseGpxDocument(text))
+    const routeCoords = parseRouteCoordsFromGpx(text)
+    setPreviewRouteCoords(routeCoords)
+    setPreviewElevations(parseRouteElevationsFromGpx(text))
+    const waypoints = parseExistingWaypointsFromGpx(text)
+    setPreviewExistingWaypoints(waypoints)
+    // Default to keeping every pre-existing waypoint, matching the
+    // post-search default in handleFind below.
+    setKeptWaypointIndices(new Set(waypoints.map((w) => w.index)))
+    setWaypointTypeOverrides({})
+    return { routeCoords, waypoints }
+  }
+
   function handleRemoveRoute() {
+    clearDraft()
+    setParkedPlan(null)
     setFile(null)
     setPreviewRouteCoords([])
     setPreviewElevations([])
@@ -583,6 +614,16 @@ export default function App() {
   }
 
   function handleStartPlanning() {
+    if (parkedPlan && file) {
+      // Reopen the plan as it was left (see parkedPlan). The filename and
+      // source document it was synthesized from are unchanged since.
+      const state = withCurrentRouting(parkedPlan.state)
+      setPlannerMode(parkedPlan.mode)
+      resetPlannerSession()
+      setPlannerState(state)
+      setTrackedPositions(seedTracked(plannerGeometry(state).coords))
+      return
+    }
     const coords = findResult?.route_coords ?? previewRouteCoords
     plannedFilenameRef.current =
       file?.name ?? `Planned route ${new Date().toISOString().slice(0, 10)}.gpx`
@@ -597,12 +638,15 @@ export default function App() {
   }
 
   function handleExitPlanning() {
+    // The plan is finished: nothing left to restore after a reload.
+    clearDraft()
     // Every point was deleted: there's no route to carry on with, so leave
     // the way "Remove route" would rather than with stale search results.
     if (!file) {
       handleRemoveRoute()
       return
     }
+    if (plannerState) setParkedPlan({ state: plannerState, mode: plannerMode })
     setPlannerState(null)
     resetPlannerSession()
     // Planning is step 1's work; once it's done, a route that actually
@@ -729,6 +773,95 @@ export default function App() {
     }
     if (result.state !== plannerState) applyEditWithFullReprojection(result.state)
   }
+
+  // The source GPX as text, for the draft - serialized once per import, not
+  // on every save.
+  const sourceGpxText = useMemo(() => (sourceDoc ? new XMLSerializer().serializeToString(sourceDoc) : null), [sourceDoc])
+
+  // Save the in-progress plan (debounced) so a reload or a closed tab doesn't
+  // lose it. Leaving the planner clears it (handleExitPlanning,
+  // handleRemoveRoute, importing another file), not this effect.
+  useEffect(() => {
+    if (!plannerState) return
+    const timer = setTimeout(() => {
+      if (plannerAnchors(plannerState).length === 0) {
+        // Nothing planned yet: nothing worth offering back.
+        clearDraft()
+        setDraftTooBig(false)
+        return
+      }
+      const result = saveDraft({
+        state: plannerState,
+        mode: plannerMode,
+        filename: plannedFilenameRef.current,
+        sourceGpx: sourceGpxText,
+      })
+      setDraftTooBig(result === "too-big")
+    }, DRAFT_SAVE_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [plannerState, plannerMode, sourceGpxText])
+
+  /**
+   * A plan made earlier - a saved draft, or one parked by "Done" before the
+   * activity was switched - may be under another profile, or carry options
+   * the current style no longer offers; the backend would refuse those legs.
+   * Route it with the current style's profile and sanitized options instead.
+   */
+  function withCurrentRouting(state: PlannerState): PlannerState {
+    return { ...state, profile: routingProfile, options: sanitizeRoutingOptions(mapStyleKey, state.options) }
+  }
+
+  /**
+   * Puts a saved draft back: the imported GPX it started from (if any), then
+   * the plan itself, straight into planning mode. The saved routed geometry
+   * comes back with it, so only legs never fetched are requested again.
+   */
+  function restoreDraft(draft: PlannerDraft) {
+    setFindResult(null)
+    setSelectedIds(new Set())
+    setSearchedPoiTypes([])
+    setClickAddedCandidates([])
+    setClickAddedDetails({})
+    resetPlannerSession()
+    let waypoints: ExistingWaypoint[] = []
+    if (draft.sourceGpx) {
+      waypoints = loadGpxText(draft.sourceGpx).waypoints
+    } else {
+      setSourceDoc(null)
+      setPreviewExistingWaypoints([])
+      setKeptWaypointIndices(new Set())
+      setWaypointTypeOverrides({})
+    }
+    const state = withCurrentRouting(draft.state)
+    setParkedPlan(null)
+    plannedFilenameRef.current = draft.filename
+    setPlannerMode(draft.mode)
+    setPlannerState(state)
+    setTrackedPositions(
+      trackPositions(
+        waypoints.map((w) => ({ key: `w:${w.index}`, lat: w.lat, lon: w.lon })),
+        plannerGeometry(state).coords
+      )
+    )
+    setFitRequest((n) => n + 1)
+  }
+
+  // Offer a saved draft back once, when the app opens. A toast rather than a
+  // dialog: the visitor may just as well want to start something new.
+  const restoreDraftRef = useRef(restoreDraft)
+  useEffect(() => {
+    restoreDraftRef.current = restoreDraft
+  })
+  useEffect(() => {
+    const draft = loadDraft()
+    if (!draft) return
+    const id = toast("You have an unfinished route. Restore it?", "info", [
+      { label: "Restore", onClick: () => restoreDraftRef.current(draft) },
+      { label: "Discard", onClick: () => clearDraft() },
+    ])
+    // Strict mode mounts twice in development; don't leave a duplicate toast.
+    return () => dismissToast(id)
+  }, [])
 
   // Planner keyboard shortcuts. Handled through a ref so the window listener
   // is bound once per planning session yet always sees the current state.
@@ -1415,6 +1548,7 @@ export default function App() {
             onConfirmPendingLookup={handleConfirmPendingLookup}
             onDismissPendingLookup={() => setPendingLookup(null)}
             insets={mapInsets}
+            fitRequest={fitRequest}
             onZoomChange={(zoom) => {
               mapZoomRef.current = zoom
             }}
@@ -1472,6 +1606,7 @@ export default function App() {
             {plannerState ? (
               <PlannerPanel
                 mode={plannerMode}
+                draftTooBig={draftTooBig}
                 hasRoute={file !== null}
                 onDone={handleExitPlanning}
                 canUndo={plannerPast.length > 0}
