@@ -120,6 +120,9 @@ export interface RouteMapProps {
   // present only while planning - where on the route to add it.
   searchedPlace?: PlaceResult | null
   onAddSearchedPlace?: (where: "start" | "end") => void
+  // Present only before any route exists (step 1's load-or-plan choice): the
+  // pin's popup then offers to start planning a route from the place.
+  onStartRouteAtSearchedPlace?: () => void
   // How much of the map the floating header/sidebar cover. The map itself
   // stays full-page; only its own controls and fit-to-route framing move
   // clear of the covered area.
@@ -831,12 +834,16 @@ function SearchedPlacePopup({
   place,
   planning,
   onAdd,
+  onStartRoute,
   onClose,
 }: {
   place: PlaceResult
   // Absent outside planning, where there's no route to add to.
   planning?: { anchorCount: number; shape: RouteShape }
   onAdd?: (where: "start" | "end") => void
+  // Outside planning, before any route exists: start planning a new route
+  // from this place.
+  onStartRoute?: () => void
   onClose: () => void
 }) {
   const startLabel = planning?.shape === "one-way" ? "Start here" : "Start and finish here"
@@ -883,6 +890,12 @@ function SearchedPlacePopup({
               </>
             )}
           </div>
+        )}
+        {!planning && onStartRoute && (
+          <Button size="sm" className="self-start" onClick={onStartRoute}>
+            <Play className="size-4" />
+            Start a route here
+          </Button>
         )}
       </div>
     </Popup>
@@ -1343,6 +1356,7 @@ export function RouteMap({
   focusRequest = null,
   searchedPlace = null,
   onAddSearchedPlace,
+  onStartRouteAtSearchedPlace,
 }: RouteMapProps) {
   const [openPopup, setOpenPopup] = useState<{ kind: "candidate" | "waypoint"; id: number } | null>(null)
   // Which pick's popup was closed. Picking a place in the search list is
@@ -1835,6 +1849,7 @@ export function RouteMap({
               place={searchedPlace}
               planning={planning && { anchorCount: planning.anchors.length, shape: planning.shape }}
               onAdd={onAddSearchedPlace}
+              onStartRoute={onStartRouteAtSearchedPlace}
               onClose={() => setPlacePopupClosedFor(searchedPlace)}
             />
           )}

@@ -629,7 +629,12 @@ export default function App() {
     )
   }
 
-  function handleStartPlanning() {
+  /**
+   * Opens the planner - on the loaded route, or on a new one. `startAt` (the
+   * searched-place pin's "Start a route here", offered only before any route
+   * exists) makes that place the new route's first point.
+   */
+  function handleStartPlanning(startAt?: [number, number]) {
     if (parkedPlan && file) {
       // Reopen the plan as it was left (see parkedPlan). The filename and
       // source document it was synthesized from are unchanged since.
@@ -644,23 +649,42 @@ export default function App() {
     const coords = findResult?.route_coords ?? previewRouteCoords
     plannedFilenameRef.current =
       file?.name ?? `Planned route ${new Date().toISOString().slice(0, 10)}.gpx`
-    const state =
+    let state =
       coords.length > 0
         ? plannerStateFromImport(coords, previewElevations, routingProfile, routingOptions)
         : emptyPlannerState(routingProfile, routingOptions)
+    if (startAt && coords.length === 0) {
+      // The very first point is just the start: no leg to route yet.
+      const started = appendAnchor(state, startAt)
+      if (started.ok) state = started.state
+    }
     setPlannerMode(coords.length > 0 ? "edit" : "new")
     resetPlannerSession()
     setPlannerState(state)
     setTrackedPositions(seedTracked(coords))
-    trackPlanningStarted(coords.length > 0 ? "edit" : "new", "fresh", state)
+    trackPlanningStarted(coords.length > 0 ? "edit" : "new", startAt ? "place" : "fresh", state)
+  }
+
+  /** Step 1's pin popup, before any route exists: plan a new route from the searched place. */
+  function handleStartRouteAtSearchedPlace() {
+    if (!searchedPlace) return
+    handleStartPlanning([searchedPlace.lat, searchedPlace.lon])
+    // Now the route's start, so the pin would only sit on top of its marker.
+    setSearchedPlace(null)
+    track("place_added_to_route", { where: "start", source: "pin", name: searchedPlace.name, kind: searchedPlace.kind })
   }
 
   /**
    * `mode` is what's being planned (a new route, or edits to a loaded one);
-   * `from` is how the session began - from scratch or the loaded file, the
-   * plan "Done" parked, or a draft restored after a reload.
+   * `from` is how the session began - from scratch or the loaded file, a
+   * searched place's "Start a route here", the plan "Done" parked, or a
+   * draft restored after a reload.
    */
-  function trackPlanningStarted(mode: "new" | "edit", from: "fresh" | "reopened" | "draft", state: PlannerState) {
+  function trackPlanningStarted(
+    mode: "new" | "edit",
+    from: "fresh" | "place" | "reopened" | "draft",
+    state: PlannerState
+  ) {
     track("route_planning_started", { mode, from, point_count: plannerAnchors(state).length })
   }
 
@@ -1663,6 +1687,7 @@ export default function App() {
             focusRequest={focusRequest}
             searchedPlace={searchedPlace}
             onAddSearchedPlace={plannerState ? handleAddSearchedPlace : undefined}
+            onStartRouteAtSearchedPlace={!plannerState && !file ? handleStartRouteAtSearchedPlace : undefined}
             planning={
               plannerState
                 ? {
@@ -1769,7 +1794,7 @@ export default function App() {
                     onAvgSpeedChange={handleAvgSpeedChange}
                     wahooTokens={wahooTokens}
                     onWahooTokensChange={setWahooTokens}
-                    onStartPlanning={handleStartPlanning}
+                    onStartPlanning={() => handleStartPlanning()}
                   />
                 </StepCard>
 

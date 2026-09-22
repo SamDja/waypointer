@@ -12,6 +12,14 @@ import type { PlaceResult } from "@/types/candidate"
 const SEARCH_DEBOUNCE_MS = 300
 const MIN_QUERY_LENGTH = 3
 
+// Cmd+K on Apple platforms, Ctrl+K elsewhere, as in most apps with a search box.
+// Both platform sources are checked: userAgentData can be present with an
+// empty platform (headless Chromium), and navigator.platform is deprecated.
+const IS_APPLE = /Mac|iPhone|iPad/.test(
+  `${(navigator as Navigator & { userAgentData?: { platform?: string } }).userAgentData?.platform ?? ""} ${navigator.platform}`
+)
+const SHORTCUT_LABEL = IS_APPLE ? "\u2318K" : "Ctrl K"
+
 export interface PlaceSearchProps {
   // Where the map is looking, to bias results towards it (read when a search runs).
   getNear: () => [number, number] | null
@@ -30,6 +38,22 @@ export function PlaceSearch({ getNear, onSelect, onAddPoint }: PlaceSearchProps)
   const [status, setStatus] = useState<"idle" | "searching" | "done" | "error">("idle")
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
+  const [focused, setFocused] = useState(false)
+
+  // Cmd/Ctrl+K from anywhere focuses the box, with its text selected so
+  // typing replaces the last search. Not inside a dialog, which owns its keys.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "k" || !(IS_APPLE ? e.metaKey : e.ctrlKey) || e.altKey || e.shiftKey) return
+      if (e.target instanceof Element && e.target.closest("[role=dialog], [role=alertdialog]")) return
+      e.preventDefault()
+      inputRef.current?.focus()
+      inputRef.current?.select()
+    }
+    window.addEventListener("keydown", onKeyDown)
+    return () => window.removeEventListener("keydown", onKeyDown)
+  }, [])
 
   // Debounced search; a search typed past is aborted so a late answer can't
   // replace a newer one.
@@ -82,6 +106,7 @@ export function PlaceSearch({ getNear, onSelect, onAddPoint }: PlaceSearchProps)
           {/* cmdk's raw input: the shadcn CommandInput wrapper is styled for use
               inside a popover (its own icon, border and height). */}
           <CommandPrimitive.Input
+            ref={inputRef}
             value={query}
             onValueChange={(value) => {
               setQuery(value)
@@ -91,7 +116,11 @@ export function PlaceSearch({ getNear, onSelect, onAddPoint }: PlaceSearchProps)
                 setStatus("idle")
               }
             }}
-            onFocus={() => setOpen(true)}
+            onFocus={() => {
+              setOpen(true)
+              setFocused(true)
+            }}
+            onBlur={() => setFocused(false)}
             onKeyDown={(e) => {
               if (e.key === "Escape") setOpen(false)
             }}
@@ -99,7 +128,17 @@ export function PlaceSearch({ getNear, onSelect, onAddPoint }: PlaceSearchProps)
             aria-label="Search places"
             className="h-11 min-w-0 flex-1 bg-transparent px-2 text-sm outline-hidden placeholder:text-muted-foreground"
           />
-          {status === "searching" && <Loader2 className="mr-3 size-4 shrink-0 animate-spin text-muted-foreground" />}
+          {status === "searching" ? (
+            <Loader2 className="mr-3 size-4 shrink-0 animate-spin text-muted-foreground" />
+          ) : (
+            !focused &&
+            !query && (
+              // Desktop only: phones have no keyboard shortcut to hint at.
+              <kbd className="mr-3 hidden shrink-0 rounded border bg-muted px-1.5 py-0.5 font-sans text-xs text-muted-foreground md:inline-block">
+                {SHORTCUT_LABEL}
+              </kbd>
+            )
+          )}
         </div>
         {open && !tooShort && (
           <CommandList className="absolute top-full right-0 left-0 z-10 mt-2 max-h-80 overflow-y-auto rounded-xl bg-popover p-1 shadow-lg ring-1 ring-foreground/10">
