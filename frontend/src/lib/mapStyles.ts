@@ -84,6 +84,48 @@ const FASTBIKE_OPTIONS: RoutingOptionSpec[] = [
   { key: "consider_town", kind: "toggle", label: "Bypass towns", default: false },
 ]
 
+// hiking-mountain's options (see routing.py's PROFILE_OPTIONS for what each
+// does to BRouter's cost model, and why this profile rather than the
+// hiking-beta the public instance also serves). Exported ahead of the
+// MAP_STYLES entry that will use it: the routing layer lands before the
+// hiking style file exists, so nothing references this yet.
+//
+// Unlike FASTBIKE_OPTIONS, steps and ferries keep the profile's own
+// defaults - both are ordinary parts of a walking route rather than things
+// to route around.
+export const HIKING_OPTIONS: RoutingOptionSpec[] = [
+  {
+    key: "SAC_scale_preferred",
+    kind: "choice",
+    // The SAC mountaineering scale's own wording, since a walker who cares
+    // about the difference already knows these grades, and a walker who
+    // doesn't is served by the plain-language half of each label.
+    label: "How technical a trail are you happy on?",
+    default: 1,
+    choices: [
+      { value: 1, label: "T1 · Hiking" },
+      { value: 2, label: "T2 · Mountain hiking" },
+      { value: 3, label: "T3 · Demanding mountain hiking" },
+    ],
+  },
+  {
+    key: "hiking_routes_preference",
+    kind: "choice",
+    label: "How much do you want to stick to marked trails?",
+    default: 0.2,
+    choices: [
+      { value: 0.1, label: "A little" },
+      { value: 0.2, label: "Somewhat" },
+      { value: 0.5, label: "Quite a bit" },
+      { value: 1, label: "As much as possible" },
+    ],
+  },
+  { key: "iswet", kind: "toggle", label: "Avoid mud & wet ground", default: false },
+  { key: "consider_elevation", kind: "toggle", label: "Prefer less climbing", default: false },
+  { key: "allow_steps", kind: "toggle", label: "Allow steps", default: true },
+  { key: "allow_ferries", kind: "toggle", label: "Allow ferries", default: true },
+]
+
 // Hand-mirrors road-cycling.json's layer ids (not its colors - see
 // RoadLegendCategory above) so the legend's road-color rows always reflect
 // whatever road-cycling.json currently renders. The last row surfaces the

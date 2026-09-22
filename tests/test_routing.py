@@ -4,7 +4,11 @@ import responses
 from urllib.parse import parse_qs, urlparse
 
 from waypointer.routing import (
+    ALLOWED_PROFILES,
+    PROFILE_OPTIONS,
     ROUTING_URL,
+    BoolOption,
+    ChoiceOption,
     RoutingError,
     build_routing_params,
     resolve_options,
@@ -115,6 +119,48 @@ def test_resolve_options_fills_every_default_explicitly():
         "consider_town": "0",
         "consider_traffic": "0.1",
     }
+
+
+def test_resolve_options_fills_every_hiking_default_explicitly():
+    # Steps and ferries stay on here, unlike fastbike above - both are
+    # ordinary parts of a walking route.
+    assert resolve_options("hiking-mountain", None) == {
+        "SAC_scale_preferred": "1",
+        "allow_ferries": "1",
+        "allow_steps": "1",
+        "consider_elevation": "0",
+        "hiking_routes_preference": "0.2",
+        "iswet": "0",
+    }
+
+
+def test_every_allowed_profile_declares_its_options():
+    # A profile reachable from the frontend but missing from PROFILE_OPTIONS
+    # would silently route with none of its options sent, since
+    # resolve_options falls back to an empty allowlist for an unknown one.
+    assert set(PROFILE_OPTIONS) == set(ALLOWED_PROFILES)
+
+
+@pytest.mark.parametrize("profile", sorted(ALLOWED_PROFILES))
+def test_resolve_options_rejects_another_profiles_options(profile):
+    # Each profile's options are its own: fastbike's traffic knob doesn't
+    # exist in hiking-mountain and vice versa, so sending one to the wrong
+    # profile has to be a 400 rather than a parameter BRouter ignores.
+    foreign = {name for other, opts in PROFILE_OPTIONS.items() if other != profile for name in opts}
+    for name in sorted(foreign - set(PROFILE_OPTIONS[profile])):
+        with pytest.raises(ValueError):
+            resolve_options(profile, {name: True})
+
+
+@pytest.mark.parametrize("profile", sorted(ALLOWED_PROFILES))
+def test_every_option_default_is_itself_valid(profile):
+    # Guards the hand-mirroring: a default that isn't one of its own choices
+    # would make an untouched planner panel unroutable.
+    for name, spec in PROFILE_OPTIONS[profile].items():
+        if isinstance(spec, ChoiceOption):
+            assert spec.default in spec.choices, f"{profile}.{name}"
+        else:
+            assert isinstance(spec, BoolOption) and isinstance(spec.default, bool)
 
 
 def test_resolve_options_encodes_booleans_as_1_0_and_numbers_as_decimals():
