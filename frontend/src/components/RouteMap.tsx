@@ -40,7 +40,7 @@ import { buildAddablePoiFilter, resolvePoiTypeFromFeatureProps } from "@/lib/bas
 import { cumulativeDistancesM, pointAtDistanceM, projectOntoPolylineM } from "@/lib/geometry"
 import { setHoveredDistanceM, useHoveredDistanceM } from "@/lib/hoverDistance"
 import { PLANNER_POINT_COLOR, ROUTE_END_COLOR, ROUTE_START_COLOR, START_FINISH_BACKGROUND } from "@/lib/mapColors"
-import { CircleMarkerIcon, UserLocationMarker } from "@/lib/mapIcons"
+import { CircleMarkerIcon, SearchedPlacePin, UserLocationMarker } from "@/lib/mapIcons"
 import { MAP_STYLES } from "@/lib/mapStyles"
 import {
   formatExactDateTime,
@@ -53,7 +53,14 @@ import { toast } from "@/lib/toast"
 import { tailwindHex } from "@/lib/color"
 import type { MapInsets } from "@/lib/useMapInsets"
 import type { RouteShape } from "@/lib/routePlanner"
-import type { Candidate, CandidateDetails, ExistingWaypoint, HoveredPoi, PoiLookupResult } from "@/types/candidate"
+import type {
+  Candidate,
+  CandidateDetails,
+  ExistingWaypoint,
+  HoveredPoi,
+  PlaceResult,
+  PoiLookupResult,
+} from "@/types/candidate"
 import colors from "tailwindcss/colors"
 
 // maplibre-gl v6 no longer inlines its worker: it loads it as a sibling file of
@@ -108,6 +115,11 @@ export interface RouteMapProps {
   // Frames a place once per new `id` - fitted to its bbox if it's an area,
   // flown to otherwise (the place search's pick).
   focusRequest?: FocusRequest | null
+  // The place search's pick, pinned until it's added or replaced. Clicking
+  // the pin opens a popup with its name and - through onAddSearchedPlace,
+  // present only while planning - where on the route to add it.
+  searchedPlace?: PlaceResult | null
+  onAddSearchedPlace?: (where: "start" | "end") => void
   // How much of the map the floating header/sidebar cover. The map itself
   // stays full-page; only its own controls and fit-to-route framing move
   // clear of the covered area.
@@ -521,12 +533,12 @@ function EndpointMarker({
       onDragEnd={
         onDragEnd
           ? (e) => {
-              // The drag event carries only a lngLat, so project it back to
-              // screen space for the hit test against the route line.
-              const map = mapRef?.getMap()
-              const onRoute = map ? isOnRouteLine(map, map.project(e.lngLat)) : false
-              onDragEnd([e.lngLat.lat, e.lngLat.lng], onRoute)
-            }
+            // The drag event carries only a lngLat, so project it back to
+            // screen space for the hit test against the route line.
+            const map = mapRef?.getMap()
+            const onRoute = map ? isOnRouteLine(map, map.project(e.lngLat)) : false
+            onDragEnd([e.lngLat.lat, e.lngLat.lng], onRoute)
+          }
           : undefined
       }
       onClick={(e) => {
@@ -715,6 +727,14 @@ const PLANNER_PENDING_SOURCE_ID = "planner-pending"
 // Above the POI markers so anchors stay grabbable while planning over a
 // dense candidate cluster, but below HOVERED_Z_INDEX.
 const PLANNER_ANCHOR_Z_INDEX = 700
+// Above the planner points, so a pin dropped on top of one stays clickable.
+const SEARCHED_PLACE_Z_INDEX = 800
+// Lucide's map-pin tip sits 2 units above the bottom of its 24-unit box:
+// 2.5px at the pin's 30px, so the marker is nudged down by that to put the
+// tip on the place.
+const SEARCHED_PLACE_PIN_TIP_GAP_PX = 2.5
+// Clears the pin above the place.
+const SEARCHED_PLACE_POPUP_OFFSET = 30
 // Big enough to carry a legible two-digit number.
 const PLANNER_ANCHOR_SIZE = 22
 // A transparent, much wider copy of the route line, purely as a pointer
@@ -797,6 +817,73 @@ function SelectedPointPopup({
           {/* To the side: above would cover the popup's title, below the point itself. */}
           <TooltipContent side="right">Or press Delete</TooltipContent>
         </Tooltip>
+      </div>
+    </Popup>
+  )
+}
+
+// Opened by clicking the searched-place pin. While planning it's how that
+// place joins the route - at either end, since a searched town is as often
+// where a ride starts as where it goes. Clicking elsewhere closes it (the
+// Popup's default closeOnClick); the pin stays until the place is added or
+// another one is picked.
+function SearchedPlacePopup({
+  place,
+  planning,
+  onAdd,
+  onClose,
+}: {
+  place: PlaceResult
+  // Absent outside planning, where there's no route to add to.
+  planning?: { anchorCount: number; shape: RouteShape }
+  onAdd?: (where: "start" | "end") => void
+  onClose: () => void
+}) {
+  const startLabel = planning?.shape === "one-way" ? "Start here" : "Start and finish here"
+  const endLabel =
+    planning?.shape === "loop" ? "Add as last point" : planning?.shape === "out-and-back" ? "Add as turnaround" : "End here"
+  return (
+    <Popup
+      longitude={place.lon}
+      latitude={place.lat}
+      anchor="bottom"
+      offset={SEARCHED_PLACE_POPUP_OFFSET}
+      onClose={onClose}
+    >
+      <div className="flex max-w-64 flex-col gap-2 pr-4 text-sm">
+        <div className="flex flex-col">
+          <span className="font-medium">{place.name}</span>
+          {place.context && <span className="text-xs text-muted-foreground">{place.context}</span>}
+        </div>
+        {planning && onAdd && (
+          <div className="flex flex-wrap gap-2">
+            {planning.anchorCount === 0 ? (
+              // A lone first point is the start, whichever end it's "added" to.
+              <Button size="sm" onClick={() => onAdd("end")}>
+                <Play className="size-4" />
+                Start the route here
+              </Button>
+            ) : (
+              <>
+                <Button size="sm" variant="outline" onClick={() => onAdd("start")}>
+                  {planning.shape === "one-way" && (
+                    <Play fill={colors.lime[700]} strokeWidth="0" className="size-4" />
+                  )}
+                  {(planning.shape === "loop" || planning.shape === "out-and-back") && (
+                    <Flag fill={colors.black} className="size-4"/>
+                  )}
+                  {startLabel}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => onAdd("end")}>
+                  {planning.shape === "one-way" && (
+                    <Square fill={colors.red[700]} strokeWidth="0" className="size-4" />
+                  )}
+                  {endLabel}
+                </Button>
+              </>
+            )}
+          </div>
+        )}
       </div>
     </Popup>
   )
@@ -1254,8 +1341,15 @@ export function RouteMap({
   onViewChange,
   fitRequest = 0,
   focusRequest = null,
+  searchedPlace = null,
+  onAddSearchedPlace,
 }: RouteMapProps) {
   const [openPopup, setOpenPopup] = useState<{ kind: "candidate" | "waypoint"; id: number } | null>(null)
+  // Which pick's popup was closed. Picking a place in the search list is
+  // already the click that asks about it, so a new pick opens its popup
+  // straight away - with no effect needed to reset this.
+  const [placePopupClosedFor, setPlacePopupClosedFor] = useState<PlaceResult | null>(null)
+  const placePopupOpen = searchedPlace !== null && placePopupClosedFor !== searchedPlace
   const [bearing, setBearing] = useState(0)
   const [locating, setLocating] = useState(false)
   // [lon, lat] - unlike the rest of this file's [lat, lon] convention, this
@@ -1381,6 +1475,12 @@ export function RouteMap({
           onMouseEnter={() => setHoveringPoiLayer(true)}
           onMouseLeave={() => setHoveringPoiLayer(false)}
           onClick={(e) => {
+            // With the pin's popup open, a click elsewhere just dismisses it,
+            // like a planner point's popup.
+            if (placePopupOpen) {
+              setPlacePopupClosedFor(searchedPlace)
+              return
+            }
             if (planning) {
               // Clicking the route itself does nothing - that gesture is
               // reserved for dragging a new point out of the line, and
@@ -1715,6 +1815,29 @@ export function RouteMap({
                 ))
             }
           />
+          {searchedPlace && (
+            <Marker
+              longitude={searchedPlace.lon}
+              latitude={searchedPlace.lat}
+              anchor="bottom"
+              offset={[0, SEARCHED_PLACE_PIN_TIP_GAP_PX]}
+              style={{ zIndex: SEARCHED_PLACE_Z_INDEX }}
+              onClick={(e) => {
+                e.originalEvent.stopPropagation()
+                setPlacePopupClosedFor(placePopupOpen ? searchedPlace : null)
+              }}
+            >
+              <SearchedPlacePin />
+            </Marker>
+          )}
+          {searchedPlace && placePopupOpen && (
+            <SearchedPlacePopup
+              place={searchedPlace}
+              planning={planning && { anchorCount: planning.anchors.length, shape: planning.shape }}
+              onAdd={onAddSearchedPlace}
+              onClose={() => setPlacePopupClosedFor(searchedPlace)}
+            />
+          )}
           {userLocation && (
             <Marker longitude={userLocation[0]} latitude={userLocation[1]}>
               <UserLocationMarker />

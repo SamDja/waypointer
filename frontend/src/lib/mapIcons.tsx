@@ -1,4 +1,4 @@
-import type { LucideIcon } from "lucide-react"
+import { MapPin, type LucideIcon } from "lucide-react"
 import colors from "tailwindcss/colors"
 
 interface CircleMarkerIconProps {
@@ -48,6 +48,32 @@ export function CircleMarkerIcon({
     >
       <Icon size={iconSize} color={iconColor} strokeWidth={2} />
     </div>
+  )
+}
+
+// The place search's pick: a violet pin with a see-through dot. Lucide's
+// MapPin is a teardrop <path> with a <circle> drawn over it, and `fill`
+// paints both - so the dot is cut out of the teardrop with a mask (lucide
+// icons render `children` inside their <svg>), and the circle keeps only its
+// white outline. Only one pin is ever shown, so a fixed mask id is safe.
+// Its tip is the place, so the Marker holding it needs anchor="bottom" (plus
+// SEARCHED_PLACE_PIN_TIP_GAP_PX in RouteMap: the tip sits a little above the
+// bottom of lucide's 24px box).
+export function SearchedPlacePin() {
+  return (
+    <MapPin
+      size={30}
+      strokeWidth={1.2}
+      color={colors.white}
+      fill={colors.violet[600]}
+      className="block cursor-pointer drop-shadow-md [&>circle]:fill-none [&>path]:[mask:url(#searched-place-pin-hole)]"
+      aria-label="Searched place"
+    >
+      <mask id="searched-place-pin-hole" maskUnits="userSpaceOnUse" x={0} y={0} width={24} height={24}>
+        <rect width={24} height={24} fill="white" />
+        <circle cx={12} cy={10} r={3} fill="black" />
+      </mask>
+    </MapPin>
   )
 }
 

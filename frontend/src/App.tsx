@@ -269,6 +269,9 @@ export default function App() {
   const mapCenterRef = useRef<[number, number] | null>(null)
   // The place search's pick, for RouteMap to frame.
   const [focusRequest, setFocusRequest] = useState<FocusRequest | null>(null)
+  // The place search's last pick, pinned on the map until it's added to the
+  // route or another place is picked.
+  const [searchedPlace, setSearchedPlace] = useState<PlaceResult | null>(null)
   const getMapCenter = useCallback(() => mapCenterRef.current, [])
   // Leg keys with a request in flight, so a re-render mid-fetch doesn't fire
   // a duplicate request for the same leg.
@@ -871,15 +874,31 @@ export default function App() {
     return () => dismissToast(id)
   }, [])
 
-  /** The place search's pick: frame it on the map. */
-  function handlePlaceSelect(place: PlaceResult) {
+  function focusOnPlace(place: PlaceResult) {
     setFocusRequest((prev) => ({ id: (prev?.id ?? 0) + 1, lat: place.lat, lon: place.lon, bbox: place.bbox }))
+  }
+
+  /** The place search's pick: pin it and frame it on the map. */
+  function handlePlaceSelect(place: PlaceResult) {
+    // A fresh object per pick: RouteMap keys its popup's open state on it, so
+    // re-picking the same result reopens a popup that was closed.
+    setSearchedPlace({ ...place })
+    focusOnPlace(place)
   }
 
   /** While planning, a searched place can be added straight to the route. */
   function handlePlaceAddPoint(place: PlaceResult) {
     handleAppendAnchor([place.lat, place.lon])
-    handlePlaceSelect(place)
+    focusOnPlace(place)
+  }
+
+  /** The pinned place's popup: add it before the start or after the end. */
+  function handleAddSearchedPlace(where: "start" | "end") {
+    if (!searchedPlace) return
+    const point: [number, number] = [searchedPlace.lat, searchedPlace.lon]
+    const added = where === "start" ? handlePrependAnchor(point) : handleAppendAnchor(point)
+    // Now a route point, so the pin would only sit on top of its marker.
+    if (added) setSearchedPlace(null)
   }
 
   // Planner keyboard shortcuts. Handled through a ref so the window listener
@@ -924,17 +943,18 @@ export default function App() {
     return spurToleranceM(mapZoomRef.current, point[0])
   }
 
-  function handleAppendAnchor(point: [number, number]) {
-    if (!plannerState) return
+  /** Adds a point after the end of the route. Returns whether it was added. */
+  function handleAppendAnchor(point: [number, number]): boolean {
+    if (!plannerState) return false
     const before = plannerGeometry(plannerState).coords
     const result = appendAnchor(plannerState, point, toleranceAt(point))
     if (!result.ok) {
       toast(result.error, "error")
-      return
+      return false
     }
     if (plannerState.shape !== "one-way") {
       applyEditWithFullReprojection(result.state)
-      return
+      return true
     }
     const after = plannerGeometry(result.state).coords
     const added = after.slice(Math.max(before.length - 1, 0))
@@ -946,6 +966,25 @@ export default function App() {
       trackedAfterExtend(trackedPositions, after, added, false),
       added.length > 1 ? before.length : null
     )
+    return true
+  }
+
+  /** Adds a point before the start of the route. Returns whether it was added. */
+  function handlePrependAnchor(point: [number, number]): boolean {
+    if (!plannerState) return false
+    const result = prependAnchor(plannerState, point)
+    if (!result.ok) {
+      toast(result.error, "error")
+      return false
+    }
+    // Prepending shifts every distance-from-start, so it needs a full
+    // reprojection and a re-search of the whole route.
+    if (plannerState.shape !== "one-way") {
+      applyEditWithFullReprojection(result.state)
+    } else {
+      applyPlannerEdit(result.state, seedTracked(plannerGeometry(result.state).coords), 0)
+    }
+    return true
   }
 
   function handleMoveAnchor(anchorIndex: number, point: [number, number]) {
@@ -979,7 +1018,6 @@ export default function App() {
    */
   function handleMoveEndpoint(which: "start" | "end", point: [number, number], droppedOnRoute: boolean) {
     if (!plannerState) return
-    const coords = plannerGeometry(plannerState).coords
     const anchors = plannerAnchors(plannerState)
 
     // A lone first point is both ends and has nothing to extend or trim:
@@ -1002,29 +1040,10 @@ export default function App() {
       return
     }
 
-    const result =
-      which === "start" ? prependAnchor(plannerState, point) : appendAnchor(plannerState, point, toleranceAt(point))
-    if (!result.ok) {
-      toast(result.error, "error")
-      setPlannerState({ ...plannerState })
-      return
-    }
-    const after = plannerGeometry(result.state).coords
-    // Prepending shifts every distance-from-start, so that direction needs a
-    // full reprojection; appending keeps the whole existing route as a stable
-    // prefix - unless a derived return part follows it.
-    if (plannerState.shape !== "one-way") {
-      applyEditWithFullReprojection(result.state)
-    } else if (which === "start") {
-      applyPlannerEdit(result.state, seedTracked(after), 0)
-    } else {
-      const added = after.slice(Math.max(coords.length - 1, 0))
-      applyPlannerEdit(
-        result.state,
-        trackedAfterExtend(trackedPositions, after, added, false),
-        coords.length,
-      )
-    }
+    const added = which === "start" ? handlePrependAnchor(point) : handleAppendAnchor(point)
+    // Force the marker back to its real position - the drag already moved
+    // it visually, and a rejected edit leaves state unchanged.
+    if (!added) setPlannerState({ ...plannerState })
   }
 
   /**
@@ -1582,6 +1601,8 @@ export default function App() {
               mapCenterRef.current = view.center
             }}
             focusRequest={focusRequest}
+            searchedPlace={searchedPlace}
+            onAddSearchedPlace={plannerState ? handleAddSearchedPlace : undefined}
             planning={
               plannerState
                 ? {
