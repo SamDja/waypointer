@@ -39,7 +39,10 @@ export function RouteStats({
           id={speedInputId}
           type="number"
           min={1}
-          step={1}
+          // Half-steps because walking paces live in them: 4.5 km/h is the
+          // hiking default, and a whole-number step would both reject it as
+          // a step mismatch and make the arrow keys jump past it.
+          step={0.5}
           value={avgSpeedKmh}
           onChange={(e) => {
             const next = Number(e.target.value)

@@ -13,6 +13,7 @@ import type { PlannerPoint } from "@/components/PlannerPointList"
 import { MapStyleSelect } from "@/components/MapStyleSelect"
 import { Toaster } from "@/components/Toaster"
 import { WahooProfileMenu } from "@/components/WahooProfileMenu"
+import { ActivitySwitchDialog, type ActivitySwitchConsequences } from "@/components/ActivitySwitchDialog"
 import { OffRouteDialog, type OffRouteItem } from "@/components/OffRouteDialog"
 import { ApiError, NETWORK_ERROR_MESSAGE, cooldownRemainingMs, findPois, lookupPoi, routeLeg } from "@/lib/api"
 import { track } from "@/lib/analytics"
@@ -25,7 +26,12 @@ import {
   parseRouteCoordsFromGpx,
   parseRouteElevationsFromGpx,
 } from "@/lib/gpx"
-import { routingOptionSpecsForStyle, routingProfileForStyle, type RoutingOptions } from "@/lib/mapStyles"
+import {
+  MAP_STYLES,
+  routingOptionSpecsForStyle,
+  routingProfileForStyle,
+  type RoutingOptions,
+} from "@/lib/mapStyles"
 import {
   appendAnchor,
   commonPrefixLength,
@@ -182,7 +188,7 @@ export default function App() {
   // call, which recomputes its own suggestion from scratch.
   const [waypointTypeOverrides, setWaypointTypeOverrides] = useState<Record<number, string>>({})
   const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>(() => loadSettings())
-  const [poiSearchEntries, setPoiSearchEntries] = useState<PoiSearchEntry[]>(() => loadPoiSearchConfig())
+  const [poiSearchEntries, setPoiSearchEntries] = useState<PoiSearchEntry[]>(() => loadPoiSearchConfig(loadMapStyleKey()))
   const [isFinding, setIsFinding] = useState(false)
   // Live per-type progress for the search kicked off in handleFind - null
   // when no search is running. Drives FindPoisCard's button/row progress UI;
@@ -194,8 +200,10 @@ export default function App() {
   } | null>(null)
   const [openStep, setOpenStep] = useState<Step | null>("import")
   const [wahooTokens, setWahooTokens] = useState<WahooTokens | null>(() => loadWahooTokens())
-  const [avgSpeedKmh, setAvgSpeedKmh] = useState<number>(() => loadAvgSpeedKmh())
+  const [avgSpeedKmh, setAvgSpeedKmh] = useState<number>(() => loadAvgSpeedKmh(loadMapStyleKey()))
   const [mapStyleKey, setMapStyleKey] = useState<string>(() => loadMapStyleKey())
+  // The activity a visitor has asked to switch to, held while they confirm.
+  const [pendingActivity, setPendingActivity] = useState<string | null>(null)
   // The visitor's saved BRouter options for the current style - what a new
   // planning session starts with. While planning, the planner state's own
   // options are what the route (and PlannerPanel) reflect, so an undo that
@@ -239,7 +247,7 @@ export default function App() {
   // pre-existing <wpt> entries and their waypointer: extension markers.
   const [sourceDoc, setSourceDoc] = useState<Document | null>(null)
   const [trackedPositions, setTrackedPositions] = useState<TrackedPositions>({})
-  const [offRouteThresholdM, setOffRouteThresholdM] = useState<number>(() => loadOffRouteThresholdM())
+  const [offRouteThresholdM, setOffRouteThresholdM] = useState<number>(() => loadOffRouteThresholdM(loadMapStyleKey()))
   // An edit held back pending confirmation because it stranded something.
   // Cancelling drops it and leaves the route exactly as it was.
   const [pendingEdit, setPendingEdit] = useState<{
@@ -627,7 +635,7 @@ export default function App() {
 
   function handleOffRouteThresholdChange(thresholdM: number) {
     setOffRouteThresholdM(thresholdM)
-    saveOffRouteThresholdM(thresholdM)
+    saveOffRouteThresholdM(mapStyleKey, thresholdM)
   }
 
   function seedTracked(route: [number, number][]): TrackedPositions {
@@ -1228,14 +1236,79 @@ export default function App() {
 
   function handleAvgSpeedChange(speedKmh: number) {
     setAvgSpeedKmh(speedKmh)
-    saveAvgSpeedKmh(speedKmh)
+    saveAvgSpeedKmh(mapStyleKey, speedKmh)
+  }
+
+  /**
+   * What switching activity would disturb. Used both to decide whether the
+   * switch needs confirming at all and to say, in the dialog, what will
+   * actually happen.
+   */
+  function activitySwitchConsequences(): ActivitySwitchConsequences {
+    return {
+      // Only a plan can be re-routed; an imported track's geometry is
+      // verbatim and stays exactly as it was.
+      reroutes: plannerState !== null || parkedPlan !== null,
+      clearsPois: (findResult?.candidates.length ?? 0) > 0 || clickAddedCandidates.length > 0,
+    }
   }
 
   function handleMapStyleChange(key: string) {
+    if (key === mapStyleKey) return
+    const { reroutes, clearsPois } = activitySwitchConsequences()
+    // With nothing open to disturb, the switch is just a switch.
+    if (!reroutes && !clearsPois) {
+      applyActivity(key)
+      return
+    }
+    setPendingActivity(key)
+  }
+
+  /**
+   * Switches activity for real.
+   *
+   * An activity is not a map style. It carries the routing profile and its
+   * options, the pace and tolerances, and which POIs are worth looking for -
+   * so all of them are reloaded for the activity being switched to (never
+   * carried over, which is what keeps tuning one from reaching the other),
+   * results found under the old one are dropped, and any plan is re-routed.
+   */
+  function applyActivity(key: string) {
     setMapStyleKey(key)
     saveMapStyleKey(key)
-    // Each style is an activity with its own profile and options.
-    setRoutingOptionsPreference(loadRoutingOptions(key))
+    const options = loadRoutingOptions(key)
+    setRoutingOptionsPreference(options)
+    setAvgSpeedKmh(loadAvgSpeedKmh(key))
+    setOffRouteThresholdM(loadOffRouteThresholdM(key))
+    setPoiSearchEntries(loadPoiSearchConfig(key))
+
+    // Found against the previous activity's types, at its distances, and
+    // measured against a route that is about to change shape.
+    setFindResult(null)
+    setSelectedIds(new Set())
+    setSearchedPoiTypes([])
+    setClickAddedCandidates([])
+    setClickAddedDetails({})
+    setPendingLookup(null)
+
+    // Re-point every routed leg at the new profile and options. Their cache
+    // keys change with it, so the existing fetch effect picks them up as
+    // pending and re-routes them - the same path a routing-option change
+    // already takes.
+    const profile = routingProfileForStyle(key)
+    const rerouted = (state: PlannerState): PlannerState => ({ ...state, profile, options })
+    if (plannerState) {
+      const next = rerouted(plannerState)
+      setPlannerState(next)
+      // The route is about to change shape under the new profile, so the
+      // distances the off-route check works from have to be measured again
+      // rather than carried over from the old one.
+      setTrackedPositions(seedTracked(plannerGeometry(next).coords))
+    }
+    if (parkedPlan) setParkedPlan({ ...parkedPlan, state: rerouted(parkedPlan.state) })
+    // History holds states routed under the old profile, and an activity
+    // switch isn't an edit to step back through.
+    resetPlannerSession()
   }
 
   function handleDeviceSettingsChange(settings: DeviceSettings) {
@@ -1245,7 +1318,7 @@ export default function App() {
 
   function handlePoiSearchChange(entries: PoiSearchEntry[]) {
     setPoiSearchEntries(entries)
-    savePoiSearchConfig(entries)
+    savePoiSearchConfig(mapStyleKey, entries)
   }
 
   function handleToggle(osmId: number) {
@@ -1658,6 +1731,16 @@ export default function App() {
     <div className="relative flex h-dvh flex-col overflow-hidden">
       <Toaster />
       <FeedbackWidget />
+      <ActivitySwitchDialog
+        toLabel={MAP_STYLES.find((style) => style.key === pendingActivity)?.label ?? null}
+        consequences={activitySwitchConsequences()}
+        onConfirm={() => {
+          if (pendingActivity) applyActivity(pendingActivity)
+          setPendingActivity(null)
+        }}
+        onCancel={() => setPendingActivity(null)}
+      />
+
       <OffRouteDialog
         open={pendingEdit !== null}
         items={pendingEdit ? offRouteFor(pendingEdit.tracked, offRouteThresholdM) : []}

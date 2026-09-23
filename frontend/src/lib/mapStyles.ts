@@ -42,6 +42,24 @@ export type RoutingOptionSpec =
       choices: { value: number; label: string }[]
     }
 
+/**
+ * What this activity assumes before a visitor tells it otherwise.
+ *
+ * These live on the activity rather than as module constants because every
+ * one of them is wrong for the other activity: 20 km/h is a bike, 4.5 is a
+ * walk, and a 500m detour is a couple of minutes on one and the better part
+ * of ten on the other. `lib/settings.ts` stores whatever the visitor sets
+ * keyed by activity, so tuning one never silently changes the other.
+ */
+export interface ActivityDefaults {
+  avgSpeedKmh: number
+  // How far a route edit may strand a checked waypoint before it's flagged
+  // for unchecking (see OffRouteDialog).
+  offRouteThresholdM: number
+  // The POI types a fresh browser starts with for this activity.
+  visiblePoiTypes: readonly string[]
+}
+
 export interface MapStyleConfig {
   key: string
   label: string
@@ -71,6 +89,7 @@ export interface MapStyleConfig {
   // section for this style entirely - there's no separate boolean flag to
   // keep in sync with this.
   roadLegend?: RoadLegendCategory[]
+  defaults: ActivityDefaults
 }
 
 // fastbike's options (see routing.py's PROFILE_OPTIONS for what each does to
@@ -222,6 +241,13 @@ export const MAP_STYLES: MapStyleConfig[] = [
     routingProfile: "fastbike",
     routingOptions: FASTBIKE_OPTIONS,
     roadLegend: ROAD_CYCLING_LEGEND,
+    defaults: {
+      avgSpeedKmh: 20,
+      offRouteThresholdM: 500,
+      // Water is the core case the app was built around; everything else
+      // the visitor adds from FindPoisCard's picker.
+      visiblePoiTypes: ["water"],
+    },
   },
   {
     key: "hiking",
@@ -233,6 +259,17 @@ export const MAP_STYLES: MapStyleConfig[] = [
     routingProfile: "hiking-mountain",
     routingOptions: HIKING_OPTIONS,
     roadLegend: HIKING_LEGEND,
+    defaults: {
+      // A steady walking pace on mixed ground. Ascent is what really sets
+      // walking times, which a flat speed can't express - see RouteStats.
+      avgSpeedKmh: 4.5,
+      // 500m is a couple of minutes on a bike and the better part of ten on
+      // foot, which is far too long to be worth not mentioning.
+      offRouteThresholdM: 150,
+      // Water still, plus the summit a walk is usually aimed at and the
+      // huts that make a long one possible.
+      visiblePoiTypes: ["water", "summit", "lodging"],
+    },
   },
 ]
 
@@ -251,6 +288,11 @@ export function mapStyleFor(key: string): StyleSpecification {
     composedStyles.set(config.key, style)
   }
   return style
+}
+
+/** This activity's assumptions, falling back to the first style's. */
+export function activityDefaults(key: string): ActivityDefaults {
+  return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).defaults
 }
 
 export function routingProfileForStyle(key: string): string {

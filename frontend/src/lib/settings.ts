@@ -1,11 +1,12 @@
 import {
   DEFAULT_MAP_STYLE_KEY,
   MAP_STYLES,
+  activityDefaults,
   defaultRoutingOptions,
   routingOptionSpecsForStyle,
   type RoutingOptions,
 } from "@/lib/mapStyles"
-import { DEFAULT_VISIBLE_POI_TYPES, POI_TYPES } from "@/lib/poiTypes"
+import { POI_TYPES } from "@/lib/poiTypes"
 
 const SETTINGS_KEY = "waypointer.settings"
 const POI_SEARCH_KEY = "waypointer.poiSearch"
@@ -15,6 +16,52 @@ const OFF_ROUTE_THRESHOLD_KEY = "waypointer.offRouteThreshold"
 // Plan-time: the route planner's BRouter options, keyed by map style (each
 // style is an activity with its own profile and options).
 const ROUTING_OPTIONS_KEY = "waypointer.routingOptions"
+
+/**
+ * Reads a per-activity number.
+ *
+ * Values written before these preferences were per-activity are bare
+ * numbers rather than an object. One of those is adopted as the default
+ * activity's value, since that is the activity it was set under - handing
+ * a walker a cyclist's 20 km/h would be worse than forgetting it.
+ */
+function loadKeyedNumber(storageKey: string, styleKey: string, fallback: number): number {
+  try {
+    const raw = localStorage.getItem(storageKey)
+    if (!raw) return fallback
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed && typeof parsed === "object") {
+      const value = (parsed as Record<string, unknown>)[styleKey]
+      return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback
+    }
+    const legacy = Number(parsed)
+    return styleKey === DEFAULT_MAP_STYLE_KEY && Number.isFinite(legacy) && legacy > 0 ? legacy : fallback
+  } catch {
+    return fallback
+  }
+}
+
+function saveKeyed(storageKey: string, styleKey: string, value: unknown): void {
+  try {
+    const raw = localStorage.getItem(storageKey)
+    const parsed: unknown = raw ? JSON.parse(raw) : {}
+    const keyed = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+    // Writing the first per-activity value is what converts the old format
+    // to the new one, so the legacy value has to be carried across as the
+    // default activity's - otherwise a cyclist who tries hiking loses the
+    // pace they'd set, at the moment they switch.
+    const all = keyed ? (parsed as Record<string, unknown>) : legacyAsDefault(parsed)
+    localStorage.setItem(storageKey, JSON.stringify({ ...all, [styleKey]: value }))
+  } catch {
+    // Not remembering a preference is harmless.
+  }
+}
+
+function legacyAsDefault(parsed: unknown): Record<string, unknown> {
+  if (Array.isArray(parsed)) return { [DEFAULT_MAP_STYLE_KEY]: parsed }
+  const legacy = Number(parsed)
+  return Number.isFinite(legacy) && legacy > 0 ? { [DEFAULT_MAP_STYLE_KEY]: legacy } : {}
+}
 
 export interface DeviceSettings {
   device: string
@@ -53,15 +100,23 @@ export interface PoiSearchEntry {
 // Distinct from DeviceSettings above: device/symbol settings are an
 // export-time concern, this is a find-time concern (which POI types to
 // search for, and how far). Kept in the same file for colocation.
-export function loadPoiSearchConfig(): PoiSearchEntry[] {
-  const raw = localStorage.getItem(POI_SEARCH_KEY)
+export function loadPoiSearchConfig(styleKey: string): PoiSearchEntry[] {
   let stored: Record<string, PoiSearchEntry> = {}
   let hasStoredValue = false
   try {
-    if (raw) {
+    const raw = localStorage.getItem(POI_SEARCH_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    // Kept per activity: what you look for on a walk isn't what you look
+    // for on a ride. A legacy flat array predates that, and belongs to the
+    // activity it was built under.
+    const forStyle = Array.isArray(parsed)
+      ? styleKey === DEFAULT_MAP_STYLE_KEY
+        ? parsed
+        : null
+      : ((parsed as Record<string, unknown> | null)?.[styleKey] ?? null)
+    if (Array.isArray(forStyle)) {
       hasStoredValue = true
-      const parsed = JSON.parse(raw) as PoiSearchEntry[]
-      stored = Object.fromEntries(parsed.map((entry) => [entry.poiType, entry]))
+      stored = Object.fromEntries((forStyle as PoiSearchEntry[]).map((entry) => [entry.poiType, entry]))
     }
   } catch {
     stored = {}
@@ -75,7 +130,9 @@ export function loadPoiSearchConfig(): PoiSearchEntry[] {
   // a stored type was desearchified in a later release.
   const keys = hasStoredValue
     ? Object.keys(stored).filter((key) => POI_TYPES.some((cfg) => cfg.key === key && cfg.searchable))
-    : DEFAULT_VISIBLE_POI_TYPES
+    : activityDefaults(styleKey).visiblePoiTypes.filter((key) =>
+        POI_TYPES.some((cfg) => cfg.key === key && cfg.searchable),
+      )
 
   // Clamp any stored distance into the registry's current bounds.
   return keys.map((key) => {
@@ -91,26 +148,19 @@ export function loadPoiSearchConfig(): PoiSearchEntry[] {
   })
 }
 
-export function savePoiSearchConfig(entries: PoiSearchEntry[]): void {
-  localStorage.setItem(POI_SEARCH_KEY, JSON.stringify(entries))
+export function savePoiSearchConfig(styleKey: string, entries: PoiSearchEntry[]): void {
+  saveKeyed(POI_SEARCH_KEY, styleKey, entries)
 }
-
-export const DEFAULT_AVG_SPEED_KMH = 20
 
 // Distinct from both settings above: this is a display/estimate-time
 // concern (the Import step's duration estimate), not export- or find-time.
-export function loadAvgSpeedKmh(): number {
-  try {
-    const raw = localStorage.getItem(AVG_SPEED_KEY)
-    const parsed = raw ? Number(raw) : NaN
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_AVG_SPEED_KMH
-  } catch {
-    return DEFAULT_AVG_SPEED_KMH
-  }
+// Per activity: 20 km/h and 4.5 km/h are not the same question.
+export function loadAvgSpeedKmh(styleKey: string): number {
+  return loadKeyedNumber(AVG_SPEED_KEY, styleKey, activityDefaults(styleKey).avgSpeedKmh)
 }
 
-export function saveAvgSpeedKmh(speedKmh: number): void {
-  localStorage.setItem(AVG_SPEED_KEY, String(speedKmh))
+export function saveAvgSpeedKmh(styleKey: string, speedKmh: number): void {
+  saveKeyed(AVG_SPEED_KEY, styleKey, speedKmh)
 }
 
 // Distinct from the settings above: this is a display-time concern (which
@@ -128,25 +178,17 @@ export function saveMapStyleKey(key: string): void {
   localStorage.setItem(MAP_STYLE_KEY, key)
 }
 
-export const DEFAULT_OFF_ROUTE_THRESHOLD_M = 500
-
 // Distinct from the settings above: this is an edit-time concern. When a
 // route edit strands a waypoint or a selected POI this far from the route,
 // it gets auto-unchecked (never deleted) after an explicit confirmation -
 // see OffRouteDialog. Editable from inside that dialog, where its effect is
 // visible, rather than buried in a settings panel.
-export function loadOffRouteThresholdM(): number {
-  try {
-    const raw = localStorage.getItem(OFF_ROUTE_THRESHOLD_KEY)
-    const parsed = raw ? Number(raw) : NaN
-    return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_OFF_ROUTE_THRESHOLD_M
-  } catch {
-    return DEFAULT_OFF_ROUTE_THRESHOLD_M
-  }
+export function loadOffRouteThresholdM(styleKey: string): number {
+  return loadKeyedNumber(OFF_ROUTE_THRESHOLD_KEY, styleKey, activityDefaults(styleKey).offRouteThresholdM)
 }
 
-export function saveOffRouteThresholdM(thresholdM: number): void {
-  localStorage.setItem(OFF_ROUTE_THRESHOLD_KEY, String(thresholdM))
+export function saveOffRouteThresholdM(styleKey: string, thresholdM: number): void {
+  saveKeyed(OFF_ROUTE_THRESHOLD_KEY, styleKey, thresholdM)
 }
 
 /**

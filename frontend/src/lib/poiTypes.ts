@@ -151,11 +151,9 @@ export const POI_TYPES: PoiTypeConfig[] = [
   { key: "generic", label: "Other", icon: MapPin, color: colors.pink[500], symHints: [], searchable: false },
 ]
 
-// Pre-populated on a visitor's first-ever visit (mirrors the backend's
-// poi_types.py DEFAULT_VISIBLE_POI_TYPES by hand) - water is the app's core
-// use case, so it's the only type shown before the visitor asks for more.
-// Every other searchable type is reachable via the "add a POI type" picker
-// in FindPoisCard.tsx, and once added, persists across visits via
-// savePoiSearchConfig/loadPoiSearchConfig in settings.ts (localStorage).
-export const DEFAULT_VISIBLE_POI_TYPES = ["water"]
+// What a fresh browser starts with is no longer one list: it's per
+// activity, declared as `visiblePoiTypes` on each entry in mapStyles.ts,
+// since a walk and a ride don't look for the same things. The backend's own
+// poi_types.py DEFAULT_VISIBLE_POI_TYPES still exists as the fallback for a
+// request that omits poi_config entirely - which this frontend never does.
 

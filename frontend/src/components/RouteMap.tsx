@@ -1116,6 +1116,13 @@ function PoiTypeLabel({ name, label }: { name: string | null; label: string | un
  * missing while this is catching up - the pattern only ever adds texture on
  * top. Renders nothing at all on a style without rock fills (i.e. cycling).
  */
+// Probe for "is the loaded style one that has terrain fills at all". Taken
+// from the table rather than written out, so renaming a layer can't leave
+// this pointing at an id that no longer exists - which would silently stop
+// the patterns mounting. A *tinted* entry, since a pattern-only one
+// (forest) has no layer of its own.
+const TERRAIN_ANCHOR_LAYER = TERRAIN_FILLS.find((fill) => fill.color !== undefined)!.id
+
 function TerrainPatterns() {
   const { current: map } = useMap()
   const [ready, setReady] = useState(false)
@@ -1132,7 +1139,17 @@ function TerrainPatterns() {
           const { width, height, data } = build()
           map.addImage(id, { width, height, data })
         }
-        setReady(TERRAIN_PATTERNS.every(({ id }) => map.hasImage(id)))
+        // Both halves belong in the state, not just the images. Switching
+        // activity swaps the style asynchronously: this component re-renders
+        // the moment the prop changes, while the map still holds the *old*
+        // style, so a layer check done during render sees the wrong one. By
+        // the time the new style has loaded, only `styledata` fires - and if
+        // `ready` were already true, setting it true again is a no-op React
+        // skips, so nothing would ever re-render and the patterns would
+        // simply never appear on the style switched to.
+        setReady(
+          TERRAIN_PATTERNS.every(({ id }) => map.hasImage(id)) && Boolean(map.getLayer(TERRAIN_ANCHOR_LAYER)),
+        )
       } catch {
         // The style wasn't ready for addImage yet; a later styledata event
         // during this style load will retry.
@@ -1147,12 +1164,9 @@ function TerrainPatterns() {
     }
   }, [map])
 
-  if (!ready) return null
-  // Keyed off the style's own layers rather than the activity key, so this
-  // follows whatever style actually defines terrain fills. The forest entry
-  // patterns over the base's own landcover_wood, so its own id won't be a
-  // layer - checking one of the tinted ones is enough.
-  if (!map?.getLayer("landcover_scree")) return null
+  // `ready` already covers both the images and this style having terrain
+  // fills at all, so a style without them (cycling) renders nothing.
+  if (!ready || !map) return null
   const beforeId = map.getLayer(TERRAIN_BEFORE_ID) ? TERRAIN_BEFORE_ID : undefined
 
   return (
