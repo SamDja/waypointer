@@ -102,7 +102,7 @@ import type {
   SearchRange,
 } from "@/types/candidate"
 
-type Step = "import" | "find"
+type Step = "activity" | "import" | "find"
 
 // Stable empty-array references so RouteMap's FitBounds effect (which
 // depends on candidates/existingWaypoints by reference) doesn't refire on
@@ -1851,7 +1851,14 @@ export default function App() {
           {/* Everything in here floats over the map on desktop, hence the
               shadows: a card on its own is too close in tone to the map. */}
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0 [&>*]:shadow-lg md:[&>*]:pointer-events-auto">
-            <MapStyleSelect value={mapStyleKey} onChange={handleMapStyleChange} />
+            <StepCard
+              title="1. Pick the activity you love"
+              open={openStep === "activity"}
+              onOpenChange={(open) => setOpenStep(open ? "activity" : null)}
+              summary={MAP_STYLES.find((style) => style.key === mapStyleKey)?.label}
+            >
+              <MapStyleSelect value={mapStyleKey} onChange={handleMapStyleChange} />
+            </StepCard>
             {plannerState ? (
               <PlannerPanel
                 mode={plannerMode}
@@ -1884,7 +1891,7 @@ export default function App() {
             ) : (
               <>
                 <StepCard
-                  title={"1. Get a route" + (file ? " ✅": "")}
+                  title={"2. Get a route to follow" + (file ? " ✅": "")}
                   open={openStep === "import"}
                   onOpenChange={(open) => setOpenStep(open ? "import" : null)}
                 >
@@ -1913,7 +1920,7 @@ export default function App() {
 
                 {file && (
                   <StepCard
-                    title={"2. Find POIs" + (findResult ? " ✅": "")}
+                    title={"3. Find interesting things on the way" + (findResult ? " ✅": "")}
                     open={openStep === "find"}
                     onOpenChange={(open) => setOpenStep(open ? "find" : null)}
                   >

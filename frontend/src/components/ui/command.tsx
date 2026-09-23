@@ -155,7 +155,12 @@ function CommandItem({
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "group/command-item relative flex justify-between cursor-pointer gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none in-data-[slot=dialog-content]:rounded-lg! data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 data-selected:bg-muted data-selected:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 data-selected:*:[svg]:text-foreground hover:bg-olive-300",
+        // cmdk marks the row under the pointer as data-selected too, so the
+        // hover and keyboard states were fighting over which colour won -
+        // and bg-muted is oklch(0.97) on a popover of oklch(0.966), i.e.
+        // invisible. Both states now resolve to the same olive, matching
+        // select.tsx's SelectItem.
+        "group/command-item relative flex justify-between cursor-pointer gap-2 rounded-sm px-2 py-1.5 text-sm outline-hidden select-none in-data-[slot=dialog-content]:rounded-lg! data-[disabled=true]:pointer-events-none data-[disabled=true]:cursor-not-allowed data-[disabled=true]:opacity-50 hover:bg-olive-300 data-selected:bg-olive-300 data-selected:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 data-selected:*:[svg]:text-foreground",
         className
       )}
       {...props}
