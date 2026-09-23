@@ -106,12 +106,20 @@ describe("hiking style", () => {
     }
   })
 
-  it("draws paths wider than the base's hairline, and before zoom 14", () => {
-    expect(paint(hiking, "road_path_pedestrian").width).toBeGreaterThan(
-      paint(cycling, "road_path_pedestrian").width,
-    )
+  it("draws paths earlier and heavier than the base does, where it matters", () => {
     const layer = hiking.layers.find((l) => l.id === "road_path_pedestrian")!
+    // The base doesn't draw paths at all below 14. Coming forward from 11 is
+    // most of the point: that's where a walker is choosing between valleys.
     expect(layer.minzoom).toBeLessThan(14)
+
+    // Compared at 14, the zoom the base finally starts at - which is where
+    // "heavier than a hairline" actually means something. Further in, both
+    // are thick enough that the weight stops carrying the difference and
+    // the colour does, so this deliberately doesn't assert about z18.
+    const at14 = (style: typeof hiking) => evaluateLineLayerPaint(style, "road_path_pedestrian", 14, {})!
+    expect(at14(hiking).width).toBeGreaterThan(at14(cycling).width)
+    // And the bike's is dimmed on top of being thinner.
+    expect(at14(hiking).opacity).toBeGreaterThan(at14(cycling).opacity)
   })
 
   it("composes a style MapLibre itself considers valid, for every activity", () => {

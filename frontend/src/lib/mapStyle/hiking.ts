@@ -107,7 +107,7 @@ const ALWAYS_DIMMED_CASING = [
 // subject of the map. They come forward here: in colour, thicker, and from
 // zoom 11, which is roughly where a walker starts choosing between valleys.
 const PATH_LAYERS = ["road_path_pedestrian", "tunnel_path_pedestrian", "bridge_path_pedestrian"]
-const TRAIL_WIDTH = ["interpolate", ["exponential", 1.2], ["zoom"], 11, 0.75, 14, 2, 20, 10]
+const TRAIL_WIDTH = ["interpolate", ["exponential", 1.2], ["zoom"], 11, 0.6, 14, 1.6, 20, 8]
 const PATH_MIN_ZOOM = 11
 
 /**
@@ -147,8 +147,8 @@ const PATH_COLOR: Expression = ["case", IS_PAVED, PAVED_TRAIL, TRAIL]
 // forward to PATH_MIN_ZOOM without this would draw them at zero width for
 // four zoom levels - visible only as their own casing, which is precisely
 // what "greyed out" looks like.
-const TRACK_WIDTH = ["interpolate", ["exponential", 1.2], ["zoom"], 11, 0.6, 14, 1.5, 20, 7.5]
-const TRACK_CASING_WIDTH = ["interpolate", ["exponential", 1.2], ["zoom"], 11, 1.4, 14, 3, 20, 11]
+const TRACK_WIDTH = ["interpolate", ["exponential", 1.2], ["zoom"], 11, 0.45, 14, 1.15, 20, 6]
+const TRACK_CASING_WIDTH = ["interpolate", ["exponential", 1.2], ["zoom"], 11, 1.1, 14, 2.3, 20, 8.5]
 
 /**
  * The landmarks a walker navigates by, which the base style either buries or
@@ -230,13 +230,13 @@ export const TERRAIN_FILLS: {
     id: "landcover_farmland",
     filter: byClass("farmland"),
     color: tailwindHex(colors.yellow[100]),
-    opacity: 0.55,
+    opacity: 0.5,
   },
   {
     id: "landcover_vineyard",
     filter: bySubclass("farmland", "vineyard", "orchard", "plant_nursery"),
-    color: tailwindHex(colors.yellow[200]),
-    opacity: 0.55,
+    color: tailwindHex(colors.amber[100]),
+    opacity: 0.6,
     patternId: VINEYARD_PATTERN_ID,
   },
   // Open grazing and meadow: the easiest ground there is, so it stays a
@@ -244,16 +244,16 @@ export const TERRAIN_FILLS: {
   {
     id: "landcover_grassland",
     filter: bySubclass("grass", "grassland", "meadow", "pasture", "heath"),
-    color: tailwindHex(colors.lime[200]),
-    opacity: 0.5,
+    color: tailwindHex(colors.lime[100]),
+    opacity: 0.6,
   },
   // Scrub is not grass to walk through, whatever the tiles say by lumping
   // them in one class.
   {
     id: "landcover_scrub",
     filter: bySubclass("grass", "scrub"),
-    color: tailwindHex(colors.lime[300]),
-    opacity: 0.45,
+    color: tailwindHex(colors.lime[200]),
+    opacity: 0.5,
     patternId: SCRUB_PATTERN_ID,
   },
   // Loose stone: the paler of the two rocks, since it's the more common
@@ -429,7 +429,7 @@ export const hikingStyle = (): StylePatch[] => [
   // Forest keeps the base's own layer - it already filters class=wood - but
   // in a green that separates it from open ground rather than blending in.
   // Its canopy texture is added by the pattern overlay.
-  setPaint("landcover_wood", { "fill-color": tailwindHex(colors.green[300]), "fill-opacity": 0.5 }),
+  setPaint("landcover_wood", { "fill-color": tailwindHex(colors.green[200]), "fill-opacity": 0.55 }),
 
   // Names belong to the walking network here, not to the road network. The
   // base labels every road class, which on a hiking map is a screen of
