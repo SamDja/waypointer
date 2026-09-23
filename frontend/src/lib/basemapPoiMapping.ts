@@ -30,7 +30,7 @@ export const BASEMAP_POI_MAPPING: BasemapPoiMapping[] = [
   { poiType: "info", classes: ["information"], subclasses: ["information"] },
   {
     poiType: "lodging",
-    subclasses: ["hotel", "motel", "guest_house", "hostel", "alpine_hut"],
+    subclasses: ["hotel", "motel", "guest_house", "hostel", "alpine_hut", "wilderness_hut"],
     classes: ["lodging"],
   },
   { poiType: "toilet", classes: ["toilets"], subclasses: ["toilets"] },

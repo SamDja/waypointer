@@ -5,10 +5,17 @@
 -- OSM features Waypointer actually cares about, not a full-region dataset.
 -- This is the same "keep two implementations in sync by hand" tradeoff the
 -- repo already accepts for frontend/src/lib/poiTypes.ts mirroring
--- poi_types.py - no automated test cross-checks the FILTERS table below
--- against poi_types.py's tag filters (a Lua-vs-Python parity test would
--- need a Lua runtime or a brittle text parser), so a change to one side
--- needs a manual check against the other for now.
+-- poi_types.py - but unlike that one, this mirror IS checked:
+-- tests/test_import_pois_lua.py parses the FILTERS table below and each
+-- tag_filter in poi_types.py and asserts they describe the same tags, with
+-- the same scope. It parses strictly, so an entry written in a shape the
+-- parser doesn't recognise fails the test rather than going unchecked - if
+-- you add a condition form here, teach the test about it.
+--
+-- Note that changing a filter is not enough on its own: the `pois` table
+-- only holds rows for tags that were already being imported, so a widened
+-- filter finds nothing until `docker compose run --rm poi-import` is run
+-- again, locally and on the Pi.
 --
 -- No --slim/updatable state is used - this is a one-shot static import, not
 -- a continuously-updated mirror (see postgis/update_check.sh for the
@@ -54,7 +61,7 @@ local FILTERS = {
     shopping        = { scope = 'any',  match = { { key = 'shop', exists = true } } },
     winery          = { scope = 'any',  match = { { key = 'shop', value = 'wine' } } },
     info            = { scope = 'any',  match = { { key = 'tourism', value = 'information' } } },
-    lodging         = { scope = 'any',  match = { { key = 'tourism', in_ = { 'hotel', 'hostel', 'guest_house', 'motel', 'alpine_hut' } } } },
+    lodging         = { scope = 'any',  match = { { key = 'tourism', in_ = { 'hotel', 'hostel', 'guest_house', 'motel', 'alpine_hut', 'wilderness_hut' } } } },
     shower          = { scope = 'any',  match = { { key = 'amenity', value = 'shower' } } },
     toilet          = { scope = 'any',  match = { { key = 'amenity', value = 'toilets' } } },
     bike_parking    = { scope = 'any',  match = { { key = 'amenity', value = 'bicycle_parking' } } },

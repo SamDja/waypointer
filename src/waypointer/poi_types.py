@@ -137,8 +137,13 @@ POI_TYPES: dict[str, PoiTypeConfig] = {
     ),
     "lodging": PoiTypeConfig(
         key="lodging", label="Lodging", course_point_type=51,
-        default_name="Lodging", sym_hints=("lodging", "hotel", "hostel", "motel", "alpine hut"),
-        tag_filter='nwr["tourism"~"^(hotel|hostel|guest_house|motel|alpine_hut)$"]',
+        default_name="Lodging",
+        sym_hints=("lodging", "hotel", "hostel", "motel", "alpine hut", "wilderness hut", "bivouac"),
+        # wilderness_hut is an unstaffed mountain shelter you can sleep in -
+        # often the only lodging for miles on a walk, and a legitimate
+        # bail-out on a long ride, so it belongs with the rest rather than
+        # in a type of its own.
+        tag_filter='nwr["tourism"~"^(hotel|hostel|guest_house|motel|alpine_hut|wilderness_hut)$"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
     ),
     "shower": PoiTypeConfig(
