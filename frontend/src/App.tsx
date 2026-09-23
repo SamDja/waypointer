@@ -676,6 +676,16 @@ export default function App() {
     trackPlanningStarted(coords.length > 0 ? "edit" : "new", startAt ? "place" : "fresh", state)
   }
 
+  /**
+   * A POI's popup, before any route exists: plan a new route starting at it.
+   * The lookup popup closes with the same click, since the POI is about to
+   * become the route's first point and would only sit under its marker.
+   */
+  function handleStartRouteFromPoi(lat: number, lon: number) {
+    setPendingLookup(null)
+    handleStartPlanning([lat, lon])
+  }
+
   /** Step 1's pin popup, before any route exists: plan a new route from the searched place. */
   function handleStartRouteAtSearchedPlace() {
     if (!searchedPlace) return
@@ -1697,6 +1707,7 @@ export default function App() {
             pendingLookup={pendingLookup}
             onConfirmPendingLookup={handleConfirmPendingLookup}
             onDismissPendingLookup={() => setPendingLookup(null)}
+            onStartRouteFromPoi={!plannerState && !file ? handleStartRouteFromPoi : undefined}
             insets={mapInsets}
             fitRequest={fitRequest}
             onViewChange={(view) => {
