@@ -169,6 +169,9 @@ describe("hiking style", () => {
     it("shows signposts, mountain huts and shelters, and nothing else from the POI layer", () => {
       expect(selects("hiking_poi", { class: "information", subclass: "guidepost" })).toBe(true)
       expect(selects("hiking_poi", { class: "lodging", subclass: "alpine_hut" })).toBe(true)
+      // Accepted if it ever arrives, but OpenMapTiles' tourism mapping has
+      // no wilderness_hut, so this branch matches nothing in real tiles -
+      // asserting it here would otherwise read as "we draw bivouacs".
       expect(selects("hiking_poi", { class: "lodging", subclass: "wilderness_hut" })).toBe(true)
       expect(selects("hiking_poi", { class: "shelter", subclass: "shelter" })).toBe(true)
 

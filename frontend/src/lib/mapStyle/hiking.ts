@@ -171,6 +171,13 @@ const HIKING_POI: Expression = [
   // Signposts. Dense where they exist - 36 in one valley tile near Trento -
   // so they wait a zoom longer than the rest (see HIKING_POI_MIN_ZOOM).
   ["all", ["==", ["get", "class"], "information"], ["==", ["get", "subclass"], "guidepost"]],
+  // `wilderness_hut` is listed defensively and matches nothing today:
+  // OpenMapTiles' POI mapping accepts only alpine_hut, hotel, guest_house,
+  // hostel and chalet under tourism, so an unstaffed bivouac never reaches
+  // these tiles at all - confirmed against the schema and by scanning eight
+  // alpine tiles. Our own PostGIS *does* import them (poi_types.py's
+  // `lodging` filter), so they're findable by searching, and RouteMap's
+  // MapPoiOverlay draws them from there (/api/map-pois).
   ["match", ["get", "subclass"], ["alpine_hut", "wilderness_hut"], true, false],
   ["==", ["get", "class"], "shelter"],
 ]

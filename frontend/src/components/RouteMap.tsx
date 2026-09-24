@@ -41,7 +41,7 @@ import { cumulativeDistancesM, pointAtDistanceM, projectOntoPolylineM } from "@/
 import { setHoveredDistanceM, useHoveredDistanceM } from "@/lib/hoverDistance"
 import { PLANNER_POINT_COLOR, ROUTE_END_COLOR, ROUTE_START_COLOR, START_FINISH_BACKGROUND } from "@/lib/mapColors"
 import { CircleMarkerIcon, SearchedPlacePin, UserLocationMarker } from "@/lib/mapIcons"
-import { mapStyleFor } from "@/lib/mapStyles"
+import { MAP_STYLES, mapStyleFor } from "@/lib/mapStyles"
 import { TERRAIN_FILLS, TERRAIN_BEFORE_ID } from "@/lib/mapStyle/hiking"
 import { TERRAIN_PATTERNS } from "@/lib/mapStyle/terrainPatterns"
 import {
@@ -53,6 +53,8 @@ import {
 import { POI_TYPES } from "@/lib/poiTypes"
 import { toast } from "@/lib/toast"
 import { tailwindHex } from "@/lib/color"
+import { fetchMapPois } from "@/lib/api"
+import type { MapPoi } from "@/types/candidate"
 import type { MapInsets } from "@/lib/useMapInsets"
 import type { RouteShape } from "@/lib/routePlanner"
 import type {
@@ -1116,6 +1118,142 @@ function PoiTypeLabel({ name, label }: { name: string | null; label: string | un
  * missing while this is catching up - the pattern only ever adds texture on
  * top. Renders nothing at all on a style without rock fills (i.e. cycling).
  */
+// Sprite icon per drawable POI type, matching what the basemap uses for the
+// same thing so a hut looks like a hut whichever source it came from.
+const MAP_POI_SPRITE: Record<string, string> = { lodging: "lodging" }
+
+// A stable empty array, so the overlay's effect doesn't re-run on every
+// render of a style that has no overlay POIs.
+const EMPTY_POI_TYPES: readonly string[] = []
+
+const MAP_POI_SOURCE_ID = "our-pois"
+const MAP_POI_LAYER_ID = "our_pois"
+// Below this there's no point asking: the backend refuses a viewport wider
+// than a degree, and the layer doesn't draw until closer in anyway.
+const MAP_POI_FETCH_MIN_ZOOM = 12
+const MAP_POI_MIN_ZOOM = 13
+// Panning fires moveend constantly; this is how long the map has to settle.
+const MAP_POI_DEBOUNCE_MS = 400
+
+/**
+ * Draws POIs from our own PostGIS import on top of the basemap.
+ *
+ * Exists for the ones the basemap simply cannot show: OpenMapTiles' POI
+ * mapping has no `tourism=wilderness_hut`, so an unstaffed bivouac never
+ * reaches the tiles however the style is written, while our import does
+ * hold it. Fetched per viewport rather than per route, because these are
+ * cartography - they're there before any route is.
+ *
+ * Only ever covers the region the configured OSM extract holds, which is
+ * why it supplements the basemap rather than replacing any part of it: the
+ * basemap keeps drawing staffed alpine huts, everywhere.
+ */
+function MapPoiOverlay({ poiTypes }: { poiTypes: readonly string[] }) {
+  const { current: map } = useMap()
+  const [pois, setPois] = useState<MapPoi[]>([])
+
+  useEffect(() => {
+    // No clearing of state here: an activity without overlay POIs renders
+    // nothing regardless (see the guard below), so whatever the last one
+    // left behind is never drawn.
+    if (!map || poiTypes.length === 0) return
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let controller: AbortController | undefined
+    let cancelled = false
+
+    const load = () => {
+      if (map.getZoom() < MAP_POI_FETCH_MIN_ZOOM) {
+        setPois([])
+        return
+      }
+      const bounds = map.getBounds()
+      controller?.abort()
+      controller = new AbortController()
+      fetchMapPois(
+        {
+          minLat: bounds.getSouth(),
+          minLon: bounds.getWest(),
+          maxLat: bounds.getNorth(),
+          maxLon: bounds.getEast(),
+        },
+        poiTypes,
+        controller.signal,
+      )
+        .then((found) => {
+          if (!cancelled) setPois(found)
+        })
+        .catch(() => {
+          // A failed or superseded fetch just leaves the last set drawn -
+          // these are supplementary, and a toast per pan would be worse
+          // than quietly showing nothing new.
+        })
+    }
+
+    const schedule = () => {
+      clearTimeout(timer)
+      timer = setTimeout(load, MAP_POI_DEBOUNCE_MS)
+    }
+
+    schedule()
+    map.on("moveend", schedule)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+      controller?.abort()
+      map.off("moveend", schedule)
+    }
+  }, [map, poiTypes])
+
+  const data = useMemo(
+    () => ({
+      type: "FeatureCollection" as const,
+      features: pois
+        .filter((poi) => MAP_POI_SPRITE[poi.poi_type])
+        .map((poi) => ({
+          type: "Feature" as const,
+          geometry: { type: "Point" as const, coordinates: [poi.lon, poi.lat] },
+          // poi_type rides along so a click can resolve it directly - these
+          // features have no OpenMapTiles class/subclass to map from.
+          properties: {
+            name: poi.name ?? "",
+            icon: MAP_POI_SPRITE[poi.poi_type],
+            poi_type: poi.poi_type,
+            osm_id: poi.osm_id,
+          },
+        })),
+    }),
+    [pois],
+  )
+
+  if (poiTypes.length === 0 || data.features.length === 0) return null
+
+  return (
+    <Source id={MAP_POI_SOURCE_ID} type="geojson" data={data}>
+      <Layer
+        id={MAP_POI_LAYER_ID}
+        type="symbol"
+        minzoom={MAP_POI_MIN_ZOOM}
+        layout={{
+          "icon-image": ["get", "icon"],
+          "icon-size": 1,
+          "text-optional": true,
+          "text-field": ["get", "name"],
+          "text-font": ["Noto Sans Regular"],
+          "text-size": 11,
+          "text-anchor": "top",
+          "text-offset": [0, 0.8],
+          "text-max-width": 9,
+        }}
+        paint={{
+          "text-color": tailwindHex(colors.stone[700]),
+          "text-halo-color": "#ffffff",
+          "text-halo-width": 1.2,
+        }}
+      />
+    </Source>
+  )
+}
+
 // Probe for "is the loaded style one that has terrain fills at all". Taken
 // from the table rather than written out, so renaming a layer can't leave
 // this pointing at an id that no longer exists - which would silently stop
@@ -1499,13 +1637,21 @@ export function RouteMap({
   const zoom = hasRoute ? 13 : DEFAULT_ZOOM
   const isHovering = hoveredPoi !== null
   const mapStyle = mapStyleFor(mapStyleKey)
+  // POIs this activity wants drawn from our own import, on top of the
+  // basemap's - see MapPoiOverlay.
+  const overlayPoiTypes = MAP_STYLES.find((style) => style.key === mapStyleKey)?.overlayPoiTypes ?? EMPTY_POI_TYPES
   // Naming a layer the current style doesn't have makes MapLibre's
   // queryRenderedFeatures complain on every click, so the set is derived
-  // from the style in use rather than hardcoded.
+  // from the style in use rather than hardcoded. The overlay's layer can't
+  // pass that check - it's added at runtime, not part of the style object -
+  // and doesn't need to: react-map-gl already drops interactive ids missing
+  // from the live map before querying, so it's harmless while the overlay
+  // draws nothing or a style swap is in flight.
   const clickablePoiLayerIds = useMemo(() => {
     const present = new Set(mapStyle.layers.map((layer) => layer.id))
-    return [...BASEMAP_POI_LAYER_IDS, ...HIKING_POI_LAYER_IDS].filter((id) => present.has(id))
-  }, [mapStyle])
+    const ids = [...BASEMAP_POI_LAYER_IDS, ...HIKING_POI_LAYER_IDS].filter((id) => present.has(id))
+    return overlayPoiTypes.length > 0 ? [...ids, MAP_POI_LAYER_ID] : ids
+  }, [mapStyle, overlayPoiTypes])
   // Click-added candidates are excluded from FitBounds's input - including
   // one from its lookup popup shouldn't re-fit/re-zoom the map, since the
   // visitor just clicked that exact spot and already has it in view.
@@ -1622,8 +1768,13 @@ export function RouteMap({
             }
             if (e.features && e.features.length > 0) {
               const feature = e.features[0]
-              const props = feature.properties as { class?: string; subclass?: string }
-              const poiType = resolvePoiTypeFromFeatureProps(props)
+              const props = feature.properties as { class?: string; subclass?: string; poi_type?: string }
+              // Our own overlay POIs carry their type; the basemap's carry
+              // only OpenMapTiles' class/subclass.
+              const poiType =
+                feature.layer.id === MAP_POI_LAYER_ID
+                  ? (props.poi_type ?? null)
+                  : resolvePoiTypeFromFeatureProps(props)
               // Use the feature's own point geometry, not the click/tap
               // position - a basemap POI's clickable footprint includes its
               // text label (rendered below the icon, "text-anchor: top"),
@@ -1645,6 +1796,7 @@ export function RouteMap({
           <PlanningCursor active={planning !== undefined} />
           <BasemapPoiFilter />
           <TerrainPatterns />
+          <MapPoiOverlay poiTypes={overlayPoiTypes} />
 
           {hasRoute && (
             <Source id={ROUTE_SOURCE_ID} type="geojson" data={toRouteLineGeoJson(routeCoords)}>

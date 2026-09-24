@@ -9,7 +9,12 @@ import pytest
 from psycopg.types.json import Jsonb
 
 from waypointer import poi_db
-from waypointer.poi_db import PoiDbError, query_poi_near_point, query_pois_near_route
+from waypointer.poi_db import (
+    PoiDbError,
+    query_poi_near_point,
+    query_pois_in_bounds,
+    query_pois_near_route,
+)
 
 try:
     from testcontainers.community.postgres import PostgresContainer
@@ -156,3 +161,71 @@ def test_query_pois_near_route_raises_poi_db_error_when_unconfigured(monkeypatch
     poi_db._pool = None
     with pytest.raises(PoiDbError):
         query_pois_near_route("water", [(48.0, 2.0), (48.001, 2.001)], radius_m=10)
+
+
+def test_query_pois_in_bounds_returns_only_what_is_inside(postgis_url):
+    with _connect(postgis_url) as conn:
+        _insert_point(conn, "node", 1, "lodging", 46.62, 12.30, tags={"tourism": "wilderness_hut"})
+        _insert_point(conn, "node", 2, "lodging", 46.90, 12.30, tags={"tourism": "alpine_hut"})
+
+    found = query_pois_in_bounds(["lodging"], 46.6, 12.2, 46.7, 12.4, limit=100)
+    assert [node.id for _, node in found] == [1]
+
+
+def test_query_pois_in_bounds_narrows_by_tag(postgis_url):
+    """The point of tag_matches: `lodging` holds hotels too, and a hiking
+    map drawing every hotel in a town would bury the huts."""
+    with _connect(postgis_url) as conn:
+        _insert_point(conn, "node", 1, "lodging", 46.62, 12.30, tags={"tourism": "wilderness_hut"})
+        _insert_point(conn, "node", 2, "lodging", 46.63, 12.31, tags={"tourism": "alpine_hut"})
+        _insert_point(conn, "node", 3, "lodging", 46.64, 12.32, tags={"tourism": "hotel"})
+
+    huts = query_pois_in_bounds(
+        ["lodging"],
+        46.6,
+        12.2,
+        46.7,
+        12.4,
+        limit=100,
+        tag_matches=[{"tourism": "alpine_hut"}, {"tourism": "wilderness_hut"}],
+    )
+    assert sorted(node.id for _, node in huts) == [1, 2]
+
+    # Without the filter the hotel comes back too, which is what the
+    # endpoint's per-type narrowing exists to prevent.
+    everything = query_pois_in_bounds(["lodging"], 46.6, 12.2, 46.7, 12.4, limit=100)
+    assert sorted(node.id for _, node in everything) == [1, 2, 3]
+
+
+def test_query_pois_in_bounds_gives_a_way_a_point_on_itself(postgis_url):
+    """A hut mapped as its building outline still needs somewhere to draw."""
+    with _connect(postgis_url) as conn:
+        _insert_linestring(
+            conn,
+            "way",
+            5,
+            "lodging",
+            [(46.620, 12.300), (46.621, 12.301), (46.622, 12.300)],
+            tags={"tourism": "alpine_hut"},
+        )
+
+    found = query_pois_in_bounds(["lodging"], 46.6, 12.2, 46.7, 12.4, limit=100)
+    assert len(found) == 1
+    poi_type, node = found[0]
+    assert poi_type == "lodging"
+    assert node.osm_type == "way"
+    # On the feature, not merely near it.
+    assert 46.619 < node.lat < 46.623
+    assert 12.299 < node.lon < 12.302
+
+
+def test_query_pois_in_bounds_honours_the_row_limit(postgis_url):
+    with _connect(postgis_url) as conn:
+        for i in range(10):
+            _insert_point(conn, "node", i, "water", 46.60 + i * 0.001, 12.30, tags={})
+
+    assert len(query_pois_in_bounds(["water"], 46.5, 12.2, 46.7, 12.4, limit=4)) == 4
+
+
+def test_query_pois_in_bounds_with_no_types_asks_nothing(postgis_url):
+    assert query_pois_in_bounds([], 46.6, 12.2, 46.7, 12.4, limit=100) == []

@@ -90,6 +90,13 @@ export interface MapStyleConfig {
   // keep in sync with this.
   roadLegend?: RoadLegendCategory[]
   defaults: ActivityDefaults
+  // POI types to draw from our *own* PostGIS import, on top of the basemap
+  // (see main.py's /api/map-pois). Only worth listing a type the basemap
+  // can't show: OpenMapTiles has no `tourism=wilderness_hut`, so a bivouac
+  // never reaches the tiles however this style is written. Limited to the
+  // region the configured OSM extract covers, so these are a supplement to
+  // the basemap's own POIs, never a replacement for them.
+  overlayPoiTypes?: readonly string[]
 }
 
 // fastbike's options (see routing.py's PROFILE_OPTIONS for what each does to
@@ -270,6 +277,10 @@ export const MAP_STYLES: MapStyleConfig[] = [
       // huts that make a long one possible.
       visiblePoiTypes: ["water", "summit", "lodging"],
     },
+    // Unstaffed bivouacs, which the basemap cannot draw. Staffed alpine
+    // huts already come from the tiles and are left to them - see
+    // MAP_POI_TAG_MATCHES in main.py.
+    overlayPoiTypes: ["lodging"],
   },
 ]
 
