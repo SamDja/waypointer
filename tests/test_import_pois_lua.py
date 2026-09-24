@@ -18,6 +18,7 @@ import pytest
 from waypointer.poi_types import POI_TYPES
 
 LUA_PATH = Path(__file__).parent.parent / "postgis" / "import_pois.lua"
+PREFILTER_PATH = LUA_PATH.parent / "prefilter.txt"
 
 # A condition is a tag key plus either the set of values it may take, or
 # EXISTS for a bare-key match.
@@ -116,3 +117,44 @@ def test_lodging_includes_both_kinds_of_mountain_hut():
     _, conditions = _searchable()["lodging"]
     values = dict(conditions)["tourism"]
     assert {"alpine_hut", "wilderness_hut"} <= values
+
+
+# osmium's object-type letters, per Lua scope a FILTERS entry can have.
+_SCOPE_TYPES = {"any": set("nwr"), "node": {"n"}, "way": {"w"}}
+# One prefilter.txt line: object types, key, and its values or EXISTS.
+PrefilterLine = tuple[set[str], str, frozenset[str] | str]
+
+
+def _parse_prefilter() -> list[PrefilterLine]:
+    lines: list[PrefilterLine] = []
+    for raw in PREFILTER_PATH.read_text().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        match = re.fullmatch(r"([nwr]+)/([\w:]+)(?:=([\w,]+))?", line)
+        assert match, f"unparseable prefilter.txt line: {line}"
+        values = frozenset(match.group(3).split(",")) if match.group(3) else EXISTS
+        lines.append((set(match.group(1)), match.group(2), values))
+    return lines
+
+
+def _covers(line: PrefilterLine, scope: str, condition: Condition) -> bool:
+    types, key, values = line
+    cond_key, cond_values = condition
+    if key != cond_key or not _SCOPE_TYPES[scope] <= types:
+        return False
+    if values == EXISTS:
+        return True
+    return cond_values != EXISTS and cond_values <= values
+
+
+@pytest.mark.parametrize("poi_type", sorted(_parse_lua()))
+def test_prefilter_keeps_everything_the_lua_imports(poi_type: str):
+    # The osmium pre-filter runs before the Lua ever sees the data, so a
+    # type it drops imports no rows - the same silent failure as above. The
+    # Lua ANDs its conditions, so covering any one of them is enough.
+    scope, conditions = _parse_lua()[poi_type]
+    prefilter = _parse_prefilter()
+    assert any(_covers(line, scope, cond) for line in prefilter for cond in conditions), (
+        f"postgis/prefilter.txt drops every {poi_type} ({scope}: {sorted(conditions)})"
+    )
