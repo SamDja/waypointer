@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { cumulativeDistancesM, elevationGainLossM, pointAtDistanceM } from "@/lib/geometry"
+import { cumulativeDistancesM, elevationGainLossM, estimateDurationHours, pointAtDistanceM } from "@/lib/geometry"
 
 describe("elevationGainLossM", () => {
   it("counts a steady climb and descent in full", () => {
@@ -38,5 +38,22 @@ describe("pointAtDistanceM", () => {
   it("clamps to the route's ends", () => {
     expect(pointAtDistanceM(coords, cumulative, -10)).toEqual(coords[0])
     expect(pointAtDistanceM(coords, cumulative, 1e9)).toEqual(coords[2])
+  })
+})
+
+describe("estimateDurationHours", () => {
+  it("is distance over pace on the flat model, whatever the climbing", () => {
+    expect(estimateDurationHours(40_000, 800, 20, "flat")).toBe(2)
+  })
+
+  it("adds an hour per 600m of ascent under Naismith's rule", () => {
+    // 9km at 4.5km/h is 2h, plus 1200m of climbing at 600m an hour.
+    expect(estimateDurationHours(9_000, 1200, 4.5, "naismith")).toBeCloseTo(4)
+    expect(estimateDurationHours(9_000, 0, 4.5, "naismith")).toBeCloseTo(2)
+  })
+
+  it("is zero without a route or a pace", () => {
+    expect(estimateDurationHours(0, 500, 4.5, "naismith")).toBe(0)
+    expect(estimateDurationHours(5_000, 500, 0, "naismith")).toBe(0)
   })
 })

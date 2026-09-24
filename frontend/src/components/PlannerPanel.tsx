@@ -1,4 +1,5 @@
 import { Button } from "@/components/ui/button"
+import type { DurationModel } from "@/lib/geometry"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
@@ -43,6 +44,7 @@ export interface PlannerPanelProps {
   elevationGainM: number
   elevationLossM: number
   avgSpeedKmh: number
+  durationModel: DurationModel
   onAvgSpeedChange: (speedKmh: number) => void
 }
 
@@ -81,6 +83,7 @@ export function PlannerPanel({
   elevationGainM,
   elevationLossM,
   avgSpeedKmh,
+  durationModel,
   onAvgSpeedChange,
 }: PlannerPanelProps) {
   return (
@@ -145,6 +148,7 @@ export function PlannerPanel({
             elevationGainM={elevationGainM}
             elevationLossM={elevationLossM}
             avgSpeedKmh={avgSpeedKmh}
+            durationModel={durationModel}
             onAvgSpeedChange={onAvgSpeedChange}
           />
         )}

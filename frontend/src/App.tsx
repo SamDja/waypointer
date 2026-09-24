@@ -28,6 +28,8 @@ import {
 } from "@/lib/gpx"
 import {
   MAP_STYLES,
+  durationModelForStyle,
+  gradeScaleForStyle,
   routingOptionSpecsForStyle,
   routingProfileForStyle,
   type RoutingOptions,
@@ -1835,6 +1837,7 @@ export default function App() {
                 cyclewayM={plannerSurfaceData.cyclewayM}
                 gainM={elevationGainM}
                 lossM={elevationLossM}
+                gradeScale={gradeScaleForStyle(mapStyleKey)}
                 // Open on desktop; collapsed on a phone, where the map is only half the screen.
                 defaultOpen={window.matchMedia("(min-width: 48rem)").matches}
               />
@@ -1886,6 +1889,7 @@ export default function App() {
                 elevationGainM={elevationGainM}
                 elevationLossM={elevationLossM}
                 avgSpeedKmh={avgSpeedKmh}
+                durationModel={durationModelForStyle(mapStyleKey)}
                 onAvgSpeedChange={handleAvgSpeedChange}
               />
             ) : (
@@ -1911,6 +1915,7 @@ export default function App() {
                     elevationGainM={elevationGainM}
                     elevationLossM={elevationLossM}
                     avgSpeedKmh={avgSpeedKmh}
+                    durationModel={durationModelForStyle(mapStyleKey)}
                     onAvgSpeedChange={handleAvgSpeedChange}
                     wahooTokens={wahooTokens}
                     onWahooTokensChange={setWahooTokens}

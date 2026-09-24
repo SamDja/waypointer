@@ -1,6 +1,7 @@
 import type { StyleSpecification } from "@maplibre/maplibre-gl-style-spec"
 import { Bike, Footprints, type LucideIcon } from "lucide-react"
 
+import type { DurationModel } from "./geometry"
 import { composeStyle } from "./mapStyle/compose"
 import { hikingStyle } from "./mapStyle/hiking"
 import { houseStyle } from "./mapStyle/houseStyle"
@@ -60,6 +61,20 @@ export interface ActivityDefaults {
   visiblePoiTypes: readonly string[]
 }
 
+// How the elevation profile bins a gradient into its colour bands. The five
+// colours are fixed (ElevationProfile's CLIMB_COLORS / DESCENT_COLORS, a
+// validated palette); what varies by activity is where each band starts,
+// because "steep" means a different number on each: 12% is a hard climb on
+// a road bike and an ordinary stretch of mountain path.
+export interface GradeScale {
+  // Where each of the five climb bands starts, in %, gentlest first. The
+  // descent bands mirror them.
+  bandStartsPct: readonly [number, number, number, number, number]
+  // Within +-this, a stretch is drawn as flat rather than as the gentlest
+  // climb or descent.
+  flatPct: number
+}
+
 export interface MapStyleConfig {
   key: string
   label: string
@@ -90,6 +105,9 @@ export interface MapStyleConfig {
   // keep in sync with this.
   roadLegend?: RoadLegendCategory[]
   defaults: ActivityDefaults
+  gradeScale: GradeScale
+  // How RouteStats turns distance and climbing into an estimated duration.
+  durationModel: DurationModel
   // POI types to draw from our *own* PostGIS import, on top of the basemap
   // (see main.py's /api/map-pois). Only worth listing a type the basemap
   // can't show: OpenMapTiles has no `tourism=wilderness_hut`, so a bivouac
@@ -255,6 +273,10 @@ export const MAP_STYLES: MapStyleConfig[] = [
       // the visitor adds from FindPoisCard's picker.
       visiblePoiTypes: ["water"],
     },
+    // Wahoo's climb bands (green 0-4%, yellow 4-8%, orange 8-12%, red
+    // 12-20%, brown 20%+), so the profile reads like the head unit's.
+    gradeScale: { bandStartsPct: [0, 4, 8, 12, 20], flatPct: 2 },
+    durationModel: "flat",
   },
   {
     key: "hiking",
@@ -267,8 +289,8 @@ export const MAP_STYLES: MapStyleConfig[] = [
     routingOptions: HIKING_OPTIONS,
     roadLegend: HIKING_LEGEND,
     defaults: {
-      // A steady walking pace on mixed ground. Ascent is what really sets
-      // walking times, which a flat speed can't express - see RouteStats.
+      // A steady walking pace on the flat. The climbing is added on top by
+      // Naismith's rule (see durationModel below), not folded into this.
       avgSpeedKmh: 4.5,
       // 500m is a couple of minutes on a bike and the better part of ten on
       // foot, which is far too long to be worth not mentioning.
@@ -277,6 +299,14 @@ export const MAP_STYLES: MapStyleConfig[] = [
       // huts that make a long one possible.
       visiblePoiTypes: ["water", "summit", "lodging"],
     },
+    // Mountain paths sit above 20% routinely, so the cycling bands would
+    // paint a whole trail one brown. Tens instead: under 10% is easy
+    // walking, 10-20% a steady climb, 20-30% steep, 30-40% very steep, and
+    // past 40% it's hands as much as feet. Anything under 5% is walked as
+    // if flat.
+    gradeScale: { bandStartsPct: [0, 10, 20, 30, 40], flatPct: 5 },
+    // On foot ascent sets the time more than distance does.
+    durationModel: "naismith",
     // Unstaffed bivouacs, which the basemap cannot draw. Staffed alpine
     // huts already come from the tiles and are left to them - see
     // MAP_POI_TAG_MATCHES in main.py.
@@ -304,6 +334,14 @@ export function mapStyleFor(key: string): StyleSpecification {
 /** This activity's assumptions, falling back to the first style's. */
 export function activityDefaults(key: string): ActivityDefaults {
   return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).defaults
+}
+
+export function gradeScaleForStyle(key: string): GradeScale {
+  return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).gradeScale
+}
+
+export function durationModelForStyle(key: string): DurationModel {
+  return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).durationModel
 }
 
 export function routingProfileForStyle(key: string): string {
