@@ -147,18 +147,20 @@ export const TUFT: Motif = [
   [1, -1], [2, -2],
 ]
 
-/** Forest: scattered conifers, sparse enough that the green still carries. */
+/**
+ * Forest: scattered conifers, sparse enough that the green still carries.
+ * Three to a tile, not more: tracks run through forest more than through
+ * anything else, and at five the trees broke up their dashes.
+ */
 export function forestPattern(): PatternImage {
   const data = blankTile()
   const rgb = hexToRgb(tailwindHex(colors.green[700]))
   for (const [x, y] of [
-    [6, 6],
-    [22, 3],
-    [14, 17],
-    [28, 21],
-    [4, 26],
+    [6, 4],
+    [22, 12],
+    [12, 23],
   ]) {
-    stamp(data, TREE, x, y, rgb, 0.4)
+    stamp(data, TREE, x, y, rgb, 0.3)
   }
   return { width: TILE, height: TILE, data }
 }
@@ -171,14 +173,13 @@ export function forestPattern(): PatternImage {
 export function scrubPattern(): PatternImage {
   const data = blankTile()
   const rgb = hexToRgb(tailwindHex(colors.lime[700]))
+  // Three to a tile, like forest, so a dashed track still reads through it.
   for (const [x, y] of [
-    [5, 10],
-    [18, 6],
-    [27, 16],
-    [10, 23],
-    [22, 29],
+    [6, 8],
+    [22, 16],
+    [12, 28],
   ]) {
-    stamp(data, TUFT, x, y, rgb, 0.45)
+    stamp(data, TUFT, x, y, rgb, 0.35)
   }
   return { width: TILE, height: TILE, data }
 }

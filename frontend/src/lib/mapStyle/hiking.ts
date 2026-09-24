@@ -228,60 +228,65 @@ export const TERRAIN_FILLS: {
   opacity?: number
   patternId?: string
 }[] = [
-  // Forest gets its tint from the base's own landcover_wood (recoloured
-  // below); this entry exists only to lay canopy texture over it.
-  { id: "landcover_forest", filter: byClass("wood"), patternId: FOREST_PATTERN_ID },
-  // Cultivated ground, which the base style leaves blank. Warm, to separate
-  // the worked valley floor from the green of rough grazing above it.
-  {
-    id: "landcover_farmland",
-    filter: byClass("farmland"),
-    color: tailwindHex(colors.yellow[100]),
-    opacity: 0.5,
-  },
-  {
-    id: "landcover_vineyard",
-    filter: bySubclass("farmland", "vineyard", "orchard", "plant_nursery"),
-    color: tailwindHex(colors.amber[100]),
-    opacity: 0.6,
-    patternId: VINEYARD_PATTERN_ID,
-  },
-  // Open grazing and meadow: the easiest ground there is, so it stays a
-  // plain wash with no texture competing with the route line.
-  {
-    id: "landcover_grassland",
-    filter: bySubclass("grass", "grassland", "meadow", "pasture", "heath"),
-    color: tailwindHex(colors.lime[100]),
-    opacity: 0.6,
-  },
-  // Scrub is not grass to walk through, whatever the tiles say by lumping
-  // them in one class.
-  {
-    id: "landcover_scrub",
-    filter: bySubclass("grass", "scrub"),
-    color: tailwindHex(colors.lime[200]),
-    opacity: 0.5,
-    patternId: SCRUB_PATTERN_ID,
-  },
-  // Loose stone: the paler of the two rocks, since it's the more common
-  // ground and shouldn't dominate a whole cirque. Stippled.
-  {
-    id: "landcover_scree",
-    filter: bySubclass("rock", "scree"),
-    color: tailwindHex(colors.stone[200]),
-    opacity: 0.85,
-    patternId: SCREE_PATTERN_ID,
-  },
-  // Solid rock and cliff faces: darker and hatched, so the difference
-  // between "slow going" and "not walkable" reads at a glance.
-  {
-    id: "landcover_bare_rock",
-    filter: bySubclass("rock", "bare_rock"),
-    color: tailwindHex(colors.stone[400]),
-    opacity: 0.55,
-    patternId: BARE_ROCK_PATTERN_ID,
-  },
-]
+    // Forest gets its tint from the base's own landcover_wood (recoloured
+    // below); this entry exists only to lay canopy texture over it.
+    {
+      id: "landcover_forest",
+      filter: byClass("wood"),
+      patternId: FOREST_PATTERN_ID,
+      opacity: 0.4
+    },
+    // Cultivated ground, which the base style leaves blank. Warm, to separate
+    // the worked valley floor from the green of rough grazing above it.
+    {
+      id: "landcover_farmland",
+      filter: byClass("farmland"),
+      color: tailwindHex(colors.yellow[100]),
+      opacity: 0.4,
+    },
+    {
+      id: "landcover_vineyard",
+      filter: bySubclass("farmland", "vineyard", "orchard", "plant_nursery"),
+      color: tailwindHex(colors.amber[100]),
+      opacity: 0.6,
+      patternId: VINEYARD_PATTERN_ID,
+    },
+    // Open grazing and meadow: the easiest ground there is, so it stays a
+    // plain wash with no texture competing with the route line.
+    {
+      id: "landcover_grassland",
+      filter: bySubclass("grass", "grassland", "meadow", "pasture", "heath"),
+      color: tailwindHex(colors.lime[100]),
+      opacity: 0.4,
+    },
+    // Scrub is not grass to walk through, whatever the tiles say by lumping
+    // them in one class.
+    {
+      id: "landcover_scrub",
+      filter: bySubclass("grass", "scrub"),
+      color: tailwindHex(colors.lime[200]),
+      opacity: 0.5,
+      patternId: SCRUB_PATTERN_ID,
+    },
+    // Loose stone: the paler of the two rocks, since it's the more common
+    // ground and shouldn't dominate a whole cirque. Stippled.
+    {
+      id: "landcover_scree",
+      filter: bySubclass("rock", "scree"),
+      color: tailwindHex(colors.stone[200]),
+      opacity: 0.85,
+      patternId: SCREE_PATTERN_ID,
+    },
+    // Solid rock and cliff faces: darker and hatched, so the difference
+    // between "slow going" and "not walkable" reads at a glance.
+    {
+      id: "landcover_bare_rock",
+      filter: bySubclass("rock", "bare_rock"),
+      color: tailwindHex(colors.stone[400]),
+      opacity: 0.55,
+      patternId: BARE_ROCK_PATTERN_ID,
+    },
+  ]
 
 // The layer the terrain fills sit directly beneath, which is also where the
 // pattern overlays have to be inserted so they land on top of their own

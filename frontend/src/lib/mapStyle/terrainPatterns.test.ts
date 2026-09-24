@@ -1,6 +1,14 @@
 import { describe, expect, it } from "vitest"
 
-import { TERRAIN_PATTERNS, TREE, TUFT, bareRockPattern, screePattern } from "./terrainPatterns"
+import {
+  FOREST_PATTERN_ID,
+  SCRUB_PATTERN_ID,
+  TERRAIN_PATTERNS,
+  TREE,
+  TUFT,
+  bareRockPattern,
+  screePattern,
+} from "./terrainPatterns"
 
 /**
  * These produce raw RGBA for `map.addImage`, where a mistake shows up as an
@@ -33,6 +41,17 @@ describe("terrain patterns", () => {
       for (let i = 3; i < data.length; i += 4) if (data[i] > 0) painted++
       expect(painted, id).toBeGreaterThan(0)
       expect(painted / (width * height), id).toBeLessThan(0.1)
+    }
+  })
+
+  it("keep forest and scrub sparse enough for a dashed track to read through", () => {
+    // Tracks cross these more than any other ground, and a dash is only a
+    // few pixels long - so these get a tighter ceiling than the rest.
+    for (const { id, build } of TERRAIN_PATTERNS.filter(({ id }) => id === FOREST_PATTERN_ID || id === SCRUB_PATTERN_ID)) {
+      const { width, height, data } = build()
+      let painted = 0
+      for (let i = 3; i < data.length; i += 4) if (data[i] > 0) painted++
+      expect(painted / (width * height), id).toBeLessThan(0.04)
     }
   })
 
