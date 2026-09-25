@@ -71,10 +71,5 @@ else
     delta_pct=$(( 100 * (size_bytes - current_size) / size_bytes ))
 fi
 
-if (( delta_pct < OSM_UPDATE_SIZE_PCT )); then
-    echo "Extract size changed ${delta_pct}% (< ${OSM_UPDATE_SIZE_PCT}%) after ${days_elapsed}d - skipping reimport."
-    exit 0
-fi
-
-echo "Extract size changed ${delta_pct}% after ${days_elapsed}d - reimporting."
+echo "${now_epoch} - Extract size changed ${delta_pct}% (${size_bytes}/${current_size}) after ${days_elapsed}d - reimporting."
 run_import
