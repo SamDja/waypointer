@@ -59,6 +59,11 @@ export interface ActivityDefaults {
   offRouteThresholdM: number
   // The POI types a fresh browser starts with for this activity.
   visiblePoiTypes: readonly string[]
+  // Which device SaveCard's format picker starts on (a key from
+  // lib/devices.ts). A FIT course for a bike computer is the obvious answer
+  // on a ride and the wrong one on a walk, where a plain GPX is what any
+  // watch or phone will take.
+  device: string
 }
 
 // How the elevation profile bins a gradient into its colour bands. The five
@@ -115,6 +120,14 @@ export interface MapStyleConfig {
   // region the configured OSM extract covers, so these are a supplement to
   // the basemap's own POIs, never a replacement for them.
   overlayPoiTypes?: readonly string[]
+  // Whether this activity offers pushing the finished route to Wahoo
+  // (SaveCard's "Wahoo" tab). A ROAM is a bike computer, so it's offered on
+  // a ride and not on a walk. This is the seed of a per-activity
+  // integrations list - when Strava/Garmin land it becomes one, and the
+  // header's Wahoo profile menu is reworked with it (its own card). Note
+  // it doesn't gate *importing* a route from Wahoo, which is
+  // activity-neutral GPX by the time it reaches the app.
+  wahooSync: boolean
 }
 
 // fastbike's options (see routing.py's PROFILE_OPTIONS for what each does to
@@ -266,12 +279,16 @@ export const MAP_STYLES: MapStyleConfig[] = [
     routingProfile: "fastbike",
     routingOptions: FASTBIKE_OPTIONS,
     roadLegend: ROAD_CYCLING_LEGEND,
+    wahooSync: true,
     defaults: {
       avgSpeedKmh: 20,
       offRouteThresholdM: 500,
       // Water is the core case the app was built around; everything else
       // the visitor adds from FindPoisCard's picker.
       visiblePoiTypes: ["water"],
+      // The head unit this app's FIT course work was built and verified
+      // against.
+      device: "wahoo_elemnt_roam_v3",
     },
     // Wahoo's climb bands (green 0-4%, yellow 4-8%, orange 8-12%, red
     // 12-20%, brown 20%+), so the profile reads like the head unit's.
@@ -288,6 +305,7 @@ export const MAP_STYLES: MapStyleConfig[] = [
     routingProfile: "hiking-mountain",
     routingOptions: HIKING_OPTIONS,
     roadLegend: HIKING_LEGEND,
+    wahooSync: false,
     defaults: {
       // A steady walking pace on the flat. The climbing is added on top by
       // Naismith's rule (see durationModel below), not folded into this.
@@ -298,6 +316,10 @@ export const MAP_STYLES: MapStyleConfig[] = [
       // Water still, plus the summit a walk is usually aimed at and the
       // huts that make a long one possible.
       visiblePoiTypes: ["water", "summit", "lodging"],
+      // GPX, which any watch or phone will take. The FIT course points are
+      // shaped for a Wahoo head unit, and nothing about them is verified
+      // on a device someone walks with.
+      device: "generic",
     },
     // Mountain paths sit above 20% routinely, so the cycling bands would
     // paint a whole trail one brown. Tens instead: under 10% is easy
@@ -338,6 +360,11 @@ export function activityDefaults(key: string): ActivityDefaults {
 
 export function gradeScaleForStyle(key: string): GradeScale {
   return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).gradeScale
+}
+
+/** Whether this activity offers the Wahoo push in SaveCard. */
+export function wahooSyncForStyle(key: string): boolean {
+  return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).wahooSync
 }
 
 export function durationModelForStyle(key: string): DurationModel {

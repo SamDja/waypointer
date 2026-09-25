@@ -33,6 +33,7 @@ import {
   gradeScaleForStyle,
   routingOptionSpecsForStyle,
   routingProfileForStyle,
+  wahooSyncForStyle,
   type RoutingOptions,
 } from "@/lib/mapStyles"
 import {
@@ -190,7 +191,7 @@ export default function App() {
   // backend-authoritative) so the choice survives a later /api/find-pois/route
   // call, which recomputes its own suggestion from scratch.
   const [waypointTypeOverrides, setWaypointTypeOverrides] = useState<Record<number, string>>({})
-  const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>(() => loadSettings())
+  const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>(() => loadSettings(loadMapStyleKey()))
   const [poiSearchEntries, setPoiSearchEntries] = useState<PoiSearchEntry[]>(() => loadPoiSearchConfig(loadMapStyleKey()))
   const [isFinding, setIsFinding] = useState(false)
   // Live per-type progress for the search kicked off in handleFind - null
@@ -1284,6 +1285,7 @@ export default function App() {
     setAvgSpeedKmh(loadAvgSpeedKmh(key))
     setOffRouteThresholdM(loadOffRouteThresholdM(key))
     setPoiSearchEntries(loadPoiSearchConfig(key))
+    setDeviceSettings(loadSettings(key))
 
     // Found against the previous activity's types, at its distances, and
     // measured against a route that is about to change shape.
@@ -1316,7 +1318,7 @@ export default function App() {
 
   function handleDeviceSettingsChange(settings: DeviceSettings) {
     setDeviceSettings(settings)
-    saveSettings(settings)
+    saveSettings(mapStyleKey, settings)
   }
 
   function handlePoiSearchChange(entries: PoiSearchEntry[]) {
@@ -1963,6 +1965,7 @@ export default function App() {
                     keptWaypointIndices={keptWaypointIndices}
                     settings={deviceSettings}
                     onSettingsChange={handleDeviceSettingsChange}
+                    wahooSync={wahooSyncForStyle(mapStyleKey)}
                     wahooTokens={wahooTokens}
                     onWahooTokensChange={setWahooTokens}
                   />

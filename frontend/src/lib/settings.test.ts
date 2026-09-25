@@ -1,12 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import { DEVICES } from "@/lib/devices"
+import { MAP_STYLES } from "@/lib/mapStyles"
 import {
   loadAvgSpeedKmh,
+  loadSettings,
   loadOffRouteThresholdM,
   loadPoiSearchConfig,
   saveAvgSpeedKmh,
   saveOffRouteThresholdM,
   savePoiSearchConfig,
+  saveSettings,
 } from "@/lib/settings"
 
 /**
@@ -59,6 +63,16 @@ describe("per-activity preferences", () => {
     const hikingTypes = loadPoiSearchConfig(HIKING).map((e) => e.poiType)
     expect(hikingTypes).toContain("water")
     expect(hikingTypes.length).toBeGreaterThan(1)
+
+    // A FIT course is shaped for a bike computer; a walk saves as GPX.
+    expect(loadSettings(CYCLING).device).toBe("wahoo_elemnt_roam_v3")
+    expect(loadSettings(HIKING).device).toBe("generic")
+  })
+
+  it("offers every activity a device that actually exists", () => {
+    for (const style of MAP_STYLES) {
+      expect(DEVICES.map((d) => d.key)).toContain(style.defaults.device)
+    }
   })
 
   it("keeps one activity's settings out of the other's", () => {
@@ -81,6 +95,18 @@ describe("per-activity preferences", () => {
     saveAvgSpeedKmh(HIKING, 3.5)
     expect(loadAvgSpeedKmh(CYCLING)).toBe(28)
     expect(loadAvgSpeedKmh(HIKING)).toBe(3.5)
+
+    saveSettings(CYCLING, { device: "generic", symbols: {} })
+    saveSettings(HIKING, { device: "wahoo_elemnt_roam_v3", symbols: {} })
+    expect(loadSettings(CYCLING).device).toBe("generic")
+    expect(loadSettings(HIKING).device).toBe("wahoo_elemnt_roam_v3")
+  })
+
+  it("shares the GPX symbol overrides across activities", () => {
+    // Unlike the device, a <sym> string is the same answer whichever
+    // activity found the POI.
+    saveSettings(HIKING, { device: "generic", symbols: { water: "Drinking Water" } })
+    expect(loadSettings(CYCLING).symbols).toEqual({ water: "Drinking Water" })
   })
 
   describe("values saved before these were per-activity", () => {
@@ -120,6 +146,20 @@ describe("per-activity preferences", () => {
       expect(loadAvgSpeedKmh(CYCLING)).toBe(26)
     })
 
+    it("adopts a legacy device for cycling, and keeps it across the conversion", () => {
+      store.setItem(
+        "waypointer.settings",
+        JSON.stringify({ device: "wahoo_elemnt_roam_v3", symbols: { water: "Water" } }),
+      )
+      expect(loadSettings(CYCLING).device).toBe("wahoo_elemnt_roam_v3")
+      // A ROAM is a bike computer, so the choice says nothing about a walk.
+      expect(loadSettings(HIKING).device).toBe("generic")
+
+      saveSettings(HIKING, { device: "generic", symbols: { water: "Water" } })
+      expect(loadSettings(CYCLING).device).toBe("wahoo_elemnt_roam_v3")
+      expect(loadSettings(CYCLING).symbols).toEqual({ water: "Water" })
+    })
+
     it("carries a legacy POI list across the same conversion", () => {
       store.setItem("waypointer.poiSearch", JSON.stringify([{ poiType: "coffee", maxDistanceM: 100 }]))
       savePoiSearchConfig(HIKING, [{ poiType: "summit", maxDistanceM: 120 }])
@@ -136,5 +176,10 @@ describe("per-activity preferences", () => {
     expect(loadAvgSpeedKmh(CYCLING)).toBe(20)
     expect(loadOffRouteThresholdM(HIKING)).toBeGreaterThan(0)
     expect(loadPoiSearchConfig(HIKING).map((e) => e.poiType)).toContain("water")
+  })
+
+  it("falls back to the activity default on a device that no longer exists", () => {
+    store.setItem("waypointer.settings", JSON.stringify({ device: { [HIKING]: "garmin_someday" } }))
+    expect(loadSettings(HIKING).device).toBe("generic")
   })
 })

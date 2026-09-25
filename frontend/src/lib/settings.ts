@@ -1,3 +1,4 @@
+import { isKnownDevice } from "@/lib/devices"
 import {
   DEFAULT_MAP_STYLE_KEY,
   MAP_STYLES,
@@ -64,32 +65,83 @@ function legacyAsDefault(parsed: unknown): Record<string, unknown> {
 }
 
 export interface DeviceSettings {
+  // Which device/output format to save for - per activity, since a FIT
+  // course for a bike computer is the obvious answer on a ride and the
+  // wrong one on a walk (see mapStyles.ts's ActivityDefaults.device).
   device: string
   // Sparse: only populated for POI types the visitor has actually edited
   // a GPX <sym> value for - see SaveCard.tsx, which falls back to each
   // type's suggested default (POI_TYPES[...].defaultGpxSymbol ?? label)
   // for any present-in-output type missing here.
+  //
+  // Shared across activities on purpose, unlike device: the <sym> string a
+  // visitor wants for water is the same string whichever activity found
+  // it.
   symbols: Record<string, string>
 }
 
-export const DEFAULT_SETTINGS: DeviceSettings = { device: "generic", symbols: {} }
+/**
+ * Reads the stored device for an activity.
+ *
+ * Stored as `{ [styleKey]: device }`. A bare string predates the per-
+ * activity split and belongs to the activity it was chosen under, so it's
+ * adopted as the default activity's only - the same rule loadKeyedNumber
+ * follows. An unknown key (a device dropped in a later release) falls back
+ * rather than reaching /api/save, which would 400 on it.
+ */
+function deviceFor(stored: unknown, styleKey: string): string {
+  const fallback = activityDefaults(styleKey).device
+  if (typeof stored === "string") {
+    return styleKey === DEFAULT_MAP_STYLE_KEY && isKnownDevice(stored) ? stored : fallback
+  }
+  if (stored && typeof stored === "object") {
+    const value = (stored as Record<string, unknown>)[styleKey]
+    if (isKnownDevice(value)) return value
+  }
+  return fallback
+}
 
-export function loadSettings(): DeviceSettings {
+export function loadSettings(styleKey: string): DeviceSettings {
   try {
     const raw = localStorage.getItem(SETTINGS_KEY)
-    if (!raw) return { ...DEFAULT_SETTINGS }
+    if (!raw) return { device: activityDefaults(styleKey).device, symbols: {} }
     const parsed = JSON.parse(raw)
     return {
-      device: parsed.device || DEFAULT_SETTINGS.device,
-      symbols: parsed.symbols && typeof parsed.symbols === "object" ? parsed.symbols : {},
+      device: deviceFor(parsed?.device, styleKey),
+      symbols: parsed?.symbols && typeof parsed.symbols === "object" ? parsed.symbols : {},
     }
   } catch {
-    return { ...DEFAULT_SETTINGS }
+    return { device: activityDefaults(styleKey).device, symbols: {} }
   }
 }
 
-export function saveSettings(settings: DeviceSettings): void {
-  localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings))
+export function saveSettings(styleKey: string, settings: DeviceSettings): void {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY)
+    const parsed: unknown = raw ? JSON.parse(raw) : null
+    const storedDevice = (parsed as { device?: unknown } | null)?.device
+    // Writing the first per-activity device is what converts the old flat
+    // shape, so a legacy string has to be carried across as the default
+    // activity's - otherwise a cyclist who tries hiking loses the format
+    // they'd chosen, at the moment they switch.
+    const devices =
+      typeof storedDevice === "string"
+        ? isKnownDevice(storedDevice)
+          ? { [DEFAULT_MAP_STYLE_KEY]: storedDevice }
+          : {}
+        : storedDevice && typeof storedDevice === "object"
+          ? (storedDevice as Record<string, string>)
+          : {}
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        device: { ...devices, [styleKey]: settings.device },
+        symbols: settings.symbols,
+      })
+    )
+  } catch {
+    // Not remembering a preference is harmless.
+  }
 }
 
 export interface PoiSearchEntry {
