@@ -1128,3 +1128,52 @@ def test_map_pois_surfaces_a_db_failure_as_502(monkeypatch):
         },
     )
     assert response.status_code == 502
+
+
+def _candidate(osm_id: int, poi_type: str, name: str) -> dict:
+    return {
+        "osm_id": osm_id,
+        "poi_type": poi_type,
+        "name": name,
+        "lat": 48.8567,
+        "lon": 2.3524,
+        "distance_m": 12.0,
+        "distance_from_start_m": 34.0,
+    }
+
+
+def test_save_writes_one_waypoint_when_an_element_matched_two_types(sample_route_bytes):
+    # OSM node 6337835209 really is tourism=information AND highway=trailhead,
+    # so a selection can legitimately name it twice. Two course points on one
+    # coordinate are noise on the device - only the more specific survives.
+    selected = json.dumps(
+        [
+            _candidate(6337835209, "info", "Strada Regia"),
+            _candidate(6337835209, "trailhead", "Strada Regia"),
+        ]
+    )
+    response = client.post(
+        "/api/save",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"selected_candidates": selected, "device": "generic"},
+    )
+    assert response.status_code == 200
+    assert response.content.count(b"Strada Regia") == 1
+    assert b"<sym>Trailhead</sym>" in response.content
+    assert b"<sym>Info Point</sym>" not in response.content
+
+
+def test_save_keeps_both_when_two_elements_share_a_type(sample_route_bytes):
+    # The dedupe is per OSM element, not per type - two distinct fountains
+    # must both survive.
+    selected = json.dumps(
+        [_candidate(1001, "water", "Fontaine A"), _candidate(1002, "water", "Fontaine B")]
+    )
+    response = client.post(
+        "/api/save",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"selected_candidates": selected, "device": "generic"},
+    )
+    assert response.status_code == 200
+    assert b"Fontaine A" in response.content
+    assert b"Fontaine B" in response.content

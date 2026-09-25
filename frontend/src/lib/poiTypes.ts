@@ -28,7 +28,8 @@ import {
   Info,
   Landmark,
   type LucideIcon,
-  Map,
+  // Aliased: an unaliased `Map` shadows the global inside this module.
+  Map as MapIcon,
   MapPin,
   MapPinCheckInside,
   Mountain,
@@ -81,6 +82,13 @@ export interface PoiTypeConfig {
   // poi_types.py PoiTypeConfig.default_gpx_symbol. Undefined means "fall
   // back to label" (see SaveCard.tsx).
   defaultGpxSymbol?: string
+  // Tie-break when one OSM element matches several searched types at once -
+  // mirrors poi_types.py's PoiTypeConfig.specificity, where the reasoning
+  // lives. The higher value wins and the element is listed once, under that
+  // type; undefined means 0. Only ever compared between types the visitor
+  // actually searched for, so searching the broader type alone still finds
+  // it. See App.tsx's allCandidates.
+  specificity?: number
 }
 
 export const POI_TYPES: PoiTypeConfig[] = [
@@ -106,7 +114,7 @@ export const POI_TYPES: PoiTypeConfig[] = [
   { key: "food", label: "Food", icon: Utensils, color: colors.amber[700], symHints: ["food", "restaurant", "dining"], searchable: true, defaultMaxDistanceM: 100, minDistanceM: 1, maxDistanceM: 200 },
   { key: "gas_station", label: "Gas Station", icon: Fuel, color: colors.amber[700], symHints: ["gas station", "fuel", "petrol"], searchable: true, defaultMaxDistanceM: 100, minDistanceM: 1, maxDistanceM: 200 },
   { key: "groceries", label: "Groceries", icon: ShoppingBasket, color: colors.amber[700], symHints: ["grocery", "groceries", "supermarket"], searchable: true, defaultMaxDistanceM: 100, minDistanceM: 1, maxDistanceM: 200 },
-  { key: "shopping", label: "Shopping", icon: ShoppingBag, color: colors.amber[700], symHints: ["shopping", "shop", "store"], searchable: true, defaultMaxDistanceM: 100, minDistanceM: 1, maxDistanceM: 200 },
+  { key: "shopping", label: "Shopping", icon: ShoppingBag, color: colors.amber[700], symHints: ["shopping", "shop", "store"], searchable: true, defaultMaxDistanceM: 100, minDistanceM: 1, maxDistanceM: 200, specificity: -1 },
   { key: "winery", label: "Winery", icon: Wine, color: colors.amber[700], symHints: ["winery", "vineyard"], searchable: true, defaultMaxDistanceM: 100, minDistanceM: 1, maxDistanceM: 200 },
   { key: "info", label: "Info Point", icon: Info, color: colors.violet[700], symHints: ["info", "information"], searchable: true, defaultMaxDistanceM: 100, minDistanceM: 1, maxDistanceM: 200 },
   { key: "internet", label: "Internet", icon: Wifi, color: colors.violet[700], symHints: ["internet", "wifi"], searchable: false },
@@ -127,7 +135,7 @@ export const POI_TYPES: PoiTypeConfig[] = [
   { key: "park", label: "Park", icon: TreePine, color: colors.green[700], symHints: ["park"], searchable: true, defaultMaxDistanceM: 100, minDistanceM: 1, maxDistanceM: 200 },
   { key: "rest_area", label: "Rest Area", icon: RockingChair, color: colors.green[700], symHints: ["rest area", "picnic"], searchable: true, defaultMaxDistanceM: 100, minDistanceM: 1, maxDistanceM: 200 },
   { key: "swimming", label: "Swimming", icon: WavesLadder, color: colors.green[700], symHints: ["swimming", "swim", "pool"], searchable: true, defaultMaxDistanceM: 100, minDistanceM: 1, maxDistanceM: 200 },
-  { key: "trailhead", label: "Trailhead", icon: Map, color: colors.green[700], symHints: ["trailhead", "trail head"], searchable: false },
+  { key: "trailhead", label: "Trailhead", icon: MapIcon, color: colors.green[700], symHints: ["trailhead", "trail head"], searchable: true, defaultMaxDistanceM: 100, minDistanceM: 1, maxDistanceM: 200, specificity: 1 },
   { key: "summit", label: "Summit", icon: MountainSnow, color: colors.green[700], symHints: ["summit", "peak"], searchable: true, defaultMaxDistanceM: 100, minDistanceM: 1, maxDistanceM: 200 },
   { key: "valley", label: "Valley", icon: Mountain, color: colors.green[700], symHints: ["valley"], searchable: false },
   { key: "checkpoint", label: "Checkpoint", icon: MapPinCheckInside, color: colors.pink[500], symHints: ["checkpoint"], searchable: false },
@@ -157,3 +165,38 @@ export const POI_TYPES: PoiTypeConfig[] = [
 // poi_types.py DEFAULT_VISIBLE_POI_TYPES still exists as the fallback for a
 // request that omits poi_config entirely - which this frontend never does.
 
+
+const SPECIFICITY_BY_KEY: Record<string, number> = Object.fromEntries(
+  POI_TYPES.map((type) => [type.key, type.specificity ?? 0])
+)
+
+export function poiSpecificity(poiType: string): number {
+  return SPECIFICITY_BY_KEY[poiType] ?? 0
+}
+
+/**
+ * One entry per OSM element, keeping its most specific type.
+ *
+ * An element can honestly match several types at once - a trailhead that is
+ * also an info board, or any shop, which the catch-all `shopping` matches
+ * alongside its own shop type - and the search runs one request per type, so
+ * both come back and the same thing would otherwise be listed twice.
+ *
+ * Only the types actually searched are in `candidates`, which is what makes
+ * this respect "the broader type alone still finds it": searching Info on its
+ * own leaves nothing more specific here to beat it. Ties keep the earlier
+ * entry. Returns the input unchanged when there was nothing to resolve, so an
+ * uncontested list keeps its identity.
+ */
+export function mostSpecificPerElement<T extends { osm_id: number; poi_type: string }>(
+  candidates: T[]
+): T[] {
+  const best = new Map<number, T>()
+  for (const candidate of candidates) {
+    const previous = best.get(candidate.osm_id)
+    if (previous === undefined || poiSpecificity(candidate.poi_type) > poiSpecificity(previous.poi_type)) {
+      best.set(candidate.osm_id, candidate)
+    }
+  }
+  return best.size === candidates.length ? candidates : [...best.values()]
+}

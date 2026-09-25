@@ -13,7 +13,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss(), mkcert()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
   // maplibre-gl v6 spawns its worker with { type: "module" }, so the bundled

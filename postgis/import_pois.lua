@@ -77,6 +77,7 @@ local FILTERS = {
     rest_area       = { scope = 'any',  match = { { key = 'highway', value = 'rest_area' } } },
     swimming        = { scope = 'any',  match = { { key = 'leisure', in_ = { 'swimming_pool', 'bathing_place' } } } },
     summit          = { scope = 'node', match = { { key = 'natural', value = 'peak' } } },
+    trailhead       = { scope = 'any',  match = { { key = 'highway', value = 'trailhead' } } },
     atm             = { scope = 'node', match = { { key = 'amenity', value = 'atm' } } },
     art             = { scope = 'any',  match = { { key = 'tourism', value = 'artwork' } } },
     attraction      = { scope = 'any',  match = { { key = 'tourism', value = 'attraction' } } },

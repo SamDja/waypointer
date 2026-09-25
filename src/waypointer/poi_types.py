@@ -38,6 +38,17 @@ class PoiTypeConfig:
     # only water needs an explicit override since "Water Fountains" (its
     # label) isn't the conventional Garmin/Basecamp symbol name.
     default_gpx_symbol: str | None = None
+    # Tie-break when one OSM element matches several searched types at once.
+    # A node can honestly be two things - highway=trailhead + tourism=
+    # information is a real and common pairing on an info board at a trail
+    # start - and nwr["shop"] structurally contains every shop=* type, so
+    # this is not a rare edge case. The higher value wins and the element is
+    # shown (and exported) once, under that type. It is only ever consulted
+    # between two types the visitor actually searched for: searching Info
+    # alone still finds the board, because nothing more specific is there to
+    # beat it. 0 is the right value for almost everything - set it only to
+    # settle a collision that really happens.
+    specificity: int = 0
 
 
 POI_TYPES: dict[str, PoiTypeConfig] = {
@@ -114,6 +125,9 @@ POI_TYPES: dict[str, PoiTypeConfig] = {
         default_name="Shop", sym_hints=("shopping", "shop", "store"),
         tag_filter='nwr["shop"]',
         default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
+        # The catch-all: any shop at all, so it contains groceries, winery
+        # and bike_shop outright. Loses to all of them.
+        specificity=-1,
     ),
     "winery": PoiTypeConfig(
         key="winery", label="Winery", course_point_type=65,
@@ -239,6 +253,16 @@ POI_TYPES: dict[str, PoiTypeConfig] = {
     "trailhead": PoiTypeConfig(
         key="trailhead", label="Trailhead", course_point_type=61,
         default_name="Trailhead", sym_hints=("trailhead", "trail head"),
+        # highway=trailhead is the de facto tag (~18k uses, nearly all on
+        # nodes, areas allowed). Not information=guidepost: a signpost stands
+        # anywhere along a trail, and those are `info` already.
+        tag_filter='nwr["highway"="trailhead"]',
+        default_max_distance_m=100.0, min_distance_m=1.0, max_distance_m=200.0,
+        # Trailheads are routinely also tagged tourism=information (the board
+        # at the trail start) or amenity=parking (the car park it sits in).
+        # "This is where the walk begins" is the more useful of those to a
+        # visitor who asked for both, so it beats info and parking.
+        specificity=1,
     ),
     "summit": PoiTypeConfig(
         key="summit", label="Summit", course_point_type=14,

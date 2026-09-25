@@ -17,6 +17,7 @@ import { ActivitySwitchDialog, type ActivitySwitchConsequences } from "@/compone
 import { OffRouteDialog, type OffRouteItem } from "@/components/OffRouteDialog"
 import { ApiError, NETWORK_ERROR_MESSAGE, cooldownRemainingMs, findPois, lookupPoi, routeLeg } from "@/lib/api"
 import { track } from "@/lib/analytics"
+import { mostSpecificPerElement } from "@/lib/poiTypes"
 import { encodePolyline } from "@/lib/polyline"
 import { elevationGainLossM, projectOntoPolylineM, totalDistanceM } from "@/lib/geometry"
 import {
@@ -1703,12 +1704,14 @@ export default function App() {
   }, [plannerState])
 
   const allCandidates = useMemo(() => {
-    if (clickAddedCandidates.length === 0) return findResult?.candidates ?? EMPTY_CANDIDATES
-    const foundIds = new Set((findResult?.candidates ?? []).map((c) => c.osm_id))
-    return [
-      ...(findResult?.candidates ?? EMPTY_CANDIDATES),
-      ...clickAddedCandidates.filter((c) => !foundIds.has(c.osm_id)),
-    ]
+    const found = findResult?.candidates ?? EMPTY_CANDIDATES
+    if (clickAddedCandidates.length === 0) return mostSpecificPerElement(found)
+    const foundIds = new Set(found.map((c) => c.osm_id))
+    // mostSpecificPerElement runs over the merged list, so one element that
+    // came back under two searched types is listed once, under the more
+    // specific of them (see poiTypes.ts). The click-added filter above is a
+    // different concern - the same element arriving by two routes.
+    return mostSpecificPerElement([...found, ...clickAddedCandidates.filter((c) => !foundIds.has(c.osm_id))])
   }, [findResult, clickAddedCandidates])
   // osm_ids added via a basemap click - used only to exclude those markers
   // from RouteMap's FitBounds input (see RouteMapProps.clickAddedCandidateIds),

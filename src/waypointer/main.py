@@ -328,6 +328,30 @@ def _resolved_name(c: Candidate) -> str:
     return c.name or cfg.default_name
 
 
+def _dedupe_by_specificity(selected: list[Candidate]) -> list[Candidate]:
+    """One waypoint per OSM element, keeping its most specific type.
+
+    An element can honestly match several POI types at once (a trailhead
+    that is also an info board; any shop, which nwr["shop"] matches as well
+    as its own shop=* type), so a selection can name the same element twice.
+    Two course points on one coordinate are just noise on the device - they
+    render on top of each other - so the less specific one is dropped. See
+    PoiTypeConfig.specificity; ties keep the earlier entry, and order is
+    otherwise preserved.
+    """
+    best: dict[int, Candidate] = {}
+    for candidate in selected:
+        previous = best.get(candidate.osm_id)
+        if previous is None or _specificity(candidate) > _specificity(previous):
+            best[candidate.osm_id] = candidate
+    return list(best.values())
+
+
+def _specificity(candidate: Candidate) -> int:
+    config = POI_TYPES.get(candidate.poi_type)
+    return config.specificity if config else 0
+
+
 def _build_fit_course_points(
     selected: list[Candidate],
     original_waypoints: list[GPXWaypoint],
@@ -382,7 +406,7 @@ async def save(
     gpx, coords = await _read_gpx_upload(gpx_file)
 
     try:
-        selected = _selected_candidates_adapter.validate_json(selected_candidates)
+        selected = _dedupe_by_specificity(_selected_candidates_adapter.validate_json(selected_candidates))
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid selection data: {exc}") from exc
 
@@ -474,7 +498,7 @@ async def wahoo_route_payload(
     gpx, coords = await _read_gpx_upload(gpx_file)
 
     try:
-        selected = _selected_candidates_adapter.validate_json(selected_candidates)
+        selected = _dedupe_by_specificity(_selected_candidates_adapter.validate_json(selected_candidates))
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid selection data: {exc}") from exc
 

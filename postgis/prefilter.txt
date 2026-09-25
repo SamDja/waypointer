@@ -20,4 +20,5 @@ nwr/historic
 w/aerialway
 n/highway=bus_stop
 nwr/highway=rest_area
+nwr/highway=trailhead
 n/natural=peak
