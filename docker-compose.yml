@@ -82,11 +82,10 @@ services:
       - POSTGIS_URL=postgresql://waypointer:${POSTGIS_PASSWORD:-waypointer}@postgis:5432/pois
       - IMPORT_STATE_FILE=/state/.last_import_state
       # osm2pgsql tuning - see import.sh. Left unset by default (falls back
-      # to nproc / osm2pgsql's own 800MB default there); set on the Pi's
-      # .env if the container's default CPU/cache sizing doesn't fit its
-      # 4 cores / 4-8GB RAM well for the extract size in use.
+      # to nproc there); it only affects the final index build, since the
+      # import itself is single-threaded - import.sh's osmium pre-filter is
+      # what keeps a country extract fast.
       - OSM2PGSQL_NUMBER_PROCESSES=${OSM2PGSQL_NUMBER_PROCESSES:-}
-      - OSM2PGSQL_CACHE_MB=${OSM2PGSQL_CACHE_MB:-}
     volumes:
       - ./postgis/state:/state
     networks:

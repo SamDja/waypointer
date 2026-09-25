@@ -996,3 +996,184 @@ def test_geocode_passes_upstream_throttling_on_as_429():
     response = client.get("/api/geocode", params={"q": "Trento"})
     assert response.status_code == 429
     assert response.headers["Retry-After"] == str(UPSTREAM_RETRY_AFTER_S)
+
+
+def _hut_nodes() -> list[tuple[str, OsmNode]]:
+    return [
+        (
+            "lodging",
+            OsmNode(
+                id=2001,
+                lat=46.62,
+                lon=12.30,
+                tags={"tourism": "wilderness_hut", "name": "Bivacco"},
+                osm_type="node",
+            ),
+        ),
+        (
+            "lodging",
+            OsmNode(id=2002, lat=46.63, lon=12.31, tags={"tourism": "alpine_hut"}, osm_type="way"),
+        ),
+    ]
+
+
+def test_map_pois_returns_pois_in_bounds(monkeypatch):
+    monkeypatch.setattr(main, "query_pois_in_bounds", lambda *args, **kwargs: _hut_nodes())
+    response = client.get(
+        "/api/map-pois",
+        params={
+            "min_lat": 46.6,
+            "min_lon": 12.2,
+            "max_lat": 46.7,
+            "max_lon": 12.4,
+            "poi_types": "lodging",
+        },
+    )
+    assert response.status_code == 200
+    pois = response.json()["pois"]
+    assert [p["osm_id"] for p in pois] == [2001, 2002]
+    assert pois[0]["name"] == "Bivacco"
+    assert pois[0]["poi_type"] == "lodging"
+    # An unnamed hut is still worth drawing, so the name is simply absent.
+    assert pois[1]["name"] is None
+    assert pois[1]["osm_type"] == "way"
+
+
+def test_map_pois_narrows_a_coarse_registry_type_to_what_it_draws(monkeypatch):
+    """`lodging` is every kind of bed for searching; on the map it's huts.
+
+    Without this the overlay would put every town hotel on a hiking map -
+    and the hut that can't come from the basemap at all (OpenMapTiles has no
+    wilderness_hut) would be lost among them under the row limit.
+    """
+    captured: dict[str, object] = {}
+
+    def fake(poi_types, min_lat, min_lon, max_lat, max_lon, limit, tag_matches=None):
+        captured["poi_types"] = poi_types
+        captured["tag_matches"] = tag_matches
+        captured["limit"] = limit
+        return []
+
+    monkeypatch.setattr(main, "query_pois_in_bounds", fake)
+    client.get(
+        "/api/map-pois",
+        params={
+            "min_lat": 46.6,
+            "min_lon": 12.2,
+            "max_lat": 46.7,
+            "max_lon": 12.4,
+            "poi_types": "lodging",
+        },
+    )
+    assert captured["poi_types"] == ["lodging"]
+    # Only what the basemap can't draw: OpenMapTiles has no wilderness_hut,
+    # while alpine_hut reaches the tiles and is drawn from them - including
+    # outside the region our own extract covers.
+    assert captured["tag_matches"] == [{"tourism": "wilderness_hut"}]
+    assert captured["limit"] == main.MAP_POI_LIMIT
+
+
+def test_map_pois_rejects_a_viewport_too_big_to_answer(monkeypatch):
+    called = False
+
+    def fake(*args, **kwargs):
+        nonlocal called
+        called = True
+        return []
+
+    monkeypatch.setattr(main, "query_pois_in_bounds", fake)
+    response = client.get(
+        "/api/map-pois",
+        params={
+            "min_lat": 40.0,
+            "min_lon": 2.0,
+            "max_lat": 48.0,
+            "max_lon": 12.0,
+            "poi_types": "lodging",
+        },
+    )
+    assert response.status_code == 400
+    # The point is to never reach PostGIS with a continent-sized box.
+    assert not called
+
+
+def test_map_pois_rejects_unknown_and_unsearchable_types():
+    for poi_type in ("bogus", "warning"):
+        response = client.get(
+            "/api/map-pois",
+            params={
+                "min_lat": 46.6,
+                "min_lon": 12.2,
+                "max_lat": 46.7,
+                "max_lon": 12.4,
+                "poi_types": poi_type,
+            },
+        )
+        assert response.status_code == 400, poi_type
+
+
+def test_map_pois_surfaces_a_db_failure_as_502(monkeypatch):
+    def boom(*args, **kwargs):
+        raise main.PoiDbError("down")
+
+    monkeypatch.setattr(main, "query_pois_in_bounds", boom)
+    response = client.get(
+        "/api/map-pois",
+        params={
+            "min_lat": 46.6,
+            "min_lon": 12.2,
+            "max_lat": 46.7,
+            "max_lon": 12.4,
+            "poi_types": "lodging",
+        },
+    )
+    assert response.status_code == 502
+
+
+def _candidate(osm_id: int, poi_type: str, name: str) -> dict:
+    return {
+        "osm_id": osm_id,
+        "poi_type": poi_type,
+        "name": name,
+        "lat": 48.8567,
+        "lon": 2.3524,
+        "distance_m": 12.0,
+        "distance_from_start_m": 34.0,
+    }
+
+
+def test_save_writes_one_waypoint_when_an_element_matched_two_types(sample_route_bytes):
+    # OSM node 6337835209 really is tourism=information AND highway=trailhead,
+    # so a selection can legitimately name it twice. Two course points on one
+    # coordinate are noise on the device - only the more specific survives.
+    selected = json.dumps(
+        [
+            _candidate(6337835209, "info", "Strada Regia"),
+            _candidate(6337835209, "trailhead", "Strada Regia"),
+        ]
+    )
+    response = client.post(
+        "/api/save",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"selected_candidates": selected, "device": "generic"},
+    )
+    assert response.status_code == 200
+    assert response.content.count(b"Strada Regia") == 1
+    assert b"<sym>Trailhead</sym>" in response.content
+    assert b"<sym>Info Point</sym>" not in response.content
+
+
+def test_save_keeps_both_when_two_elements_share_a_type(sample_route_bytes):
+    # The dedupe is per OSM element, not per type - two distinct fountains
+    # must both survive.
+    selected = json.dumps(
+        [_candidate(1001, "water", "Fontaine A"), _candidate(1002, "water", "Fontaine B")]
+    )
+    response = client.post(
+        "/api/save",
+        files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
+        data={"selected_candidates": selected, "device": "generic"},
+    )
+    assert response.status_code == 200
+    assert b"Fontaine A" in response.content
+    assert b"Fontaine B" in response.content

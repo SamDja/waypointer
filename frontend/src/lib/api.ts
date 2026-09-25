@@ -1,6 +1,8 @@
 import type {
   Candidate,
   FindPoisResponse,
+  MapPoi,
+  MapPoiResponse,
   PoiLookupResult,
   PoiSearchConfig,
   PlaceResult,
@@ -142,6 +144,40 @@ export async function searchPlaces(
     { failed: "Place search isn't working right now - please try again in a moment." },
   )
   return (await response.json()) as PlaceResult[]
+}
+
+/**
+ * Our own imported POIs inside the map's current view, for drawing the ones
+ * the basemap can't (see main.py's /api/map-pois).
+ *
+ * Returns [] rather than throwing when the view is too wide to answer: the
+ * backend 400s on a viewport past its span limit, and "zoom in for these"
+ * is a normal state of the map, not an error worth a toast.
+ */
+export async function fetchMapPois(
+  bounds: { minLat: number; minLon: number; maxLat: number; maxLon: number },
+  poiTypes: readonly string[],
+  signal?: AbortSignal,
+): Promise<MapPoi[]> {
+  if (poiTypes.length === 0) return []
+  const params = new URLSearchParams({
+    min_lat: String(bounds.minLat),
+    min_lon: String(bounds.minLon),
+    max_lat: String(bounds.maxLat),
+    max_lon: String(bounds.maxLon),
+    poi_types: poiTypes.join(","),
+  })
+  try {
+    const response = await request(
+      `/api/map-pois?${params}`,
+      { signal },
+      { failed: "Couldn't load points of interest for this area." },
+    )
+    return ((await response.json()) as MapPoiResponse).pois
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 400) return []
+    throw err
+  }
 }
 
 export async function routeLeg(

@@ -41,7 +41,7 @@ CACHE_TTL_S = 3600.0
 # its server happens to host. Mirrors the routingProfile values in
 # frontend/src/lib/mapStyles.ts (same hand-mirroring convention as
 # poi_types.py/poiTypes.ts).
-ALLOWED_PROFILES = frozenset({"fastbike"})
+ALLOWED_PROFILES = frozenset({"fastbike", "hiking-mountain"})
 DEFAULT_PROFILE = "fastbike"
 
 
@@ -67,24 +67,57 @@ RoutingOption = BoolOption | ChoiceOption
 # profile's own default. Mirrors the routingOptions in
 # frontend/src/lib/mapStyles.ts, labels and all, by hand.
 #
-# Two defaults deliberately differ from fastbike's own: ferries and steps are
-# off, since a road bike planner shouldn't route onto either unless asked.
+# This allowlist is the *only* guard on option names: BRouter silently
+# ignores a `profile:` parameter that no variable matches - it answers 200
+# with the unmodified route rather than an error - so a misspelled name here
+# would quietly do nothing instead of failing loudly.
 #
 # fastbike rather than fastbike-lowtraffic: the two profiles are identical
 # except for consider_traffic's default (0.1 vs 1), and since that's an
 # option always sent explicitly, the profile choice only sets the default.
+#
+# hiking-mountain rather than the hiking-beta the public instance also still
+# serves: hiking-beta was dropped from BRouter upstream after v1.6.3, so
+# self-hosting (which ships upstream's profile set) would lose it, and it
+# declares no `# %name%` options at all - its tunables are bare `assign`s
+# that only respond to overrides by undocumented accident. hiking-mountain
+# is in upstream master and declares each option with its type and range.
 PROFILE_OPTIONS: dict[str, dict[str, RoutingOption]] = {
     "fastbike": {
         # How much longer a detour is worth to avoid busy roads: BRouter
         # scales its traffic penalty by this (1 = strongest avoidance,
         # 0 = ignore traffic).
         "consider_traffic": ChoiceOption(choices=(0.0, 0.1, 0.3, 0.5, 1.0), default=0.1),
+        # Deliberately off, unlike fastbike's own defaults: a road bike
+        # planner shouldn't route onto either unless asked.
         "allow_ferries": BoolOption(default=False),
         "allow_steps": BoolOption(default=False),
         "consider_noise": BoolOption(default=False),
         "consider_river": BoolOption(default=False),
         "consider_forest": BoolOption(default=False),
         "consider_town": BoolOption(default=False),
+    },
+    "hiking-mountain": {
+        # The SAC mountaineering scale (Key:sac_scale): T1 hiking, T2
+        # mountain hiking, T3 demanding mountain hiking. Paths below the
+        # preferred level are penalised slightly and above it strongly, so
+        # this shapes the route without forbidding anything - the profile's
+        # separate hard cap (SAC_scale_limit, left at its own default of T3)
+        # is not offered, since two SAC knobs side by side read as one
+        # setting contradicting the other.
+        "SAC_scale_preferred": ChoiceOption(choices=(1.0, 2.0, 3.0), default=1.0),
+        # Multiplies the cost of ways that aren't part of a marked hiking
+        # route by 1 + this. The profile allows 0.10-2.0 continuously; a
+        # fixed set of steps for the same reason as ChoiceOption itself.
+        "hiking_routes_preference": ChoiceOption(choices=(0.1, 0.2, 0.5, 1.0), default=0.2),
+        "iswet": BoolOption(default=False),
+        "consider_elevation": BoolOption(default=False),
+        # Left at the profile's own defaults (both on), unlike fastbike
+        # above: steps are an ordinary part of a walking route rather than
+        # something to route around, and a ferry is a normal way for a
+        # walker to cross water.
+        "allow_steps": BoolOption(default=True),
+        "allow_ferries": BoolOption(default=True),
     },
 }
 

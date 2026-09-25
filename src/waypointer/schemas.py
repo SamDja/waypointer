@@ -45,6 +45,25 @@ class SearchRange(BaseModel):
     end_index: int
 
 
+class MapPoi(BaseModel):
+    # One of our own imported POIs, drawn on the map for its own sake rather
+    # than as a candidate near a route - hence no distances (see main.py's
+    # /api/map-pois). Deliberately lighter than PoiLookupResult: these come
+    # back hundreds at a time per viewport, and the full tag dict is only
+    # needed once a visitor actually clicks one, which goes through
+    # /api/find-pois/location as before.
+    osm_id: int
+    osm_type: str = "node"
+    poi_type: str
+    name: str | None = None
+    lat: float
+    lon: float
+
+
+class MapPoiResponse(BaseModel):
+    pois: list[MapPoi]
+
+
 class PoiLookupResult(BaseModel):
     # Resolves a single basemap POI icon click (see main.py's
     # /api/find-pois/location) to a real OSM element - carries the full raw

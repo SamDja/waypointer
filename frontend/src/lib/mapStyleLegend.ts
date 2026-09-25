@@ -1,20 +1,20 @@
-import { createPropertyExpression, latest, type Feature, type StyleSpecification } from "@maplibre/maplibre-gl-style-spec"
+import {
+  createPropertyExpression,
+  latest,
+  type Feature,
+  type StylePropertySpecification,
+  type StyleSpecification,
+} from "@maplibre/maplibre-gl-style-spec"
 
-const styleJsonCache = new Map<string, Promise<StyleSpecification>>()
-
-// Style JSONs served from public/map-styles/ are static local files, so an
-// unbounded in-memory cache keyed by URL is fine - they only change via a
-// full page reload during development.
-export function loadStyleJson(styleUrl: string): Promise<StyleSpecification> {
-  let pending = styleJsonCache.get(styleUrl)
-  if (!pending) {
-    pending = fetch(styleUrl).then((res) => {
-      if (!res.ok) throw new Error(`Failed to load style JSON: ${styleUrl} (${res.status})`)
-      return res.json() as Promise<StyleSpecification>
-    })
-    styleJsonCache.set(styleUrl, pending)
-  }
-  return pending
+/**
+ * The style spec's own `latest` export is inferred structurally, so its
+ * entries come out with `type: string` rather than the literal types
+ * `createPropertyExpression` wants. The values are the specifications that
+ * function is built to take - only their inferred types are too loose - so
+ * this names the cast once instead of at each call.
+ */
+export function linePaintSpec(property: keyof typeof latest.paint_line): StylePropertySpecification {
+  return latest.paint_line[property] as unknown as StylePropertySpecification
 }
 
 export interface LineLayerPaint {
@@ -46,9 +46,19 @@ export function evaluateLineLayerPaint(
   // needing a real rendered feature.
   const feature: Feature = { type: "LineString", properties }
 
-  const colorExpr = createPropertyExpression(paint["line-color"] ?? "#000000", latest.paint_line["line-color"])
-  const widthExpr = createPropertyExpression(paint["line-width"] ?? 1, latest.paint_line["line-width"])
-  const opacityExpr = createPropertyExpression(paint["line-opacity"] ?? 1, latest.paint_line["line-opacity"])
+  // The second argument is the property's own key, which the style spec
+  // uses only to name it in any parse error it reports.
+  const colorExpr = createPropertyExpression(
+    paint["line-color"] ?? "#000000",
+    "line-color",
+    linePaintSpec("line-color"),
+  )
+  const widthExpr = createPropertyExpression(paint["line-width"] ?? 1, "line-width", linePaintSpec("line-width"))
+  const opacityExpr = createPropertyExpression(
+    paint["line-opacity"] ?? 1,
+    "line-opacity",
+    linePaintSpec("line-opacity"),
+  )
   if (colorExpr.result !== "success" || widthExpr.result !== "success" || opacityExpr.result !== "success") {
     return null
   }

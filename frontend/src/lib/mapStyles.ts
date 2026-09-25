@@ -1,4 +1,11 @@
-import { Bike, type LucideIcon } from "lucide-react"
+import type { StyleSpecification } from "@maplibre/maplibre-gl-style-spec"
+import { Bike, Footprints, type LucideIcon } from "lucide-react"
+
+import type { DurationModel } from "./geometry"
+import { composeStyle } from "./mapStyle/compose"
+import { hikingStyle } from "./mapStyle/hiking"
+import { houseStyle } from "./mapStyle/houseStyle"
+import { roadCyclingStyle } from "./mapStyle/roadCycling"
 
 export interface RoadLegendCategory {
   label: string
@@ -36,13 +43,59 @@ export type RoutingOptionSpec =
       choices: { value: number; label: string }[]
     }
 
+/**
+ * What this activity assumes before a visitor tells it otherwise.
+ *
+ * These live on the activity rather than as module constants because every
+ * one of them is wrong for the other activity: 20 km/h is a bike, 4.5 is a
+ * walk, and a 500m detour is a couple of minutes on one and the better part
+ * of ten on the other. `lib/settings.ts` stores whatever the visitor sets
+ * keyed by activity, so tuning one never silently changes the other.
+ */
+export interface ActivityDefaults {
+  avgSpeedKmh: number
+  // How far a route edit may strand a checked waypoint before it's flagged
+  // for unchecking (see OffRouteDialog).
+  offRouteThresholdM: number
+  // The POI types a fresh browser starts with for this activity.
+  visiblePoiTypes: readonly string[]
+  // Which device SaveCard's format picker starts on (a key from
+  // lib/devices.ts). A FIT course for a bike computer is the obvious answer
+  // on a ride and the wrong one on a walk, where a plain GPX is what any
+  // watch or phone will take.
+  device: string
+}
+
+// How the elevation profile bins a gradient into its colour bands. The five
+// colours are fixed (ElevationProfile's CLIMB_COLORS / DESCENT_COLORS, a
+// validated palette); what varies by activity is where each band starts,
+// because "steep" means a different number on each: 12% is a hard climb on
+// a road bike and an ordinary stretch of mountain path.
+export interface GradeScale {
+  // Where each of the five climb bands starts, in %, gentlest first. The
+  // descent bands mirror them.
+  bandStartsPct: readonly [number, number, number, number, number]
+  // Within +-this, a stretch is drawn as flat rather than as the gentlest
+  // climb or descent.
+  flatPct: number
+}
+
 export interface MapStyleConfig {
   key: string
   label: string
   // Shown next to the label in MapStyleSelect - one per activity, since
   // this registry doubles as the activity list.
   icon: LucideIcon
-  styleUrl: string
+  // Composes this activity's finished MapLibre style from the vendored base
+  // plus the house and activity patches (see lib/mapStyle/compose.ts).
+  //
+  // A function rather than a value because composing is not free and not
+  // always pure: hiking's contour source starts a web worker and registers
+  // a maplibre protocol the first time it's built. Read it through
+  // mapStyleFor(), which memoises, so only the activity a visitor actually
+  // selects pays for itself - and so the map and the legend are handed the
+  // identical object and can't drift.
+  buildStyle: () => StyleSpecification
   // BRouter profile the route planner routes with while this style is
   // active. Deliberately lives here rather than behind its own selector:
   // this registry is already an activity list (see the commented-out gravel/
@@ -56,6 +109,25 @@ export interface MapStyleConfig {
   // section for this style entirely - there's no separate boolean flag to
   // keep in sync with this.
   roadLegend?: RoadLegendCategory[]
+  defaults: ActivityDefaults
+  gradeScale: GradeScale
+  // How RouteStats turns distance and climbing into an estimated duration.
+  durationModel: DurationModel
+  // POI types to draw from our *own* PostGIS import, on top of the basemap
+  // (see main.py's /api/map-pois). Only worth listing a type the basemap
+  // can't show: OpenMapTiles has no `tourism=wilderness_hut`, so a bivouac
+  // never reaches the tiles however this style is written. Limited to the
+  // region the configured OSM extract covers, so these are a supplement to
+  // the basemap's own POIs, never a replacement for them.
+  overlayPoiTypes?: readonly string[]
+  // Whether this activity offers pushing the finished route to Wahoo
+  // (SaveCard's "Wahoo" tab). A ROAM is a bike computer, so it's offered on
+  // a ride and not on a walk. This is the seed of a per-activity
+  // integrations list - when Strava/Garmin land it becomes one, and the
+  // header's Wahoo profile menu is reworked with it (its own card). Note
+  // it doesn't gate *importing* a route from Wahoo, which is
+  // activity-neutral GPX by the time it reaches the app.
+  wahooSync: boolean
 }
 
 // fastbike's options (see routing.py's PROFILE_OPTIONS for what each does to
@@ -82,6 +154,46 @@ const FASTBIKE_OPTIONS: RoutingOptionSpec[] = [
   { key: "consider_river", kind: "toggle", label: "Prefer rivers & lakes", default: false },
   { key: "consider_forest", kind: "toggle", label: "Prefer forests & parks", default: false },
   { key: "consider_town", kind: "toggle", label: "Bypass towns", default: false },
+]
+
+// hiking-mountain's options (see routing.py's PROFILE_OPTIONS for what each
+// does to BRouter's cost model, and why this profile rather than the
+// hiking-beta the public instance also serves).
+//
+// Unlike FASTBIKE_OPTIONS, steps and ferries keep the profile's own
+// defaults - both are ordinary parts of a walking route rather than things
+// to route around.
+const HIKING_OPTIONS: RoutingOptionSpec[] = [
+  {
+    key: "SAC_scale_preferred",
+    kind: "choice",
+    // The SAC mountaineering scale's own wording, since a walker who cares
+    // about the difference already knows these grades, and a walker who
+    // doesn't is served by the plain-language half of each label.
+    label: "How technical a trail are you happy on?",
+    default: 1,
+    choices: [
+      { value: 1, label: "T1 · Hiking" },
+      { value: 2, label: "T2 · Mountain hiking" },
+      { value: 3, label: "T3 · Demanding mountain hiking" },
+    ],
+  },
+  {
+    key: "hiking_routes_preference",
+    kind: "choice",
+    label: "How much do you want to stick to marked trails?",
+    default: 0.2,
+    choices: [
+      { value: 0.1, label: "A little" },
+      { value: 0.2, label: "Somewhat" },
+      { value: 0.5, label: "Quite a bit" },
+      { value: 1, label: "As much as possible" },
+    ],
+  },
+  { key: "iswet", kind: "toggle", label: "Avoid mud & wet ground", default: false },
+  { key: "consider_elevation", kind: "toggle", label: "Prefer less climbing", default: false },
+  { key: "allow_steps", kind: "toggle", label: "Allow steps", default: true },
+  { key: "allow_ferries", kind: "toggle", label: "Allow ferries", default: true },
 ]
 
 // Hand-mirrors road-cycling.json's layer ids (not its colors - see
@@ -111,48 +223,153 @@ const ROAD_CYCLING_LEGEND: RoadLegendCategory[] = [
   },
 ]
 
-// OpenFreeMap (openfreemap.org) only ships 4 generic base styles today -
-// no activity-specific cartography exists yet, apart from road_cycling
-// below. The rest are provisional placeholders; swap styleUrl for a
-// self-hosted, custom-authored style per activity later without touching
-// any callers of this file.
-//
-// road_cycling's style.json (public/map-styles/road-cycling.json) is
-// OpenFreeMap's "liberty" style, forked and hand-edited: it still points at
-// OpenFreeMap's hosted vector tiles/sprite/glyphs (self-hosting those is a
-// much bigger undertaking than editing the style layer definitions), but
-// adds "cycleway"/"tunnel_cycleway"/"bridge_cycleway" layers that highlight
-// class=path/subclass=cycleway ways (OpenMapTiles' tagging for OSM
-// highway=cycleway) in blue at every zoom - road cyclists need to spot
-// dedicated cycling infrastructure while still planning a route, not just
-// once they've zoomed to street level. Any other road/path (motorway down
-// to footpath/track) that's bike-prohibited (bicycle=no, or access=no
-// without a permissive bicycle override) or tagged with a non-paved surface
-// (gravel/dirt/unpaved/etc.) renders grayed-out/dimmed instead of its
-// normal class color, so unsuitable roads visually recede.
+// Hand-mirrors hiking.ts's layer ids, the same way ROAD_CYCLING_LEGEND
+// mirrors roadCycling.ts's. The last row shows the style's "you can't walk
+// here" look via a minor road with foot=no, rather than a motorway - a
+// motorway is always dim in this style, so it wouldn't show that the dimming
+// is a judgement about access.
+const HIKING_LEGEND: RoadLegendCategory[] = [
+  // The style tells the five path subclasses apart by dash pattern, which a
+  // swatch this size can't show (and the legend evaluator only reads colour,
+  // width and whether a line is dashed at all). So these rows show the
+  // distinction it *can* carry - what a way is surfaced with - and leave the
+  // dash vocabulary to the map itself.
+  { label: "Path or trail", fillLayerId: "road_path_pedestrian" },
+  { label: "Paved path or footway", fillLayerId: "road_path_pedestrian", properties: { surface: "paved" } },
+  { label: "Unpaved track", fillLayerId: "road_track", casingLayerId: "road_track_casing" },
+  {
+    label: "Paved track",
+    fillLayerId: "road_track",
+    casingLayerId: "road_track_casing",
+    properties: { surface: "paved" },
+  },
+  { label: "Contour line", fillLayerId: "contour_line", properties: { level: 1 } },
+  { label: "Minor / residential street", fillLayerId: "road_minor", casingLayerId: "road_minor_casing" },
+  {
+    label: "Secondary / tertiary road",
+    fillLayerId: "road_secondary_tertiary",
+    casingLayerId: "road_secondary_tertiary_casing",
+  },
+  { label: "Motorway / trunk road", fillLayerId: "road_trunk_primary", casingLayerId: "road_trunk_primary_casing" },
+  {
+    label: "Closed to walkers",
+    fillLayerId: "road_minor",
+    casingLayerId: "road_minor_casing",
+    properties: { foot: "no" },
+  },
+]
+
+// Each activity's cartography is composed from one vendored copy of
+// OpenFreeMap's "liberty" style plus two patches - see
+// lib/mapStyle/compose.ts for the whole arrangement, houseStyle.ts for the
+// shared look, and each activity's own module for its judgement. Tiles,
+// sprite and glyphs still come from OpenFreeMap; only the layer definitions
+// are ours.
 export const MAP_STYLES: MapStyleConfig[] = [
   {
     key: "road_cycling",
     label: "Road Cycling",
     icon: Bike,
-    styleUrl: "/map-styles/road-cycling.json",
+    buildStyle: () => composeStyle(...houseStyle, ...roadCyclingStyle()),
     // Road-bike oriented (prefers paved, avoids tracks) - the same judgement
-    // road-cycling.json makes visually by dimming unpaved and bike-prohibited
+    // roadCycling.ts makes visually by dimming unpaved and bike-prohibited
     // ways. fastbike rather than fastbike-lowtraffic: the two profiles are
     // identical except for consider_traffic's default, and that's an option
     // the visitor sets anyway (see FASTBIKE_OPTIONS).
     routingProfile: "fastbike",
     routingOptions: FASTBIKE_OPTIONS,
     roadLegend: ROAD_CYCLING_LEGEND,
+    wahooSync: true,
+    defaults: {
+      avgSpeedKmh: 20,
+      offRouteThresholdM: 500,
+      // Water is the core case the app was built around; everything else
+      // the visitor adds from FindPoisCard's picker.
+      visiblePoiTypes: ["water"],
+      // The head unit this app's FIT course work was built and verified
+      // against.
+      device: "wahoo_elemnt_roam_v3",
+    },
+    // Wahoo's climb bands (green 0-4%, yellow 4-8%, orange 8-12%, red
+    // 12-20%, brown 20%+), so the profile reads like the head unit's.
+    gradeScale: { bandStartsPct: [0, 4, 8, 12, 20], flatPct: 2 },
+    durationModel: "flat",
   },
-  // { key: "gravel", label: "Gravel", styleUrl: "https://tiles.openfreemap.org/styles/bright" },
-  // { key: "mtb", label: "Mountain Biking", styleUrl: "https://tiles.openfreemap.org/styles/bright" },
-  // { key: "cycloturism", label: "Cycloturism", styleUrl: "https://tiles.openfreemap.org/styles/liberty" },
-  // { key: "hiking", label: "Hiking", styleUrl: "https://tiles.openfreemap.org/styles/positron" },
-  // { key: "multiday", label: "Multi-day (Pedestrian)", styleUrl: "https://tiles.openfreemap.org/styles/positron" },
+  {
+    key: "hiking",
+    label: "Hiking",
+    icon: Footprints,
+    buildStyle: () => composeStyle(...houseStyle, ...hikingStyle()),
+    // See routing.py's PROFILE_OPTIONS for why hiking-mountain rather than
+    // the hiking-beta the public BRouter instance also serves.
+    routingProfile: "hiking-mountain",
+    routingOptions: HIKING_OPTIONS,
+    roadLegend: HIKING_LEGEND,
+    wahooSync: false,
+    defaults: {
+      // A steady walking pace on the flat. The climbing is added on top by
+      // Naismith's rule (see durationModel below), not folded into this.
+      avgSpeedKmh: 4.5,
+      // 500m is a couple of minutes on a bike and the better part of ten on
+      // foot, which is far too long to be worth not mentioning.
+      offRouteThresholdM: 150,
+      // Water still, plus the summit a walk is usually aimed at and the
+      // huts that make a long one possible.
+      visiblePoiTypes: ["water", "summit", "lodging"],
+      // GPX, which any watch or phone will take. The FIT course points are
+      // shaped for a Wahoo head unit, and nothing about them is verified
+      // on a device someone walks with.
+      device: "generic",
+    },
+    // Mountain paths sit above 20% routinely, so the cycling bands would
+    // paint a whole trail one brown. Tens instead: under 10% is easy
+    // walking, 10-20% a steady climb, 20-30% steep, 30-40% very steep, and
+    // past 40% it's hands as much as feet. Anything under 5% is walked as
+    // if flat.
+    gradeScale: { bandStartsPct: [0, 10, 20, 30, 40], flatPct: 5 },
+    // On foot ascent sets the time more than distance does.
+    durationModel: "naismith",
+    // Unstaffed bivouacs, which the basemap cannot draw. Staffed alpine
+    // huts already come from the tiles and are left to them - see
+    // MAP_POI_TAG_MATCHES in main.py.
+    overlayPoiTypes: ["lodging"],
+  },
 ]
 
 export const DEFAULT_MAP_STYLE_KEY = "road_cycling"
+
+// Memoised so repeated renders reuse one style object - MapLibre diffs a
+// new style against the old one on every change, and two structurally
+// identical but distinct objects would make it redo the whole thing.
+const composedStyles = new Map<string, StyleSpecification>()
+
+export function mapStyleFor(key: string): StyleSpecification {
+  const config = MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]
+  let style = composedStyles.get(config.key)
+  if (!style) {
+    style = config.buildStyle()
+    composedStyles.set(config.key, style)
+  }
+  return style
+}
+
+/** This activity's assumptions, falling back to the first style's. */
+export function activityDefaults(key: string): ActivityDefaults {
+  return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).defaults
+}
+
+export function gradeScaleForStyle(key: string): GradeScale {
+  return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).gradeScale
+}
+
+/** Whether this activity offers the Wahoo push in SaveCard. */
+export function wahooSyncForStyle(key: string): boolean {
+  return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).wahooSync
+}
+
+export function durationModelForStyle(key: string): DurationModel {
+  return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).durationModel
+}
 
 export function routingProfileForStyle(key: string): string {
   return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).routingProfile

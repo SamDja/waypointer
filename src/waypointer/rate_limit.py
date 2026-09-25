@@ -40,6 +40,9 @@ LOOKUP_POI_REQUESTS_PER_WINDOW = 30
 ROUTING_REQUESTS_PER_WINDOW = 60
 # The map's search box is a debounced typeahead - a few requests per search.
 GEOCODE_REQUESTS_PER_WINDOW = 30
+# Map POIs are fetched per viewport, debounced, and only past a zoom - so
+# this is panning around, not a fan-out like find-pois.
+MAP_POI_REQUESTS_PER_WINDOW = 60
 
 WINDOW_S = 60.0
 
@@ -90,3 +93,4 @@ rate_limit = make_rate_limit("find_pois", REQUESTS_PER_WINDOW)
 lookup_poi_rate_limit = make_rate_limit("lookup_poi", LOOKUP_POI_REQUESTS_PER_WINDOW)
 routing_rate_limit = make_rate_limit("routing", ROUTING_REQUESTS_PER_WINDOW)
 geocode_rate_limit = make_rate_limit("geocode", GEOCODE_REQUESTS_PER_WINDOW)
+map_poi_rate_limit = make_rate_limit("map_poi", MAP_POI_REQUESTS_PER_WINDOW)

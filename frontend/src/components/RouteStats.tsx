@@ -1,7 +1,7 @@
 import { useId } from "react"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { formatDurationHours } from "@/lib/geometry"
+import { NAISMITH_ASCENT_M_PER_HOUR, estimateDurationHours, formatDurationHours, type DurationModel } from "@/lib/geometry"
 import { Clock, RulerDimensionLine, TrendingDown, TrendingUp, type LucideIcon } from "lucide-react"
 
 export interface RouteStatsProps {
@@ -9,6 +9,8 @@ export interface RouteStatsProps {
   elevationGainM: number
   elevationLossM: number
   avgSpeedKmh: number
+  // The activity's: whether climbing adds to the estimate (see geometry.ts).
+  durationModel: DurationModel
   onAvgSpeedChange: (speedKmh: number) => void
 }
 
@@ -19,10 +21,11 @@ export function RouteStats({
   elevationGainM,
   elevationLossM,
   avgSpeedKmh,
+  durationModel,
   onAvgSpeedChange,
 }: RouteStatsProps) {
   const speedInputId = useId()
-  const durationHours = distanceM > 0 ? distanceM / 1000 / avgSpeedKmh : 0
+  const durationHours = estimateDurationHours(distanceM, elevationGainM, avgSpeedKmh, durationModel)
 
   return (
     <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border p-4 text-sm">
@@ -39,7 +42,10 @@ export function RouteStats({
           id={speedInputId}
           type="number"
           min={1}
-          step={1}
+          // Half-steps because walking paces live in them: 4.5 km/h is the
+          // hiking default, and a whole-number step would both reject it as
+          // a step mismatch and make the arrow keys jump past it.
+          step={0.5}
           value={avgSpeedKmh}
           onChange={(e) => {
             const next = Number(e.target.value)
@@ -47,7 +53,11 @@ export function RouteStats({
           }}
           className="h-7 w-16"
         />
-        <span className="text-xs text-muted-foreground">km/h</span>
+        <span className="text-xs text-muted-foreground">
+          km/h
+          {/* Says so, since otherwise the estimate looks wrong for the pace shown. */}
+          {durationModel === "naismith" && `, +1h per ${NAISMITH_ASCENT_M_PER_HOUR}m climbed`}
+        </span>
       </div>
     </div>
   )

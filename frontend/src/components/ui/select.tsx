@@ -81,8 +81,12 @@ function SelectContent({
         <SelectPrimitive.Viewport
           data-position={position}
           className={cn(
-            "data-[position=popper]:h-(--radix-select-trigger-height) data-[position=popper]:w-full data-[position=popper]:min-w-(--radix-select-trigger-width)",
-            position === "popper" && ""
+            // Upstream also pins the viewport to h-(--radix-select-trigger-height)
+            // in popper mode, which clips the list to the height of one
+            // trigger - a two-item menu shows as a sliver. Only the width
+            // constraints are wanted: they're what makes a popper-positioned
+            // menu line up with its trigger.
+            "data-[position=popper]:w-full data-[position=popper]:min-w-(--radix-select-trigger-width)",
           )}
         >
           {children}
@@ -115,7 +119,14 @@ function SelectItem({
     <SelectPrimitive.Item
       data-slot="select-item"
       className={cn(
-        "relative flex w-full cursor-pointer items-center gap-1.5 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none focus:bg-accent focus:text-accent-foreground not-data-[variant=destructive]:focus:**:text-accent-foreground data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
+        // Highlight matches command.tsx's CommandItem so the sidebar's three
+        // pickers behave alike. Every state that means "this is the row
+        // you're on" - Radix's data-highlighted, the focus it moves with it,
+        // and plain pointer hover - resolves to the same olive, which is
+        // what makes the ordering of the generated CSS stop mattering. The
+        // upstream accent isn't used because it's oklch(0.97) against a
+        // popover of oklch(0.966): a highlight you can't see.
+        "relative flex w-full cursor-pointer items-center gap-1.5 rounded-md py-1 pr-8 pl-1.5 text-sm outline-hidden select-none hover:bg-olive-300 focus:bg-olive-300 focus:text-foreground data-highlighted:bg-olive-300 data-highlighted:text-foreground not-data-[variant=destructive]:focus:**:text-foreground data-disabled:pointer-events-none data-disabled:cursor-not-allowed data-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4 *:[span]:last:flex *:[span]:last:items-center *:[span]:last:gap-2",
         className
       )}
       {...props}

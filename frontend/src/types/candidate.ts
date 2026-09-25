@@ -101,3 +101,21 @@ export interface FindPoisResponse {
   failed_poi_types: FailedPoiType[]
   candidate_details: Record<number, CandidateDetails>
 }
+
+// Mirrors schemas.py's MapPoi/MapPoiResponse. One of our own imported POIs
+// drawn on the map for its own sake rather than as a candidate near a
+// route - hence no distances. Lighter than PoiLookupResult on purpose:
+// these arrive hundreds at a time per viewport, and the full tag dict is
+// only needed once one is actually clicked.
+export interface MapPoi {
+  osm_id: number
+  osm_type: string
+  poi_type: string
+  name: string | null
+  lat: number
+  lon: number
+}
+
+export interface MapPoiResponse {
+  pois: MapPoi[]
+}

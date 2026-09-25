@@ -13,9 +13,11 @@ import type { PlannerPoint } from "@/components/PlannerPointList"
 import { MapStyleSelect } from "@/components/MapStyleSelect"
 import { Toaster } from "@/components/Toaster"
 import { WahooProfileMenu } from "@/components/WahooProfileMenu"
+import { ActivitySwitchDialog, type ActivitySwitchConsequences } from "@/components/ActivitySwitchDialog"
 import { OffRouteDialog, type OffRouteItem } from "@/components/OffRouteDialog"
 import { ApiError, NETWORK_ERROR_MESSAGE, cooldownRemainingMs, findPois, lookupPoi, routeLeg } from "@/lib/api"
 import { track } from "@/lib/analytics"
+import { mostSpecificPerElement } from "@/lib/poiTypes"
 import { encodePolyline } from "@/lib/polyline"
 import { elevationGainLossM, projectOntoPolylineM, totalDistanceM } from "@/lib/geometry"
 import {
@@ -25,7 +27,15 @@ import {
   parseRouteCoordsFromGpx,
   parseRouteElevationsFromGpx,
 } from "@/lib/gpx"
-import { routingOptionSpecsForStyle, routingProfileForStyle, type RoutingOptions } from "@/lib/mapStyles"
+import {
+  MAP_STYLES,
+  durationModelForStyle,
+  gradeScaleForStyle,
+  routingOptionSpecsForStyle,
+  routingProfileForStyle,
+  wahooSyncForStyle,
+  type RoutingOptions,
+} from "@/lib/mapStyles"
 import {
   appendAnchor,
   commonPrefixLength,
@@ -96,7 +106,7 @@ import type {
   SearchRange,
 } from "@/types/candidate"
 
-type Step = "import" | "find"
+type Step = "activity" | "import" | "find"
 
 // Stable empty-array references so RouteMap's FitBounds effect (which
 // depends on candidates/existingWaypoints by reference) doesn't refire on
@@ -181,8 +191,8 @@ export default function App() {
   // backend-authoritative) so the choice survives a later /api/find-pois/route
   // call, which recomputes its own suggestion from scratch.
   const [waypointTypeOverrides, setWaypointTypeOverrides] = useState<Record<number, string>>({})
-  const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>(() => loadSettings())
-  const [poiSearchEntries, setPoiSearchEntries] = useState<PoiSearchEntry[]>(() => loadPoiSearchConfig())
+  const [deviceSettings, setDeviceSettings] = useState<DeviceSettings>(() => loadSettings(loadMapStyleKey()))
+  const [poiSearchEntries, setPoiSearchEntries] = useState<PoiSearchEntry[]>(() => loadPoiSearchConfig(loadMapStyleKey()))
   const [isFinding, setIsFinding] = useState(false)
   // Live per-type progress for the search kicked off in handleFind - null
   // when no search is running. Drives FindPoisCard's button/row progress UI;
@@ -194,8 +204,10 @@ export default function App() {
   } | null>(null)
   const [openStep, setOpenStep] = useState<Step | null>("import")
   const [wahooTokens, setWahooTokens] = useState<WahooTokens | null>(() => loadWahooTokens())
-  const [avgSpeedKmh, setAvgSpeedKmh] = useState<number>(() => loadAvgSpeedKmh())
+  const [avgSpeedKmh, setAvgSpeedKmh] = useState<number>(() => loadAvgSpeedKmh(loadMapStyleKey()))
   const [mapStyleKey, setMapStyleKey] = useState<string>(() => loadMapStyleKey())
+  // The activity a visitor has asked to switch to, held while they confirm.
+  const [pendingActivity, setPendingActivity] = useState<string | null>(null)
   // The visitor's saved BRouter options for the current style - what a new
   // planning session starts with. While planning, the planner state's own
   // options are what the route (and PlannerPanel) reflect, so an undo that
@@ -239,7 +251,7 @@ export default function App() {
   // pre-existing <wpt> entries and their waypointer: extension markers.
   const [sourceDoc, setSourceDoc] = useState<Document | null>(null)
   const [trackedPositions, setTrackedPositions] = useState<TrackedPositions>({})
-  const [offRouteThresholdM, setOffRouteThresholdM] = useState<number>(() => loadOffRouteThresholdM())
+  const [offRouteThresholdM, setOffRouteThresholdM] = useState<number>(() => loadOffRouteThresholdM(loadMapStyleKey()))
   // An edit held back pending confirmation because it stranded something.
   // Cancelling drops it and leaves the route exactly as it was.
   const [pendingEdit, setPendingEdit] = useState<{
@@ -627,7 +639,7 @@ export default function App() {
 
   function handleOffRouteThresholdChange(thresholdM: number) {
     setOffRouteThresholdM(thresholdM)
-    saveOffRouteThresholdM(thresholdM)
+    saveOffRouteThresholdM(mapStyleKey, thresholdM)
   }
 
   function seedTracked(route: [number, number][]): TrackedPositions {
@@ -674,6 +686,16 @@ export default function App() {
     setPlannerState(state)
     setTrackedPositions(seedTracked(coords))
     trackPlanningStarted(coords.length > 0 ? "edit" : "new", startAt ? "place" : "fresh", state)
+  }
+
+  /**
+   * A POI's popup, before any route exists: plan a new route starting at it.
+   * The lookup popup closes with the same click, since the POI is about to
+   * become the route's first point and would only sit under its marker.
+   */
+  function handleStartRouteFromPoi(lat: number, lon: number) {
+    setPendingLookup(null)
+    handleStartPlanning([lat, lon])
   }
 
   /** Step 1's pin popup, before any route exists: plan a new route from the searched place. */
@@ -1218,24 +1240,90 @@ export default function App() {
 
   function handleAvgSpeedChange(speedKmh: number) {
     setAvgSpeedKmh(speedKmh)
-    saveAvgSpeedKmh(speedKmh)
+    saveAvgSpeedKmh(mapStyleKey, speedKmh)
+  }
+
+  /**
+   * What switching activity would disturb. Used both to decide whether the
+   * switch needs confirming at all and to say, in the dialog, what will
+   * actually happen.
+   */
+  function activitySwitchConsequences(): ActivitySwitchConsequences {
+    return {
+      // Only a plan can be re-routed; an imported track's geometry is
+      // verbatim and stays exactly as it was.
+      reroutes: plannerState !== null || parkedPlan !== null,
+      clearsPois: (findResult?.candidates.length ?? 0) > 0 || clickAddedCandidates.length > 0,
+    }
   }
 
   function handleMapStyleChange(key: string) {
+    if (key === mapStyleKey) return
+    const { reroutes, clearsPois } = activitySwitchConsequences()
+    // With nothing open to disturb, the switch is just a switch.
+    if (!reroutes && !clearsPois) {
+      applyActivity(key)
+      return
+    }
+    setPendingActivity(key)
+  }
+
+  /**
+   * Switches activity for real.
+   *
+   * An activity is not a map style. It carries the routing profile and its
+   * options, the pace and tolerances, and which POIs are worth looking for -
+   * so all of them are reloaded for the activity being switched to (never
+   * carried over, which is what keeps tuning one from reaching the other),
+   * results found under the old one are dropped, and any plan is re-routed.
+   */
+  function applyActivity(key: string) {
     setMapStyleKey(key)
     saveMapStyleKey(key)
-    // Each style is an activity with its own profile and options.
-    setRoutingOptionsPreference(loadRoutingOptions(key))
+    const options = loadRoutingOptions(key)
+    setRoutingOptionsPreference(options)
+    setAvgSpeedKmh(loadAvgSpeedKmh(key))
+    setOffRouteThresholdM(loadOffRouteThresholdM(key))
+    setPoiSearchEntries(loadPoiSearchConfig(key))
+    setDeviceSettings(loadSettings(key))
+
+    // Found against the previous activity's types, at its distances, and
+    // measured against a route that is about to change shape.
+    setFindResult(null)
+    setSelectedIds(new Set())
+    setSearchedPoiTypes([])
+    setClickAddedCandidates([])
+    setClickAddedDetails({})
+    setPendingLookup(null)
+
+    // Re-point every routed leg at the new profile and options. Their cache
+    // keys change with it, so the existing fetch effect picks them up as
+    // pending and re-routes them - the same path a routing-option change
+    // already takes.
+    const profile = routingProfileForStyle(key)
+    const rerouted = (state: PlannerState): PlannerState => ({ ...state, profile, options })
+    if (plannerState) {
+      const next = rerouted(plannerState)
+      setPlannerState(next)
+      // The route is about to change shape under the new profile, so the
+      // distances the off-route check works from have to be measured again
+      // rather than carried over from the old one.
+      setTrackedPositions(seedTracked(plannerGeometry(next).coords))
+    }
+    if (parkedPlan) setParkedPlan({ ...parkedPlan, state: rerouted(parkedPlan.state) })
+    // History holds states routed under the old profile, and an activity
+    // switch isn't an edit to step back through.
+    resetPlannerSession()
   }
 
   function handleDeviceSettingsChange(settings: DeviceSettings) {
     setDeviceSettings(settings)
-    saveSettings(settings)
+    saveSettings(mapStyleKey, settings)
   }
 
   function handlePoiSearchChange(entries: PoiSearchEntry[]) {
     setPoiSearchEntries(entries)
-    savePoiSearchConfig(entries)
+    savePoiSearchConfig(mapStyleKey, entries)
   }
 
   function handleToggle(osmId: number) {
@@ -1618,12 +1706,14 @@ export default function App() {
   }, [plannerState])
 
   const allCandidates = useMemo(() => {
-    if (clickAddedCandidates.length === 0) return findResult?.candidates ?? EMPTY_CANDIDATES
-    const foundIds = new Set((findResult?.candidates ?? []).map((c) => c.osm_id))
-    return [
-      ...(findResult?.candidates ?? EMPTY_CANDIDATES),
-      ...clickAddedCandidates.filter((c) => !foundIds.has(c.osm_id)),
-    ]
+    const found = findResult?.candidates ?? EMPTY_CANDIDATES
+    if (clickAddedCandidates.length === 0) return mostSpecificPerElement(found)
+    const foundIds = new Set(found.map((c) => c.osm_id))
+    // mostSpecificPerElement runs over the merged list, so one element that
+    // came back under two searched types is listed once, under the more
+    // specific of them (see poiTypes.ts). The click-added filter above is a
+    // different concern - the same element arriving by two routes.
+    return mostSpecificPerElement([...found, ...clickAddedCandidates.filter((c) => !foundIds.has(c.osm_id))])
   }, [findResult, clickAddedCandidates])
   // osm_ids added via a basemap click - used only to exclude those markers
   // from RouteMap's FitBounds input (see RouteMapProps.clickAddedCandidateIds),
@@ -1648,6 +1738,16 @@ export default function App() {
     <div className="relative flex h-dvh flex-col overflow-hidden">
       <Toaster />
       <FeedbackWidget />
+      <ActivitySwitchDialog
+        toLabel={MAP_STYLES.find((style) => style.key === pendingActivity)?.label ?? null}
+        consequences={activitySwitchConsequences()}
+        onConfirm={() => {
+          if (pendingActivity) applyActivity(pendingActivity)
+          setPendingActivity(null)
+        }}
+        onCancel={() => setPendingActivity(null)}
+      />
+
       <OffRouteDialog
         open={pendingEdit !== null}
         items={pendingEdit ? offRouteFor(pendingEdit.tracked, offRouteThresholdM) : []}
@@ -1697,6 +1797,7 @@ export default function App() {
             pendingLookup={pendingLookup}
             onConfirmPendingLookup={handleConfirmPendingLookup}
             onDismissPendingLookup={() => setPendingLookup(null)}
+            onStartRouteFromPoi={!plannerState && !file ? handleStartRouteFromPoi : undefined}
             insets={mapInsets}
             fitRequest={fitRequest}
             onViewChange={(view) => {
@@ -1741,6 +1842,7 @@ export default function App() {
                 cyclewayM={plannerSurfaceData.cyclewayM}
                 gainM={elevationGainM}
                 lossM={elevationLossM}
+                gradeScale={gradeScaleForStyle(mapStyleKey)}
                 // Open on desktop; collapsed on a phone, where the map is only half the screen.
                 defaultOpen={window.matchMedia("(min-width: 48rem)").matches}
               />
@@ -1757,7 +1859,14 @@ export default function App() {
           {/* Everything in here floats over the map on desktop, hence the
               shadows: a card on its own is too close in tone to the map. */}
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0 [&>*]:shadow-lg md:[&>*]:pointer-events-auto">
-            <MapStyleSelect value={mapStyleKey} onChange={handleMapStyleChange} />
+            <StepCard
+              title="1. Pick the activity you love"
+              open={openStep === "activity"}
+              onOpenChange={(open) => setOpenStep(open ? "activity" : null)}
+              summary={MAP_STYLES.find((style) => style.key === mapStyleKey)?.label}
+            >
+              <MapStyleSelect value={mapStyleKey} onChange={handleMapStyleChange} />
+            </StepCard>
             {plannerState ? (
               <PlannerPanel
                 mode={plannerMode}
@@ -1785,12 +1894,13 @@ export default function App() {
                 elevationGainM={elevationGainM}
                 elevationLossM={elevationLossM}
                 avgSpeedKmh={avgSpeedKmh}
+                durationModel={durationModelForStyle(mapStyleKey)}
                 onAvgSpeedChange={handleAvgSpeedChange}
               />
             ) : (
               <>
                 <StepCard
-                  title={"1. Get a route" + (file ? " ✅": "")}
+                  title={"2. Get a route to follow" + (file ? " ✅": "")}
                   open={openStep === "import"}
                   onOpenChange={(open) => setOpenStep(open ? "import" : null)}
                 >
@@ -1810,6 +1920,7 @@ export default function App() {
                     elevationGainM={elevationGainM}
                     elevationLossM={elevationLossM}
                     avgSpeedKmh={avgSpeedKmh}
+                    durationModel={durationModelForStyle(mapStyleKey)}
                     onAvgSpeedChange={handleAvgSpeedChange}
                     wahooTokens={wahooTokens}
                     onWahooTokensChange={setWahooTokens}
@@ -1819,7 +1930,7 @@ export default function App() {
 
                 {file && (
                   <StepCard
-                    title={"2. Find POIs" + (findResult ? " ✅": "")}
+                    title={"3. Find interesting things on the way" + (findResult ? " ✅": "")}
                     open={openStep === "find"}
                     onOpenChange={(open) => setOpenStep(open ? "find" : null)}
                   >
@@ -1854,6 +1965,7 @@ export default function App() {
                     keptWaypointIndices={keptWaypointIndices}
                     settings={deviceSettings}
                     onSettingsChange={handleDeviceSettingsChange}
+                    wahooSync={wahooSyncForStyle(mapStyleKey)}
                     wahooTokens={wahooTokens}
                     onWahooTokensChange={setWahooTokens}
                   />

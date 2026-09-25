@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerE
 import { ChevronDown, TrendingDown, TrendingUp } from "lucide-react"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { cumulativeDistancesM } from "@/lib/geometry"
+import type { GradeScale } from "@/lib/mapStyles"
 import { setHoveredDistanceM, useHoveredDistanceM } from "@/lib/hoverDistance"
 import type { SurfaceCategory, SurfaceRun } from "@/lib/routePlanner"
 import colors from "tailwindcss/colors"
@@ -17,6 +18,9 @@ export interface ElevationProfileProps {
   cyclewayM: number
   gainM: number
   lossM: number
+  // Where the gradient bands start, which depends on the activity - see
+  // mapStyles.ts's GradeScale.
+  gradeScale: GradeScale
   defaultOpen: boolean
 }
 
@@ -37,31 +41,20 @@ const MIN_CHUNK_M = 100
 // the gradient of the chunk under the pointer, so it always matches the colour.
 const MIN_CHUNK_PX = 4
 
-// Gradient bands: Wahoo's climb bands and colour order (green 0-4%, yellow
-// 4-8%, orange 8-12%, red 12-20%, brown 20%+) in Tailwind steps spread in
-// lightness so adjacent bands stay distinguishable, colour-blind readers
-// included (validated with the dataviz skill's palette checker). Descents
-// mirror the same bands as one blue, darker the steeper (a validated ordinal
-// ramp), so -5% and -15% read as "steeper" at a glance. [from %, colour].
-const CLIMB_BANDS: [number, string][] = [
-  [0, colors.green[600]],
-  [4, colors.yellow[500]],
-  [8, colors.orange[600]],
-  [12, colors.red[800]],
-  [20, colors.amber[950]],
-]
-const DESCENT_BANDS: [number, string][] = [
-  [0, colors.blue[400]],
-  [4, colors.blue[500]],
-  [8, colors.blue[600]],
-  [12, colors.blue[800]],
-  [20, colors.blue[950]],
-]
+// Gradient band colours, gentlest first: Wahoo's climb colour order (green,
+// yellow, orange, red, brown) in Tailwind steps spread in lightness so
+// adjacent bands stay distinguishable, colour-blind readers included
+// (validated with the dataviz skill's palette checker). Descents mirror the
+// same bands as one blue, darker the steeper (a validated ordinal ramp), so a
+// gentle and a steep descent read apart at a glance. Where each band *starts*
+// is the activity's GradeScale - the colours are the same for every activity.
+const CLIMB_COLORS = [colors.green[600], colors.yellow[500], colors.orange[600], colors.red[800], colors.amber[950]]
+const DESCENT_COLORS = [colors.blue[400], colors.blue[500], colors.blue[600], colors.blue[800], colors.blue[950]]
 
-// Within +-FLAT_GRADE_PCT the road has basically no grade, so it's drawn in a
-// neutral grey rather than flickering between the gentlest climb and descent
-// bands. Mid grey, not black: it should recede, not compete with the bands.
-const FLAT_GRADE_PCT = 2
+// Within the scale's flatPct a stretch has basically no grade, so it's drawn
+// in a neutral grey rather than flickering between the gentlest climb and
+// descent bands. Mid grey, not black: it should recede, not compete with the
+// bands.
 const FLAT_COLOR = colors.neutral[400]
 
 // Surface: Tailwind palette steps that look like the surfaces themselves -
@@ -78,11 +71,13 @@ const SURFACE_BY_CATEGORY = Object.fromEntries(SURFACES.map((s) => [s.category, 
   (typeof SURFACES)[number]
 >
 
-function gradientColor(gradePct: number): string {
-  const bands = gradePct >= 0 ? CLIMB_BANDS : DESCENT_BANDS
+function gradientColor(gradePct: number, scale: GradeScale): string {
+  const palette = gradePct >= 0 ? CLIMB_COLORS : DESCENT_COLORS
   const steepness = Math.abs(gradePct)
-  let color = bands[0][1]
-  for (const [from, bandColor] of bands) if (steepness >= from) color = bandColor
+  let color = palette[0]
+  scale.bandStartsPct.forEach((from, i) => {
+    if (steepness >= from) color = palette[i]
+  })
   return color
 }
 
@@ -99,6 +94,7 @@ export function ElevationProfile({
   cyclewayM,
   gainM,
   lossM,
+  gradeScale,
   defaultOpen,
 }: ElevationProfileProps) {
   const [open, setOpen] = useState(defaultOpen)
@@ -122,8 +118,9 @@ export function ElevationProfile({
           elevations={elevations}
           pointDistancesM={pointDistancesM}
           surfaceRuns={surfaceRuns}
+          gradeScale={gradeScale}
         />
-        <Legends surfaceRuns={surfaceRuns} cyclewayM={cyclewayM} />
+        <Legends surfaceRuns={surfaceRuns} cyclewayM={cyclewayM} gradeScale={gradeScale} />
       </CollapsibleContent>
     </Collapsible>
   )
@@ -139,7 +136,8 @@ function ProfilePlot({
   elevations,
   pointDistancesM,
   surfaceRuns,
-}: Pick<ElevationProfileProps, "coords" | "elevations" | "pointDistancesM" | "surfaceRuns">) {
+  gradeScale,
+}: Pick<ElevationProfileProps, "coords" | "elevations" | "pointDistancesM" | "surfaceRuns" | "gradeScale">) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   const hoveredM = useHoveredDistanceM()
@@ -186,7 +184,7 @@ function ProfilePlot({
   const x = (distanceM: number) => MARGIN.left + (distanceM / totalM) * plotWidth
   const y = (elevation: number) => MARGIN.top + PLOT_HEIGHT - ((elevation - yLo) / (yHi - yLo || 1)) * PLOT_HEIGHT
   const chunks = gradeChunks(samples, Math.max(MIN_CHUNK_M, (totalM * MIN_CHUNK_PX) / (plotWidth || 1)))
-  const gradientRuns = coloredRuns(samples, chunks, x, y, baseline)
+  const gradientRuns = coloredRuns(samples, chunks, x, y, baseline, gradeScale)
 
   const peak = samples.reduce((best, s) => (s.elevation !== null && s.elevation > (best.elevation ?? -Infinity) ? s : best))
   const hovered = hoveredM !== null && hoveredM >= 0 && hoveredM <= totalM ? readout(samples, chunks, hoveredM) : null
@@ -326,7 +324,7 @@ function ProfilePlot({
                   cx={x(hovered.distanceM)}
                   cy={y(hovered.elevation)}
                   r={4}
-                  fill={hovered.gradePct !== null ? chunkColor(hovered.gradePct) : "var(--foreground)"}
+                  fill={hovered.gradePct !== null ? chunkColor(hovered.gradePct, gradeScale) : "var(--foreground)"}
                   stroke="var(--card)"
                   strokeWidth={2}
                 />
@@ -357,7 +355,15 @@ function ProfilePlot({
 }
 
 /** Surface shares and the gradient scale, as text-token legends with colour swatches beside them. */
-function Legends({ surfaceRuns, cyclewayM }: { surfaceRuns: SurfaceRun[]; cyclewayM: number }) {
+function Legends({
+  surfaceRuns,
+  cyclewayM,
+  gradeScale,
+}: {
+  surfaceRuns: SurfaceRun[]
+  cyclewayM: number
+  gradeScale: GradeScale
+}) {
   const totalM = surfaceRuns.reduce((sum, run) => sum + run.distanceM, 0)
   const shares = SURFACES.map((surface) => ({
     ...surface,
@@ -379,10 +385,10 @@ function Legends({ surfaceRuns, cyclewayM }: { surfaceRuns: SurfaceRun[]; cyclew
       </div>
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-medium text-foreground">Gradient</span>
-        <GradientScale />
+        <GradientScale scale={gradeScale} />
         <span className="flex items-center gap-1">
           <span className="h-2 w-3 rounded-[2px]" style={{ backgroundColor: FLAT_COLOR }} />
-          Flat (within ±{FLAT_GRADE_PCT}%)
+          Flat (within ±{gradeScale.flatPct}%)
         </span>
       </div>
     </div>
@@ -390,9 +396,12 @@ function Legends({ surfaceRuns, cyclewayM }: { surfaceRuns: SurfaceRun[]; cyclew
 }
 
 // Steep descent -> steep climb, each band a swatch, labelled at the band edges.
-function GradientScale() {
-  const swatches = [...DESCENT_BANDS].reverse().map(([, color]) => color).concat(CLIMB_BANDS.map(([, color]) => color))
-  const edges = ["-20", "-12", "-8", "-4", "0", "4", "8", "12", "20"]
+function GradientScale({ scale }: { scale: GradeScale }) {
+  const swatches = [...DESCENT_COLORS].reverse().concat(CLIMB_COLORS)
+  // One label at each boundary between two swatches: the descent band
+  // starts mirrored, then 0, then the climb band starts.
+  const inner = scale.bandStartsPct.slice(1)
+  const edges = [...[...inner].reverse().map((pct) => `-${pct}`), "0", ...inner.map(String)]
   return (
     <span className="flex flex-col">
       <span className="flex">
@@ -434,9 +443,9 @@ function gradeChunks(samples: Sample[], chunkM: number): GradeChunk[] {
   return chunks
 }
 
-function chunkColor(gradePct: number | null): string {
+function chunkColor(gradePct: number | null, scale: GradeScale): string {
   if (gradePct === null) return "var(--muted-foreground)"
-  return Math.abs(gradePct) < FLAT_GRADE_PCT ? FLAT_COLOR : gradientColor(gradePct)
+  return Math.abs(gradePct) < scale.flatPct ? FLAT_COLOR : gradientColor(gradePct, scale)
 }
 
 /**
@@ -450,7 +459,8 @@ function coloredRuns(
   chunks: GradeChunk[],
   x: (d: number) => number,
   y: (e: number) => number,
-  baseline: number
+  baseline: number,
+  scale: GradeScale
 ): { color: string; line: string; area: string }[] {
   const runs: { color: string; points: [number, number][] }[] = []
   for (const chunk of chunks) {
@@ -461,7 +471,7 @@ function coloredRuns(
       .filter((s) => s.distanceM > chunk.fromM && s.distanceM < chunk.toM && s.elevation !== null)
       .map((s): [number, number] => [s.distanceM, s.elevation as number])
     const points: [number, number][] = [[chunk.fromM, a], ...inside, [chunk.toM, b]]
-    const color = chunkColor(chunk.gradePct)
+    const color = chunkColor(chunk.gradePct, scale)
     const last = runs[runs.length - 1]
     if (last && last.color === color && last.points[last.points.length - 1][0] === chunk.fromM) {
       last.points.push(...points.slice(1))

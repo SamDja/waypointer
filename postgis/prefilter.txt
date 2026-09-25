@@ -1,0 +1,24 @@
+# osmium tags-filter expressions, run by import.sh before osm2pgsql.
+#
+# osm2pgsql runs import_pois.lua's callbacks on a single thread for every
+# object in the extract, so handing it a whole country is what makes an
+# import take hours. osmium decodes the file on every core and cuts it down
+# to objects that might match (plus the nodes/ways they reference, so way
+# and multipolygon geometries still build) first.
+#
+# This only has to be a SUPERSET of import_pois.lua's FILTERS - the Lua
+# still decides what actually gets imported. Most keys are matched whole
+# (cheap to keep in sync, still drops the bulk of the extract); highway and
+# natural are narrowed to values, since the bare key would keep every road,
+# wood and coastline. tests/test_import_pois_lua.py checks every FILTERS
+# entry is covered, so a new tag key must be added here too.
+nwr/amenity
+nwr/shop
+nwr/tourism
+nwr/leisure
+nwr/historic
+w/aerialway
+n/highway=bus_stop
+nwr/highway=rest_area
+nwr/highway=trailhead
+n/natural=peak

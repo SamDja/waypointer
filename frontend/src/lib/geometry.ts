@@ -240,6 +240,26 @@ export function pointAtDistanceM(
   ]
 }
 
+// How an activity turns a route into a time. "flat" is distance over the
+// visitor's pace and nothing else, which is how a bike ride reads. "naismith"
+// adds Naismith's rule on top - an hour per NAISMITH_ASCENT_M_PER_HOUR of
+// climbing - because on foot ascent, not distance, is what sets the time: a
+// 10km walk with 1200m of climbing takes twice as long as a flat one.
+export type DurationModel = "flat" | "naismith"
+
+export const NAISMITH_ASCENT_M_PER_HOUR = 600
+
+export function estimateDurationHours(
+  distanceM: number,
+  elevationGainM: number,
+  speedKmh: number,
+  model: DurationModel,
+): number {
+  if (distanceM <= 0 || speedKmh <= 0) return 0
+  const flatHours = distanceM / 1000 / speedKmh
+  return model === "naismith" ? flatHours + Math.max(0, elevationGainM) / NAISMITH_ASCENT_M_PER_HOUR : flatHours
+}
+
 export function formatDurationHours(hours: number): string {
   if (!Number.isFinite(hours) || hours <= 0) return "-"
   const totalMinutes = Math.round(hours * 60)

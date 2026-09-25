@@ -51,7 +51,11 @@ function DropdownMenuItem({
     <DropdownMenuPrimitive.Item
       data-slot="dropdown-menu-item"
       className={cn(
-        "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-muted focus:bg-muted data-[disabled]:pointer-events-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
+        // Same highlight as select.tsx and command.tsx, so every menu in the
+        // app reads alike. bg-muted is oklch(0.97) against a popover of
+        // oklch(0.966), so what it replaced was a highlight barely visible
+        // at all.
+        "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-olive-300 focus:bg-olive-300 data-highlighted:bg-olive-300 data-[disabled]:pointer-events-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
         className
       )}
       {...props}

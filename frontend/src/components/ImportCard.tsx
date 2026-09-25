@@ -1,4 +1,5 @@
 import { useRef, useState, type DragEvent } from "react"
+import type { DurationModel } from "@/lib/geometry"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
@@ -32,6 +33,7 @@ export interface ImportCardProps {
   elevationGainM: number
   elevationLossM: number
   avgSpeedKmh: number
+  durationModel: DurationModel
   onAvgSpeedChange: (speedKmh: number) => void
   wahooTokens: WahooTokens | null
   onWahooTokensChange: (tokens: WahooTokens | null) => void
@@ -57,6 +59,7 @@ export function ImportCard({
   elevationGainM,
   elevationLossM,
   avgSpeedKmh,
+  durationModel,
   onAvgSpeedChange,
   wahooTokens,
   onWahooTokensChange,
@@ -137,6 +140,7 @@ export function ImportCard({
               elevationGainM={elevationGainM}
               elevationLossM={elevationLossM}
               avgSpeedKmh={avgSpeedKmh}
+              durationModel={durationModel}
               onAvgSpeedChange={onAvgSpeedChange}
             />
           </TabsContent>

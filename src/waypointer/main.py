@@ -45,9 +45,21 @@ from waypointer.gpx_io import (
     to_xml_bytes,
     total_ascent_m,
 )
-from waypointer.poi_db import OsmNode, PoiDbError, query_poi_near_point, query_pois_near_route
+from waypointer.poi_db import (
+    OsmNode,
+    PoiDbError,
+    query_poi_near_point,
+    query_pois_in_bounds,
+    query_pois_near_route,
+)
 from waypointer.poi_types import DEFAULT_VISIBLE_POI_TYPES, POI_TYPES, clamp_distance_m
-from waypointer.rate_limit import geocode_rate_limit, lookup_poi_rate_limit, rate_limit, routing_rate_limit
+from waypointer.rate_limit import (
+    geocode_rate_limit,
+    lookup_poi_rate_limit,
+    map_poi_rate_limit,
+    rate_limit,
+    routing_rate_limit,
+)
 from waypointer.geocode import GeocodeError, GeocodeRateLimitedError, search_places
 from waypointer.routing import USER_AGENT, RoutingError, RoutingRateLimitedError, route_leg
 from waypointer.schemas import (
@@ -56,6 +68,8 @@ from waypointer.schemas import (
     ExistingWaypoint,
     FailedPoiType,
     FindPoisResponse,
+    MapPoi,
+    MapPoiResponse,
     PlaceResult,
     PoiLookupResult,
     PoiSearchConfig,
@@ -314,6 +328,30 @@ def _resolved_name(c: Candidate) -> str:
     return c.name or cfg.default_name
 
 
+def _dedupe_by_specificity(selected: list[Candidate]) -> list[Candidate]:
+    """One waypoint per OSM element, keeping its most specific type.
+
+    An element can honestly match several POI types at once (a trailhead
+    that is also an info board; any shop, which nwr["shop"] matches as well
+    as its own shop=* type), so a selection can name the same element twice.
+    Two course points on one coordinate are just noise on the device - they
+    render on top of each other - so the less specific one is dropped. See
+    PoiTypeConfig.specificity; ties keep the earlier entry, and order is
+    otherwise preserved.
+    """
+    best: dict[int, Candidate] = {}
+    for candidate in selected:
+        previous = best.get(candidate.osm_id)
+        if previous is None or _specificity(candidate) > _specificity(previous):
+            best[candidate.osm_id] = candidate
+    return list(best.values())
+
+
+def _specificity(candidate: Candidate) -> int:
+    config = POI_TYPES.get(candidate.poi_type)
+    return config.specificity if config else 0
+
+
 def _build_fit_course_points(
     selected: list[Candidate],
     original_waypoints: list[GPXWaypoint],
@@ -368,7 +406,7 @@ async def save(
     gpx, coords = await _read_gpx_upload(gpx_file)
 
     try:
-        selected = _selected_candidates_adapter.validate_json(selected_candidates)
+        selected = _dedupe_by_specificity(_selected_candidates_adapter.validate_json(selected_candidates))
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid selection data: {exc}") from exc
 
@@ -460,7 +498,7 @@ async def wahoo_route_payload(
     gpx, coords = await _read_gpx_upload(gpx_file)
 
     try:
-        selected = _selected_candidates_adapter.validate_json(selected_candidates)
+        selected = _dedupe_by_specificity(_selected_candidates_adapter.validate_json(selected_candidates))
     except ValidationError as exc:
         raise HTTPException(status_code=400, detail=f"Invalid selection data: {exc}") from exc
 
@@ -587,6 +625,95 @@ async def find_poi_at_location(
         lon=node.lon,
         tags=node.tags,
         last_edited=node.timestamp,
+    )
+
+
+# A viewport bigger than this isn't a map you can read POIs off anyway, and
+# without a ceiling a zoomed-out view asks PostGIS for every row it holds.
+MAP_POI_MAX_SPAN_DEG = 1.0
+MAP_POI_LIMIT = 500
+
+# What each drawable POI type narrows to, within its registry type.
+#
+# Two reasons this isn't just the registry type. A registry type is built
+# for *searching* and is deliberately coarse - `lodging` is anything you can
+# sleep in - so drawing all of it would put every town hotel on a hiking
+# map. And this overlay only earns its keep where the basemap can't help:
+# OpenMapTiles' POI mapping has no `tourism=wilderness_hut`, so a bivouac
+# never reaches the tiles at all, while `alpine_hut` does and is already
+# drawn from them.
+#
+# Staffed huts are therefore deliberately absent here. Adding them would
+# either double every one the basemap already draws, or - if the style
+# stopped drawing them - make them vanish outside the region our own
+# extract covers, which is most of the world.
+MAP_POI_TAG_MATCHES: dict[str, list[dict[str, str]]] = {
+    "lodging": [{"tourism": "wilderness_hut"}],
+}
+
+
+@app.get(
+    "/api/map-pois",
+    response_model=MapPoiResponse,
+    dependencies=[Depends(map_poi_rate_limit)],
+)
+async def map_pois(
+    min_lat: float,
+    min_lon: float,
+    max_lat: float,
+    max_lon: float,
+    poi_types: str,
+) -> MapPoiResponse:
+    """Our own imported POIs inside a viewport, for drawing on the map.
+
+    Exists because the basemap can't draw some of them at all: OpenMapTiles'
+    POI mapping has no `tourism=wilderness_hut`, so an unstaffed bivouac
+    never reaches the tiles however the style is written, while our PostGIS
+    import does hold it. Distinct from `/api/find-pois/*`, which answers
+    "what's near this route" for the checklist; this answers "what's in view"
+    and returns no distances, because there's no route to measure against.
+
+    Only ever the region the configured OSM extract covers - outside it the
+    answer is legitimately empty.
+    """
+    requested = [key for key in poi_types.split(",") if key]
+    unknown = [key for key in requested if key not in POI_TYPES or POI_TYPES[key].tag_filter is None]
+    if unknown:
+        raise HTTPException(status_code=400, detail=f"Not searchable: {', '.join(unknown)}")
+    if max_lat <= min_lat or max_lon <= min_lon:
+        raise HTTPException(status_code=400, detail="Bounds must be a non-empty box.")
+    if max_lat - min_lat > MAP_POI_MAX_SPAN_DEG or max_lon - min_lon > MAP_POI_MAX_SPAN_DEG:
+        raise HTTPException(status_code=400, detail="Zoom in to load points of interest.")
+
+    tag_matches = [match for key in requested for match in MAP_POI_TAG_MATCHES.get(key, [])]
+    try:
+        found = await asyncio.to_thread(
+            query_pois_in_bounds,
+            requested,
+            min_lat,
+            min_lon,
+            max_lat,
+            max_lon,
+            MAP_POI_LIMIT,
+            tag_matches or None,
+        )
+    except PoiDbError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Failed to query the POI database: {exc}"
+        ) from exc
+
+    return MapPoiResponse(
+        pois=[
+            MapPoi(
+                osm_id=node.id,
+                osm_type=node.osm_type,
+                poi_type=poi_type,
+                name=node.tags.get("name"),
+                lat=node.lat,
+                lon=node.lon,
+            )
+            for poi_type, node in found
+        ]
     )
 
 

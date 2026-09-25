@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 
 import psycopg
+from psycopg.types.json import Jsonb
 from psycopg_pool import ConnectionPool
 
 POSTGIS_URL_ENV = "POSTGIS_URL"
@@ -112,6 +113,88 @@ _NEAR_POINT_SQL = """
     ORDER BY p.geom::geography <-> c.pt::geography
     LIMIT 1
 """
+
+
+_IN_BOUNDS_SQL = """
+    SELECT p.osm_type, p.osm_id, p.poi_type, p.tags, p.osm_timestamp,
+           ST_Y(ST_PointOnSurface(p.geom)) AS lat,
+           ST_X(ST_PointOnSurface(p.geom)) AS lon
+    FROM pois p
+    WHERE p.poi_type = ANY(%(poi_types)s)
+      AND (%(tag_matches)s::jsonb[] IS NULL OR p.tags @> ANY(%(tag_matches)s::jsonb[]))
+      AND p.geom && ST_MakeEnvelope(
+            %(min_lon)s, %(min_lat)s, %(max_lon)s, %(max_lat)s, 4326)
+    LIMIT %(limit)s
+"""
+
+
+def query_pois_in_bounds(
+    poi_types: list[str],
+    min_lat: float,
+    min_lon: float,
+    max_lat: float,
+    max_lon: float,
+    limit: int,
+    tag_matches: list[dict[str, str]] | None = None,
+) -> list[tuple[str, OsmNode]]:
+    """Every imported POI of any of poi_types inside the bounding box, as
+    (poi_type, node) pairs.
+
+    For drawing our own POIs on the map, where the basemap's tiles simply
+    don't carry them - `tourism=wilderness_hut` isn't in OpenMapTiles' POI
+    mapping at all, so a bivouac can't come from the basemap however the
+    style is written. Unlike the route and point queries this is driven by
+    the viewport rather than by a route, hence the bbox and the hard limit:
+    a whole-continent view would otherwise ask for every row in the table.
+
+    `tag_matches` narrows within those types, as an OR of jsonb containment
+    tests. It exists because a registry type is coarser than a map wants to
+    draw: `lodging` covers hotels and hostels as well as mountain huts, and
+    an overlay that drew every hotel in a town would be noise. Passing
+    `[{"tourism": "alpine_hut"}, {"tourism": "wilderness_hut"}]` asks for
+    the huts alone.
+
+    `ST_PointOnSurface` rather than a centroid, because a POI imported as a
+    way or a relation (a hut building, a park) needs a representative point
+    that's actually *on* the feature.
+    """
+    if not poi_types:
+        return []
+    try:
+        with _get_pool().connection() as conn:
+            rows = conn.execute(
+                _IN_BOUNDS_SQL,
+                {
+                    "poi_types": poi_types,
+                    "min_lat": min_lat,
+                    "min_lon": min_lon,
+                    "max_lat": max_lat,
+                    "max_lon": max_lon,
+                    "limit": limit,
+                    # psycopg adapts a list of dicts to jsonb[]; None makes
+                    # the guard in the SQL skip the test entirely.
+                    "tag_matches": (
+                        [Jsonb(match) for match in tag_matches] if tag_matches else None
+                    ),
+                },
+            ).fetchall()
+    except psycopg.Error as exc:
+        raise PoiDbError(f"PostGIS query failed: {exc}") from exc
+
+    return [
+        (
+            poi_type,
+            OsmNode(
+                id=osm_id,
+                lat=lat,
+                lon=lon,
+                tags=tags or {},
+                osm_type=osm_type,
+                timestamp=_iso(osm_timestamp),
+            ),
+        )
+        for osm_type, osm_id, poi_type, tags, osm_timestamp, lat, lon in rows
+    ]
 
 
 def query_pois_near_route(
