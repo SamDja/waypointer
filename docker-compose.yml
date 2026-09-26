@@ -22,6 +22,11 @@ services:
       # database" section. No public-mirror fallback: POI lookups fail
       # clearly (poi_db.PoiDbError) if this isn't reachable/populated.
       - POSTGIS_URL=postgresql://waypointer:${POSTGIS_PASSWORD:-waypointer}@postgis:5432/pois
+      # Optional Mapillary client token (a free Mapillary developer app) for
+      # showing Mapillary photos in POI popups - see photos.py. Without it
+      # they're offered as links instead. Runtime, server-side only: never a
+      # build arg, since it must not end up in the frontend bundle.
+      - MAPILLARY_TOKEN=${MAPILLARY_TOKEN:-}
     volumes:
       - ${CERTS_DIR:-./certs}:/certs:ro
     networks:

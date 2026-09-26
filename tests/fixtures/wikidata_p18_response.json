@@ -1,0 +1,84 @@
+{
+  "claims": {
+    "P18": [
+      {
+        "mainsnak": {
+          "snaktype": "value",
+          "property": "P18",
+          "hash": "d88e471cb397c099d72195a3e7189bc78c0286ce",
+          "datavalue": {
+            "value": "Paganella Brenta Trento.jpg",
+            "type": "string"
+          },
+          "datatype": "commonsMedia"
+        },
+        "type": "statement",
+        "qualifiers": {
+          "P585": [
+            {
+              "snaktype": "value",
+              "property": "P585",
+              "hash": "ac0372608384f3293d9309453281394ff3f36f46",
+              "datavalue": {
+                "value": {
+                  "time": "+2009-09-05T00:00:00Z",
+                  "timezone": 0,
+                  "before": 0,
+                  "after": 0,
+                  "precision": 11,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "datatype": "time"
+            }
+          ]
+        },
+        "qualifiers-order": [
+          "P585"
+        ],
+        "id": "Q3376$19bdea14-4ed9-eb07-5a3e-2e67fc03a4aa",
+        "rank": "normal"
+      },
+      {
+        "mainsnak": {
+          "snaktype": "value",
+          "property": "P18",
+          "hash": "29b36e4e962e787a023fef38f46dc037d1aa3c3f",
+          "datavalue": {
+            "value": "Trento visione d'insieme 6.jpg",
+            "type": "string"
+          },
+          "datatype": "commonsMedia"
+        },
+        "type": "statement",
+        "qualifiers": {
+          "P585": [
+            {
+              "snaktype": "value",
+              "property": "P585",
+              "hash": "175096784de2ac933d12943a3a92c0f8d543dd2a",
+              "datavalue": {
+                "value": {
+                  "time": "+2021-06-13T00:00:00Z",
+                  "timezone": 0,
+                  "before": 0,
+                  "after": 0,
+                  "precision": 11,
+                  "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+                },
+                "type": "time"
+              },
+              "datatype": "time"
+            }
+          ]
+        },
+        "qualifiers-order": [
+          "P585"
+        ],
+        "id": "q3376$11B56500-9D96-4197-9372-F237F6A3D343",
+        "rank": "preferred"
+      }
+    ]
+  }
+}

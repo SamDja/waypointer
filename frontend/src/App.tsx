@@ -1420,7 +1420,7 @@ export default function App() {
     )
     setClickAddedDetails((prev) => ({
       ...prev,
-      [result.osm_id]: { tags: result.tags, last_edited: result.last_edited },
+      [result.osm_id]: { osm_type: result.osm_type, tags: result.tags, last_edited: result.last_edited },
     }))
     setSelectedIds((prev) => new Set(prev).add(result.osm_id))
     setPendingLookup(null)

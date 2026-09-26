@@ -188,6 +188,10 @@ body {
    flex-1/min-h-0 (see RouteMap.tsx), lets OsmTagList's own overflow-y-auto
    wrapper be the only region that actually scrolls. */
 .maplibregl-popup-content {
+  /* The height of PoiPhotos.tsx's 4:3 photo box: 240px (the popup's full
+     width), or a third of the map on a short one, so the caption and tags
+     still fit - the box narrows with it to stay 4:3. */
+  --poi-photo-height: min(15rem, calc(var(--rm-map-height, 480px) * 0.33));
   max-height: calc(var(--rm-map-height, 480px) * 0.7);
   max-width: calc(var(--rm-map-width, 480px) * 0.5);
   display: flex;

@@ -19,7 +19,10 @@ class CandidateDetails(BaseModel):
     # itself - Candidate round-trips through /api/save and
     # /api/wahoo/route-payload's request bodies, so bloating it with tags
     # would bloat every save/export round trip too, not just the search
-    # response. Same shape as PoiLookupResult's tags/last_edited fields.
+    # response. Same shape as PoiLookupResult's osm_type/tags/last_edited
+    # fields. osm_type is here, not on Candidate, because only the popup's
+    # "Edit on OpenStreetMap" link needs it.
+    osm_type: str = "node"  # "node", "way", or "relation" - see poi_db.OsmNode
     tags: dict[str, str]
     last_edited: str | None = None
 
@@ -83,6 +86,35 @@ class PoiLookupResult(BaseModel):
     # distinct from a `check_date`/`survey:date` tag, which is a mapper-set
     # field in `tags` rather than OSM's own edit-history metadata.
     last_edited: str | None = None
+
+
+class PoiPhoto(BaseModel):
+    # One photo of an OSM element, resolved from its tags by photos.py.
+    # source is "commons", "panoramax", "mapillary" or "web" (an `image` URL
+    # the browser loads straight from its own host).
+    source: str
+    thumb_url: str
+    full_url: str
+    page_url: str
+    # ISO 8601 UTC - when taken where the service says, else when uploaded.
+    taken_at: str | None = None
+    author: str | None = None
+    license: str | None = None
+
+
+class PhotoLink(BaseModel):
+    # A photo the app can only link to: a Mapillary image with no
+    # MAPILLARY_TOKEN configured, or an `image` URL that isn't an image file.
+    source: str
+    url: str
+
+
+class PoiPhotosResponse(BaseModel):
+    # Newest first, undated last.
+    photos: list[PoiPhoto]
+    links: list[PhotoLink]
+    # Services that failed; the others' photos are still in `photos`.
+    failed_sources: list[str]
 
 
 class ExistingWaypoint(BaseModel):

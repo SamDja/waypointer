@@ -1,0 +1,92 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "id": "6d041a8f-bfa6-43bc-9a06-7440b853fbaf",
+      "bbox": [
+        11.120082513,
+        46.070217532,
+        11.120082513,
+        46.070217532
+      ],
+      "type": "Feature",
+      "links": [
+        {
+          "rel": "self",
+          "href": "https://api.panoramax.xyz/api/collections/a7cf963f-8d1c-4bac-9717-e3149f5f9fff/items/6d041a8f-bfa6-43bc-9a06-7440b853fbaf",
+          "type": "application/geo+json"
+        },
+        {
+          "rel": "via",
+          "href": "https://panoramax.mapcomplete.org",
+          "type": "application/json",
+          "title": "Link to the original instance",
+          "instance_name": "mapcomplete"
+        }
+      ],
+      "assets": {
+        "hd": {
+          "href": "https://panoramax.mapcomplete.org/permanent/6d/04/1a/8f/bfa6-43bc-9a06-7440b853fbaf.jpg",
+          "type": "image/jpeg",
+          "roles": [
+            "data"
+          ],
+          "title": "HD picture",
+          "description": "Highest resolution available of this picture"
+        },
+        "sd": {
+          "href": "https://panoramax.mapcomplete.org/derivatives/6d/04/1a/8f/bfa6-43bc-9a06-7440b853fbaf/sd.jpg",
+          "type": "image/jpeg",
+          "roles": [
+            "visual"
+          ],
+          "title": "SD picture",
+          "description": "Picture in standard definition (fixed width of 2048px)"
+        },
+        "thumb": {
+          "href": "https://panoramax.mapcomplete.org/derivatives/6d/04/1a/8f/bfa6-43bc-9a06-7440b853fbaf/thumb.jpg",
+          "type": "image/jpeg",
+          "roles": [
+            "thumbnail"
+          ],
+          "title": "Thumbnail",
+          "description": "Picture in low definition (fixed width of 500px)"
+        }
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [
+          11.120082513,
+          46.070217532
+        ]
+      },
+      "providers": [
+        {
+          "id": "f887e536-ca60-4c70-8f0c-fd480787296c",
+          "name": "mapcomplete",
+          "roles": [
+            "producer"
+          ]
+        },
+        {
+          "name": "Robot8A",
+          "roles": [
+            "producer"
+          ]
+        }
+      ],
+      "collection": "a7cf963f-8d1c-4bac-9717-e3149f5f9fff",
+      "properties": {
+        "created": "2025-11-29T09:23:38.825267+00:00",
+        "license": "CC-BY-SA-4.0",
+        "datetime": "2025-11-29T09:23:35.765000+00:00"
+      },
+      "stac_version": "1.0.0",
+      "stac_extensions": [
+        "https://stac-extensions.github.io/view/v1.0.0/schema.json",
+        "https://stac-extensions.github.io/perspective-imagery/v1.0.0/schema.json"
+      ]
+    }
+  ],
+  "links": []
+}

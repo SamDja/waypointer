@@ -4,6 +4,7 @@ import type {
   MapPoi,
   MapPoiResponse,
   PoiLookupResult,
+  PoiPhotosResponse,
   PoiSearchConfig,
   PlaceResult,
   RouteLegResponse,
@@ -218,6 +219,22 @@ export async function lookupPoi(
     { failed: "Couldn't look up that point of interest - please try again in a moment." },
   )
   return (await response.json()) as PoiLookupResult
+}
+
+// Only the photo tags are sent (see poiPhotos.photoTags) - the backend
+// ignores the rest, and it keeps the request small.
+export async function fetchPoiPhotos(
+  tags: Record<string, string>,
+  signal?: AbortSignal,
+): Promise<PoiPhotosResponse> {
+  const formData = new FormData()
+  formData.append("tags", JSON.stringify(tags))
+  const response = await request(
+    "/api/poi-photos",
+    { method: "POST", body: formData, signal },
+    { failed: "Couldn't load photos." },
+  )
+  return (await response.json()) as PoiPhotosResponse
 }
 
 export interface SaveParams {

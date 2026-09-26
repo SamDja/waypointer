@@ -107,6 +107,7 @@ def test_find_pois_includes_candidate_details(sample_route_bytes, monkeypatch):
     assert {c["osm_id"] for c in data["candidates"]} == {1001}
     assert set(data["candidate_details"].keys()) == {"1001"}
     assert data["candidate_details"]["1001"] == {
+        "osm_type": "node",
         "tags": {"amenity": "drinking_water", "name": "Fontaine Wallace"},
         "last_edited": "2023-05-01T12:00:00Z",
     }
@@ -1177,3 +1178,64 @@ def test_save_keeps_both_when_two_elements_share_a_type(sample_route_bytes):
     assert response.status_code == 200
     assert b"Fontaine A" in response.content
     assert b"Fontaine B" in response.content
+
+
+def test_poi_photos_returns_photos_and_links(monkeypatch):
+    from waypointer.photos import Photo, PhotoLink, PhotoResult
+
+    seen = {}
+
+    def fake_resolve(tags):
+        seen.update(tags)
+        return PhotoResult(
+            photos=[Photo("commons", "https://t/a.jpg", "https://f/a.jpg", "https://p/a", "2020-01-01T00:00:00Z")],
+            links=[PhotoLink("mapillary", "https://www.mapillary.com/app/?pKey=1&focus=photo")],
+        )
+
+    monkeypatch.setattr(main, "resolve_photos", fake_resolve)
+    response = client.post("/api/poi-photos", data={"tags": json.dumps({"wikimedia_commons": "File:A.jpg"})})
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["photos"][0]["taken_at"] == "2020-01-01T00:00:00Z"
+    assert data["links"][0]["source"] == "mapillary"
+    assert data["failed_sources"] == []
+    assert seen == {"wikimedia_commons": "File:A.jpg"}
+
+
+@pytest.mark.parametrize("tags", ["not json", "[1, 2]", '{"image": 3}'])
+def test_poi_photos_rejects_bad_tags(tags):
+    assert client.post("/api/poi-photos", data={"tags": tags}).status_code == 400
+
+
+def test_poi_photos_partial_failure_is_still_200(monkeypatch):
+    from waypointer.photos import Photo, PhotoResult
+
+    monkeypatch.setattr(
+        main,
+        "resolve_photos",
+        lambda tags: PhotoResult(photos=[Photo("panoramax", "t", "f", "p")], failed_sources=["commons"]),
+    )
+    response = client.post("/api/poi-photos", data={"tags": "{}"})
+    assert response.status_code == 200
+    assert response.json()["failed_sources"] == ["commons"]
+
+
+def test_poi_photos_502s_only_when_everything_failed(monkeypatch):
+    from waypointer.photos import PhotoResult
+
+    monkeypatch.setattr(main, "resolve_photos", lambda tags: PhotoResult(failed_sources=["commons", "panoramax"]))
+    assert client.post("/api/poi-photos", data={"tags": "{}"}).status_code == 502
+
+
+def test_poi_photos_has_its_own_rate_limit(monkeypatch):
+    from waypointer.photos import PhotoResult
+    from waypointer.rate_limit import PHOTO_REQUESTS_PER_WINDOW
+
+    monkeypatch.setattr(main, "resolve_photos", lambda tags: PhotoResult())
+    statuses = [
+        client.post("/api/poi-photos", data={"tags": "{}"}).status_code
+        for _ in range(PHOTO_REQUESTS_PER_WINDOW + 1)
+    ]
+    assert statuses[-1] == 429 and statuses[0] == 200
+    assert client.get("/api/geocode", params={"q": "ab"}).status_code == 400

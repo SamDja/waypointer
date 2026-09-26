@@ -1,0 +1,75 @@
+{
+  "batchcomplete": true,
+  "continue": {
+    "gcmcontinue": "file|5249465547494f20544f4e494e492044495354525554544f2030332e4a5047|91425062",
+    "continue": "gcmcontinue||"
+  },
+  "query": {
+    "pages": [
+      {
+        "pageid": 91425060,
+        "ns": 6,
+        "title": "File:Rifugio Tonini distrutto 01.jpg",
+        "imagerepository": "local",
+        "imageinfo": [
+          {
+            "timestamp": "2020-06-21T16:32:25Z",
+            "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/5/5d/Rifugio_Tonini_distrutto_01.jpg/960px-Rifugio_Tonini_distrutto_01.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+            "thumbwidth": 640,
+            "thumbheight": 480,
+            "url": "https://upload.wikimedia.org/wikipedia/commons/5/5d/Rifugio_Tonini_distrutto_01.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Rifugio_Tonini_distrutto_01.jpg",
+            "extmetadata": {
+              "DateTimeOriginal": {
+                "value": "2020-06-21 12:40:07",
+                "source": "commons-desc-page"
+              },
+              "Artist": {
+                "value": "<a href=\"//commons.wikimedia.org/wiki/User:Syrio\" title=\"User:Syrio\">Syrio</a>",
+                "source": "commons-desc-page"
+              },
+              "LicenseShortName": {
+                "value": "CC BY-SA 4.0",
+                "source": "commons-desc-page",
+                "hidden": ""
+              }
+            },
+            "mediatype": "BITMAP"
+          }
+        ]
+      },
+      {
+        "pageid": 91425061,
+        "ns": 6,
+        "title": "File:Rifugio Tonini distrutto 02.jpg",
+        "imagerepository": "local",
+        "imageinfo": [
+          {
+            "timestamp": "2020-06-21T16:32:25Z",
+            "thumburl": "https://thumb.wikimedia.org/wikipedia/commons/thumb/9/97/Rifugio_Tonini_distrutto_02.jpg/960px-Rifugio_Tonini_distrutto_02.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=thumbnail",
+            "thumbwidth": 640,
+            "thumbheight": 480,
+            "url": "https://upload.wikimedia.org/wikipedia/commons/9/97/Rifugio_Tonini_distrutto_02.jpg?utm_source=commons.wikimedia.org&utm_campaign=imageinfo&utm_content=original",
+            "descriptionurl": "https://commons.wikimedia.org/wiki/File:Rifugio_Tonini_distrutto_02.jpg",
+            "extmetadata": {
+              "DateTimeOriginal": {
+                "value": "2020-06-21 12:41:47",
+                "source": "commons-desc-page"
+              },
+              "Artist": {
+                "value": "<a href=\"//commons.wikimedia.org/wiki/User:Syrio\" title=\"User:Syrio\">Syrio</a>",
+                "source": "commons-desc-page"
+              },
+              "LicenseShortName": {
+                "value": "CC BY-SA 4.0",
+                "source": "commons-desc-page",
+                "hidden": ""
+              }
+            },
+            "mediatype": "BITMAP"
+          }
+        ]
+      }
+    ]
+  }
+}
