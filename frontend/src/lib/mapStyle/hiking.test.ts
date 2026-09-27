@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest"
 
 import { MAP_STYLES, mapStyleFor } from "../mapStyles"
 import { TERRAIN_FILLS } from "./hiking"
-import { TERRAIN_PATTERNS } from "./terrainPatterns"
 import { evaluateLineLayerPaint } from "../mapStyleLegend"
 
 /**
@@ -206,7 +205,6 @@ describe("hiking style", () => {
       // The base draws no farmland at all, though it is most of what a
       // valley walk crosses - 60 features in one tile near Trento.
       expect(selects("landcover_farmland", { class: "farmland", subclass: "farmland" })).toBe(true)
-      expect(selects("landcover_vineyard", { class: "farmland", subclass: "vineyard" })).toBe(true)
 
       // And it paints every green as one green: scrub is slow and scratchy
       // to cross, meadow is not, and both are class=grass in the tiles.
@@ -219,41 +217,33 @@ describe("hiking style", () => {
     it("gives every terrain kind a look of its own", () => {
       const fill = (id: string) =>
         (hiking.layers.find((l) => l.id === id)!.paint as Record<string, unknown>)["fill-color"]
-      const tinted = TERRAIN_FILLS.filter((entry) => entry.color !== undefined).map((entry) => entry.id)
+      const tinted = TERRAIN_FILLS.map((entry) => entry.id)
       // Two kinds of ground that render identically are two kinds a walker
       // cannot tell apart, which is the whole point of the table.
       const shades = tinted.map(fill)
       expect(new Set(shades).size, shades.join(", ")).toBe(tinted.length)
     })
 
-    it("builds a layer for every tinted entry, and none for a pattern-only one", () => {
+    it("builds a layer for every terrain entry", () => {
       const layerIds = new Set(hiking.layers.map((l) => l.id))
-      for (const { id, color } of TERRAIN_FILLS) {
-        // Forest is pattern-only: the base's landcover_wood already fills
-        // it, so a second tint layer would double-paint it.
-        expect(layerIds.has(id), id).toBe(color !== undefined)
-      }
-      // Every pattern named here is one that actually gets registered.
-      const registered = new Set(TERRAIN_PATTERNS.map((pattern) => pattern.id))
-      for (const { id, patternId } of TERRAIN_FILLS) {
-        if (patternId) expect(registered.has(patternId), id).toBe(true)
+      for (const { id } of TERRAIN_FILLS) {
+        expect(layerIds.has(id), id).toBe(true)
       }
     })
 
     it("draws the narrower terrain refinements over the broader ones", () => {
-      // scrub refines grass and vineyard refines farmland; if the broad
+      // scrub refines grass; if the broad
       // layer drew last it would simply cover them up.
       const order = hiking.layers.map((l) => l.id)
       expect(order.indexOf("landcover_scrub")).toBeGreaterThan(order.indexOf("landcover_grassland"))
-      expect(order.indexOf("landcover_vineyard")).toBeGreaterThan(order.indexOf("landcover_farmland"))
       // And all of them over the base's own landcover fills.
       expect(order.indexOf("landcover_farmland")).toBeGreaterThan(order.indexOf("landcover_grass"))
     })
 
     it("leaves the cycling map's ground alone", () => {
       const cyclingLayerIds = new Set(cycling.layers.map((l) => l.id))
-      for (const { id, color } of TERRAIN_FILLS) {
-        if (color !== undefined) expect(cyclingLayerIds.has(id), id).toBe(false)
+      for (const { id } of TERRAIN_FILLS) {
+        expect(cyclingLayerIds.has(id), id).toBe(false)
       }
     })
 

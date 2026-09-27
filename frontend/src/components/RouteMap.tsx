@@ -43,8 +43,6 @@ import { setHoveredDistanceM, useHoveredDistanceM } from "@/lib/hoverDistance"
 import { PLANNER_POINT_COLOR, ROUTE_END_COLOR, ROUTE_START_COLOR, START_FINISH_BACKGROUND } from "@/lib/mapColors"
 import { CircleMarkerIcon, SearchedPlacePin, UserLocationMarker } from "@/lib/mapIcons"
 import { MAP_STYLES, mapStyleFor } from "@/lib/mapStyles"
-import { TERRAIN_FILLS, TERRAIN_BEFORE_ID } from "@/lib/mapStyle/hiking"
-import { TERRAIN_PATTERNS } from "@/lib/mapStyle/terrainPatterns"
 import {
   formatExactDateTime,
   formatRelativeDate,
@@ -1105,20 +1103,6 @@ function PoiTypeLabel({ name, label }: { name: string | null; label: string | un
   return null
 }
 
-/**
- * Draws the hiking style's stipple and hatch over its flat rock tints.
- *
- * The patterns are generated pixel by pixel (lib/mapStyle/terrainPatterns.ts)
- * because `fill-pattern` needs an image in the sprite and OpenFreeMap's
- * carries none. Registration follows RouteDirectionArrows above, for the
- * same reasons: re-run on every `styledata` because a style swap wipes
- * custom images, and mount the layers only once the images exist, since a
- * layer naming a missing image just warns and draws nothing.
- *
- * The tint layers in the style render regardless, so terrain is never
- * missing while this is catching up - the pattern only ever adds texture on
- * top. Renders nothing at all on a style without rock fills (i.e. cycling).
- */
 // Sprite icon per drawable POI type, matching what the basemap uses for the
 // same thing so a hut looks like a hut whichever source it came from.
 const MAP_POI_SPRITE: Record<string, string> = { lodging: "lodging" }
@@ -1252,77 +1236,6 @@ function MapPoiOverlay({ poiTypes }: { poiTypes: readonly string[] }) {
         }}
       />
     </Source>
-  )
-}
-
-// Probe for "is the loaded style one that has terrain fills at all". Taken
-// from the table rather than written out, so renaming a layer can't leave
-// this pointing at an id that no longer exists - which would silently stop
-// the patterns mounting. A *tinted* entry, since a pattern-only one
-// (forest) has no layer of its own.
-const TERRAIN_ANCHOR_LAYER = TERRAIN_FILLS.find((fill) => fill.color !== undefined)!.id
-
-function TerrainPatterns() {
-  const { current: map } = useMap()
-  const [ready, setReady] = useState(false)
-
-  useEffect(() => {
-    if (!map) return
-    let cancelled = false
-
-    const ensurePatterns = () => {
-      if (cancelled) return
-      try {
-        for (const { id, build } of TERRAIN_PATTERNS) {
-          if (map.hasImage(id)) continue
-          const { width, height, data } = build()
-          map.addImage(id, { width, height, data })
-        }
-        // Both halves belong in the state, not just the images. Switching
-        // activity swaps the style asynchronously: this component re-renders
-        // the moment the prop changes, while the map still holds the *old*
-        // style, so a layer check done during render sees the wrong one. By
-        // the time the new style has loaded, only `styledata` fires - and if
-        // `ready` were already true, setting it true again is a no-op React
-        // skips, so nothing would ever re-render and the patterns would
-        // simply never appear on the style switched to.
-        setReady(
-          TERRAIN_PATTERNS.every(({ id }) => map.hasImage(id)) && Boolean(map.getLayer(TERRAIN_ANCHOR_LAYER)),
-        )
-      } catch {
-        // The style wasn't ready for addImage yet; a later styledata event
-        // during this style load will retry.
-      }
-    }
-
-    ensurePatterns()
-    map.on("styledata", ensurePatterns)
-    return () => {
-      cancelled = true
-      map.off("styledata", ensurePatterns)
-    }
-  }, [map])
-
-  // `ready` already covers both the images and this style having terrain
-  // fills at all, so a style without them (cycling) renders nothing.
-  if (!ready || !map) return null
-  const beforeId = map.getLayer(TERRAIN_BEFORE_ID) ? TERRAIN_BEFORE_ID : undefined
-
-  return (
-    <>
-      {TERRAIN_FILLS.filter(({ patternId }) => patternId !== undefined).map(({ id, filter, patternId }) => (
-        <Layer
-          key={id}
-          id={`${id}_pattern`}
-          type="fill"
-          source="openmaptiles"
-          source-layer="landcover"
-          beforeId={beforeId}
-          filter={filter as never}
-          paint={{ "fill-pattern": patternId as string }}
-        />
-      ))}
-    </>
   )
 }
 
@@ -1805,7 +1718,6 @@ export function RouteMap({
           <BearingSync onBearingChange={setBearing} />
           <PlanningCursor active={planning !== undefined} />
           <BasemapPoiFilter />
-          <TerrainPatterns />
           <MapPoiOverlay poiTypes={overlayPoiTypes} />
 
           {hasRoute && (
