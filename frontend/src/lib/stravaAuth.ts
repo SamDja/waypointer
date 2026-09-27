@@ -8,9 +8,11 @@ export function stravaRedirectUri(): string {
   return `${window.location.origin}/strava-callback.html`
 }
 
-// What Strava must grant for the import dialog to see private routes, which
-// most planned routes are. Strava's scopes are comma-separated.
-const REQUIRED_SCOPES = ["read_all"]
+// Strava's scopes are comma-separated. read_all is what lets the import
+// dialog see private routes (most planned routes are); activity:read_all
+// is what lets it list activities at all.
+const PRIVATE_ROUTES_SCOPE = "read_all"
+const ACTIVITIES_SCOPE = "activity:read_all"
 
 export interface StravaTokenResult {
   accessToken: string
@@ -69,15 +71,23 @@ export function refreshStravaTokens(refreshToken: string): Promise<StravaTokenRe
   return requestTokens("refresh_token", refreshToken)
 }
 
+// Whether this connection may list activities. Connections made before
+// activity import only granted routes; unknown (nothing recorded) is
+// treated as yes, and Strava's own 401 then asks for a reconnect.
+export function hasStravaActivityScope(scope: string | undefined): boolean {
+  return scope === undefined || scope.split(",").includes(ACTIVITIES_SCOPE)
+}
+
 // Strava lets the visitor untick scopes on its consent page, and reports
-// what was actually granted on the redirect. Without read_all the import
-// dialog only sees public routes, which would look like routes going
-// missing - so say so at connect time. Null if nothing's missing or Strava
-// didn't report a scope at all.
+// what was actually granted on the redirect. A missing one would look like
+// routes or activities going missing, so say so at connect time. Null if
+// nothing's missing or Strava didn't report a scope at all.
 export function missingStravaScopeWarning(scope: string | null): string | null {
   if (!scope) return null
   const granted = scope.split(",")
-  const missing = REQUIRED_SCOPES.filter((s) => !granted.includes(s))
+  const missing: string[] = []
+  if (!granted.includes(PRIVATE_ROUTES_SCOPE)) missing.push("your private routes")
+  if (!granted.includes(ACTIVITIES_SCOPE)) missing.push("your activities")
   if (missing.length === 0) return null
-  return "Connected to Strava, but without access to private routes - only your public routes can be imported."
+  return `Connected to Strava, but without access to ${missing.join(" or ")} - reconnect and allow them to import those too.`
 }

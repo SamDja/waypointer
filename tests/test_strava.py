@@ -9,6 +9,7 @@ import responses
 from fastapi.testclient import TestClient
 
 from waypointer import strava
+from waypointer.gpx_io import parse_gpx, route_coordinates, route_elevations
 from waypointer.main import app
 
 TOKEN_URL = f"{strava.STRAVA_OAUTH_BASE}/token"
@@ -18,6 +19,9 @@ ROUTES_URL = f"{strava.STRAVA_API_BASE}/athletes/{ATHLETE_ID}/routes"
 # Past 2**53, as real Strava route ids are - why the API is read by id_str.
 ROUTE_ID = "3344556677889900112"
 EXPORT_URL = f"{strava.STRAVA_API_BASE}/routes/{ROUTE_ID}/export_gpx"
+ACTIVITIES_URL = f"{strava.STRAVA_API_BASE}/athlete/activities"
+ACTIVITY_ID = "15551234567"
+STREAMS_URL = f"{strava.STRAVA_API_BASE}/activities/{ACTIVITY_ID}/streams"
 BEARER = {"Authorization": "Bearer visitor-token"}
 
 client = TestClient(app)
@@ -63,7 +67,7 @@ def test_authorize_url_carries_client_scope_and_callback():
     query = parse_qs(url.query)
     assert url.netloc == "www.strava.com" and url.path == "/oauth/authorize"
     assert query["client_id"] == ["4242"]
-    assert query["scope"] == ["read,read_all"]
+    assert query["scope"] == ["read,read_all,activity:read_all"]
     assert query["redirect_uri"] == ["https://example.org/strava-callback.html"]
     assert query["state"] == ["xyz"]
     assert "client_secret" not in query
@@ -204,3 +208,139 @@ def test_deauthorize_sends_the_token():
     responses.add(responses.POST, DEAUTHORIZE_URL, json={"access_token": "visitor-token"}, status=200)
     assert client.post("/api/strava/deauthorize", headers=BEARER).status_code == 204
     assert parse_qs(responses.calls[0].request.body)["access_token"] == ["visitor-token"]
+
+
+def _activity_json(activity_id: int, name: str, **overrides) -> dict:
+    data = {
+        "id": activity_id,
+        "name": name,
+        "sport_type": "GravelRide",
+        "type": "Ride",
+        "distance": 61_000.0,
+        "total_elevation_gain": 1_020.0,
+        "start_date": "2026-09-14T07:30:00Z",
+        "start_latlng": [46.07, 11.12],
+        "trainer": False,
+        "manual": False,
+    }
+    data.update(overrides)
+    return data
+
+
+@responses.activate
+def test_activities_skip_ones_without_a_gps_track():
+    responses.add(
+        responses.GET,
+        ACTIVITIES_URL,
+        json=[
+            _activity_json(int(ACTIVITY_ID), "Morning gravel"),
+            _activity_json(2, "Zwift", start_latlng=[], trainer=True),
+            _activity_json(3, "Logged by hand", start_latlng=None, manual=True),
+        ],
+        status=200,
+    )
+    response = client.get("/api/strava/activities", headers=BEARER)
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "activities": [
+            {
+                "id": ACTIVITY_ID,
+                "name": "Morning gravel",
+                "sport_type": "GravelRide",
+                "distance_m": 61_000.0,
+                "ascent_m": 1_020.0,
+                "start_date": "2026-09-14T07:30:00Z",
+            }
+        ],
+        # Strava sent fewer than a full page: that was the last one.
+        "has_more": False,
+    }
+    assert responses.calls[0].request.headers["Authorization"] == "Bearer visitor-token"
+
+
+@responses.activate
+def test_activities_come_one_page_of_twenty_at_a_time():
+    # A full page from Strava - all indoor rides, so none of them shown -
+    # still means there may be more, rather than ending the list.
+    responses.add(
+        responses.GET,
+        ACTIVITIES_URL,
+        json=[_activity_json(i, "Zwift", start_latlng=[], trainer=True) for i in range(20)],
+        status=200,
+    )
+    response = client.get("/api/strava/activities", params={"page": 3}, headers=BEARER)
+
+    assert response.status_code == 200
+    assert response.json() == {"activities": [], "has_more": True}
+    assert len(responses.calls) == 1
+    query = parse_qs(urlparse(responses.calls[0].request.url).query)
+    assert query["page"] == ["3"] and query["per_page"] == ["20"]
+
+
+@pytest.mark.parametrize("page", [0, -1, "x"])
+def test_activities_refuse_a_bad_page(page):
+    assert client.get("/api/strava/activities", params={"page": page}, headers=BEARER).status_code == 422
+
+
+@responses.activate
+def test_activities_without_the_scope_ask_to_reconnect():
+    # What Strava answers a token granted before activity:read_all was asked for.
+    responses.add(
+        responses.GET,
+        ACTIVITIES_URL,
+        json={"message": "Authorization Error", "errors": [{"field": "activity:read_permission", "code": "missing"}]},
+        status=401,
+    )
+    assert client.get("/api/strava/activities", headers=BEARER).status_code == 401
+
+
+@responses.activate
+def test_import_activity_builds_a_gpx_track_with_elevation():
+    responses.add(
+        responses.GET,
+        STREAMS_URL,
+        json={
+            "latlng": {"data": [[46.07, 11.12], [46.08, 11.13], [46.09, 11.15]]},
+            "altitude": {"data": [194.0, 210.5, 250.0]},
+            "distance": {"data": [0.0, 1300.0, 2900.0]},
+        },
+        status=200,
+    )
+    response = client.post(
+        "/api/strava/import-activity", data={"activity_id": ACTIVITY_ID, "name": "Morning gravel"}, headers=BEARER
+    )
+
+    assert response.status_code == 200
+    gpx = parse_gpx(response.content)
+    assert gpx.tracks[0].name == "Morning gravel"
+    assert route_coordinates(gpx) == [(46.07, 11.12), (46.08, 11.13), (46.09, 11.15)]
+    assert route_elevations(gpx) == [194.0, 210.5, 250.0]
+    query = parse_qs(urlparse(responses.calls[0].request.url).query)
+    assert query["keys"] == ["latlng,altitude"] and query["key_by_type"] == ["true"]
+
+
+@responses.activate
+def test_import_activity_without_altitude_still_imports():
+    responses.add(
+        responses.GET, STREAMS_URL, json={"latlng": {"data": [[46.07, 11.12], [46.08, 11.13]]}}, status=200
+    )
+    response = client.post("/api/strava/import-activity", data={"activity_id": ACTIVITY_ID}, headers=BEARER)
+
+    assert response.status_code == 200
+    assert route_elevations(parse_gpx(response.content)) == [None, None]
+
+
+@responses.activate
+def test_import_activity_without_gps_is_a_400():
+    responses.add(responses.GET, STREAMS_URL, json={"time": {"data": [0, 1, 2]}}, status=200)
+    response = client.post("/api/strava/import-activity", data={"activity_id": ACTIVITY_ID}, headers=BEARER)
+    assert response.status_code == 400
+    assert "no GPS track" in response.json()["detail"]
+
+
+@pytest.mark.parametrize("activity_id", ["12/../../athlete", "abc", "１２３"])
+def test_import_activity_refuses_anything_but_a_numeric_id(activity_id):
+    response = client.post("/api/strava/import-activity", data={"activity_id": activity_id}, headers=BEARER)
+    assert response.status_code == 400
+    assert "isn't a Strava activity id" in response.json()["detail"]

@@ -167,3 +167,21 @@ export interface StravaRouteResponse {
   ascent_m: number
   created_at: string
 }
+
+// Mirrors schemas.StravaActivityResponse - a recorded activity with a GPS
+// track, importable as a route to follow again.
+export interface StravaActivityResponse {
+  id: string
+  name: string
+  // Strava's sport_type, e.g. "Ride", "GravelRide", "Hike".
+  sport_type: string
+  distance_m: number
+  ascent_m: number
+  start_date: string
+}
+
+// Mirrors schemas.StravaActivitiesPage - activities come 20 at a time.
+export interface StravaActivitiesPage {
+  activities: StravaActivityResponse[]
+  has_more: boolean
+}

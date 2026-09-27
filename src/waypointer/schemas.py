@@ -229,3 +229,22 @@ class StravaRouteResponse(BaseModel):
     distance_m: float
     ascent_m: float
     created_at: str
+
+
+class StravaActivityResponse(BaseModel):
+    # One of the visitor's recorded Strava activities with a GPS track - see
+    # strava.StravaActivity. Imported as a route to follow again.
+    id: str
+    name: str
+    # Strava's sport_type, e.g. "Ride", "GravelRide", "Hike".
+    sport_type: str
+    distance_m: float
+    ascent_m: float
+    start_date: str
+
+
+class StravaActivitiesPage(BaseModel):
+    # One page of /api/strava/activities - the dialog asks for the next one
+    # only while `has_more` and the visitor wants more.
+    activities: list[StravaActivityResponse]
+    has_more: bool

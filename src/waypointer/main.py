@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from fastapi import Depends, FastAPI, Form, Header, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, Form, Header, HTTPException, Query, UploadFile
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from gpxpy.gpx import GPX, GPXException, GPXWaypoint
@@ -83,6 +83,8 @@ from waypointer.schemas import (
     RouteLegResponse,
     SurfaceRunResponse,
     SearchRange,
+    StravaActivitiesPage,
+    StravaActivityResponse,
     StravaAuthorizeUrl,
     StravaRouteResponse,
     StravaTokenResponse,
@@ -710,6 +712,57 @@ def strava_import_route(route_id: str = Form(...), authorization: str | None = H
         content=gpx_bytes,
         media_type="application/gpx+xml",
         headers={"Content-Disposition": 'attachment; filename="strava_route.gpx"'},
+    )
+
+
+@app.get(
+    "/api/strava/activities",
+    response_model=StravaActivitiesPage,
+    dependencies=[Depends(strava_rate_limit)],
+)
+def strava_activities(
+    page: int = Query(1, ge=1, le=1000),
+    authorization: str | None = Header(None),
+) -> StravaActivitiesPage:
+    """One page of the visitor's Strava activities that have a GPS track,
+    newest first, for the import dialog - a ride already done, to follow
+    again. Paged (strava.ACTIVITIES_PER_PAGE) because an athlete can have
+    thousands; the dialog asks for the next page on "Load more"."""
+    try:
+        activities, has_more = strava.list_activities(_strava_access_token(authorization), page)
+    except strava.StravaError as exc:
+        raise _strava_http_error(exc) from exc
+    return StravaActivitiesPage(
+        activities=[StravaActivityResponse(**vars(activity)) for activity in activities],
+        has_more=has_more,
+    )
+
+
+@app.post("/api/strava/import-activity", dependencies=[Depends(strava_rate_limit)])
+def strava_import_activity(
+    activity_id: str = Form(...),
+    name: str = Form(""),
+    authorization: str | None = Header(None),
+) -> Response:
+    """One Strava activity's GPS track as a GPX route, entering the same
+    pipeline as an upload. Built here from the activity's streams, since
+    Strava's API has no GPX export for activities (see strava.py)."""
+    try:
+        gpx_bytes = strava.export_activity_gpx(_strava_access_token(authorization), activity_id, name)
+    except ValueError as exc:
+        # A malformed id, or an activity recorded without GPS.
+        detail = (
+            "That isn't a Strava activity id."
+            if not (activity_id.isascii() and activity_id.isdigit())
+            else "This Strava activity has no GPS track, so it can't be imported."
+        )
+        raise HTTPException(status_code=400, detail=detail) from exc
+    except strava.StravaError as exc:
+        raise _strava_http_error(exc) from exc
+    return Response(
+        content=gpx_bytes,
+        media_type="application/gpx+xml",
+        headers={"Content-Disposition": 'attachment; filename="strava_activity.gpx"'},
     )
 
 

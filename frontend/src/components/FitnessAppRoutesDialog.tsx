@@ -1,5 +1,5 @@
-import { ExternalLinkIcon, PencilIcon, Trash2Icon } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { CircleAlertIcon, ExternalLinkIcon, PencilIcon, RotateCwIcon, Trash2Icon } from "lucide-react"
+import { useEffect, useState } from "react"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,8 +21,17 @@ import {
 import { StravaLogo, WahooLogo } from "@/components/FitnessAppLogos"
 import { RouteNameDialog } from "@/components/RouteNameDialog"
 import { importWahooRoute } from "@/lib/api"
-import { importStravaRoute, listStravaRoutes, stravaRouteUrl } from "@/lib/stravaApi"
-import { getValidStravaTokens } from "@/lib/stravaSettings"
+import { hasStravaActivityScope } from "@/lib/stravaAuth"
+import {
+  importStravaActivity,
+  importStravaRoute,
+  listStravaActivities,
+  listStravaRoutes,
+  stravaRouteUrl,
+  stravaSportLabel,
+  type StravaActivity,
+} from "@/lib/stravaApi"
+import { getValidStravaTokens, loadStravaTokens } from "@/lib/stravaSettings"
 import { toast, updateToast } from "@/lib/toast"
 import { deleteWahooRoute, listWahooRoutes, updateWahooRouteName, type WahooRoute } from "@/lib/wahooApi"
 import { getValidWahooAccessToken } from "@/lib/wahooSettings"
@@ -32,16 +41,23 @@ export type RouteSource = "wahoo" | "strava"
 
 const SOURCE_NAMES: Record<RouteSource, string> = { wahoo: "Wahoo", strava: "Strava" }
 
-// One route from any connected app, as the dialog lists it. Only Wahoo's
-// API can rename or delete a route - Strava's is read-only - so a Wahoo
-// route keeps what those calls need.
+// One route from any connected app, as the dialog lists it - a saved
+// route, or (Strava only) a recorded activity whose track can be followed
+// again. Only Wahoo's API can rename or delete a route - Strava's is
+// read-only - so a Wahoo route keeps what those calls need.
 interface RemoteRoute {
   source: RouteSource
-  // Unique across sources - two apps can hand out the same id.
+  kind: "route" | "activity"
+  // Unique across sources and kinds - two apps can hand out the same id.
   key: string
   id: string
   name: string
+  // What the row says it is: "Route", or the activity's sport.
+  label: string
   distanceM: number
+  // Total climb, as the app reports it.
+  ascentM: number
+  // When it was created, or for an activity, when it was recorded.
   createdAt: string
   wahoo?: WahooRoute
 }
@@ -49,10 +65,13 @@ interface RemoteRoute {
 function fromWahoo(route: WahooRoute): RemoteRoute {
   return {
     source: "wahoo",
+    kind: "route",
     key: `wahoo:${route.id}`,
     id: String(route.id),
     name: route.name,
+    label: "Route",
     distanceM: route.distanceM,
+    ascentM: route.ascentM,
     createdAt: route.createdAt,
     wahoo: route,
   }
@@ -67,21 +86,81 @@ function byNewest(a: RemoteRoute, b: RemoteRoute): number {
   return tb - ta
 }
 
-async function fetchSource(source: RouteSource): Promise<RemoteRoute[]> {
-  if (source === "wahoo") {
-    const accessToken = await getValidWahooAccessToken()
-    return (await listWahooRoutes(accessToken)).map(fromWahoo)
-  }
-  const tokens = await getValidStravaTokens()
-  const routes = await listStravaRoutes(tokens.accessToken, tokens.athleteId)
-  return routes.map((route) => ({
+function fromStravaActivity(activity: StravaActivity): RemoteRoute {
+  return {
     source: "strava",
-    key: `strava:${route.id}`,
-    id: route.id,
-    name: route.name,
-    distanceM: route.distanceM,
-    createdAt: route.createdAt,
-  }))
+    kind: "activity",
+    key: `strava-activity:${activity.id}`,
+    id: activity.id,
+    name: activity.name,
+    label: stravaSportLabel(activity.sportType),
+    distanceM: activity.distanceM,
+    ascentM: activity.ascentM,
+    createdAt: activity.startDate,
+  }
+}
+
+// One page of Strava activities, as dialog rows - they come a page at a
+// time (the backend's strava.ACTIVITIES_PER_PAGE, 20), since an athlete
+// can have thousands.
+async function loadActivityPage(page: number): Promise<{ routes: RemoteRoute[]; hasMore: boolean }> {
+  const tokens = await getValidStravaTokens()
+  const { activities, hasMore } = await listStravaActivities(tokens.accessToken, page)
+  return { routes: activities.map(fromStravaActivity), hasMore }
+}
+
+// One thing the dialog lists on its own, so one failing still shows the rest.
+interface Listing {
+  source: RouteSource
+  // What the dialog says when this one couldn't be loaded.
+  failed: string
+  // `hasMore` is only set by a paged listing (activities).
+  load: () => Promise<{ routes: RemoteRoute[]; hasMore?: boolean }>
+}
+
+function listings(wahooConnected: boolean, stravaConnected: boolean, withActivities: boolean): Listing[] {
+  const result: Listing[] = []
+  if (wahooConnected) {
+    result.push({
+      source: "wahoo",
+      failed: "Couldn't load your Wahoo routes.",
+      load: async () => ({ routes: (await listWahooRoutes(await getValidWahooAccessToken())).map(fromWahoo) }),
+    })
+  }
+  if (stravaConnected) {
+    result.push({
+      source: "strava",
+      failed: "Couldn't load your Strava routes.",
+      load: async () => {
+        const tokens = await getValidStravaTokens()
+        const routes = await listStravaRoutes(tokens.accessToken, tokens.athleteId)
+        return {
+          routes: routes.map((route) => ({
+            source: "strava",
+            kind: "route",
+            key: `strava:${route.id}`,
+            id: route.id,
+            name: route.name,
+            label: "Route",
+            distanceM: route.distanceM,
+            ascentM: route.ascentM,
+            createdAt: route.createdAt,
+          })),
+        }
+      },
+    })
+    // A connection made before activity import can't list activities: the
+    // routes still show, and the dialog says how to get the rest.
+    if (withActivities && hasStravaActivityScope(loadStravaTokens()?.scope)) {
+      result.push({
+        source: "strava",
+        failed: "Couldn't load your Strava activities.",
+        // Just the first page; "Load more activities" fetches the rest.
+        load: () => loadActivityPage(1),
+      })
+    }
+  }
+  return result
 }
 
 async function downloadAsGpx(route: RemoteRoute): Promise<Blob> {
@@ -89,12 +168,24 @@ async function downloadAsGpx(route: RemoteRoute): Promise<Blob> {
     return (await importWahooRoute(route.wahoo.fileUrl)).blob
   }
   const tokens = await getValidStravaTokens()
-  return importStravaRoute(route.id, tokens.accessToken)
+  return route.kind === "activity"
+    ? importStravaActivity(route.id, route.name, tokens.accessToken)
+    : importStravaRoute(route.id, tokens.accessToken)
+}
+
+// A listing that couldn't be loaded, and why - kept on screen rather than
+// toasted, since toasts sit under this full-screen dialog.
+interface ListingFailure {
+  source: RouteSource
+  failed: string
+  // The request's own message (already fit to show), when it adds something
+  // - a wait time, or "disconnect and reconnect".
+  reason: string | null
 }
 
 function SourceBadge({ source }: { source: RouteSource }) {
   return (
-    <span className="flex w-14 shrink-0 items-center" title={SOURCE_NAMES[source]}>
+    <span className="flex items-center" title={SOURCE_NAMES[source]}>
       {source === "wahoo" ? <WahooLogo className="h-3 w-auto" /> : <StravaLogo className="size-4" />}
     </span>
   )
@@ -123,62 +214,93 @@ export function FitnessAppRoutesDialog(props: FitnessAppRoutesDialogProps) {
   const [renameTarget, setRenameTarget] = useState<WahooRoute | null>(null)
   const [pendingRename, setPendingRename] = useState<{ route: WahooRoute; newName: string } | null>(null)
   const [pendingDelete, setPendingDelete] = useState<WahooRoute | null>(null)
-
-  // Kept in a ref so the fetch effect below doesn't depend on it -
-  // onOpenChange is recreated on every parent render, and including it as a
-  // dep would re-run the effect (re-fetching the list) on every unrelated
-  // re-render while the dialog is open. toast() itself is a stable
-  // module-level import, so it doesn't need the same treatment.
-  const onOpenChangeRef = useRef(onOpenChange)
-  onOpenChangeRef.current = onOpenChange
+  const [failures, setFailures] = useState<ListingFailure[]>([])
+  const [importError, setImportError] = useState<string | null>(null)
+  // Bumped by "Try again" to re-run the load below.
+  const [reloadCount, setReloadCount] = useState(0)
+  // Activities come a page at a time: the last page loaded, whether Strava
+  // may have more, and the "Load more activities" request in flight.
+  const [activityPage, setActivityPage] = useState(0)
+  const [activitiesHaveMore, setActivitiesHaveMore] = useState(false)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+  const [loadMoreError, setLoadMoreError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!open) return
-    const sources: RouteSource[] = []
-    if (wahooConnected) sources.push("wahoo")
-    if (stravaConnected) sources.push("strava")
+    // Activities are only offered to import - there's nothing to manage on
+    // one, and "Manage routes" is about routes.
+    const toLoad = listings(wahooConnected, stravaConnected, mode === "import")
     let cancelled = false
     setIsLoading(true)
     setRoutes(null)
+    setFailures([])
+    setImportError(null)
+    setActivityPage(0)
+    setActivitiesHaveMore(false)
+    setLoadMoreError(null)
     ;(async () => {
-      // Each app is listed on its own, so one failing still shows the others.
-      const results = await Promise.allSettled(sources.map(fetchSource))
+      const results = await Promise.allSettled(toLoad.map((listing) => listing.load()))
       if (cancelled) return
       const loaded: RemoteRoute[] = []
-      let failures = 0
+      const failed: ListingFailure[] = []
       results.forEach((result, i) => {
         if (result.status === "fulfilled") {
-          loaded.push(...result.value)
+          loaded.push(...result.value.routes)
+          if (result.value.hasMore !== undefined) {
+            setActivityPage(1)
+            setActivitiesHaveMore(result.value.hasMore)
+          }
         } else {
-          failures += 1
-          const fallback = `Couldn't load your ${SOURCE_NAMES[sources[i]]} routes.`
-          toast(result.reason instanceof Error ? result.reason.message : fallback, "error")
+          const { source, failed: message } = toLoad[i]
+          const reason = result.reason instanceof Error ? result.reason.message : null
+          // A server error's message only restates the headline, so it's
+          // dropped; a wait time or "reconnect" is kept.
+          const restates = reason !== null && reason.startsWith(message.replace(/\.$/, ""))
+          failed.push({ source, failed: message, reason: restates ? null : reason })
         }
       })
       setIsLoading(false)
-      if (sources.length > 0 && failures === sources.length) {
-        onOpenChangeRef.current(false)
-        return
-      }
+      setFailures(failed)
       setRoutes(loaded.sort(byNewest))
     })()
     return () => {
       cancelled = true
     }
-  }, [open, wahooConnected, stravaConnected])
+  }, [open, mode, wahooConnected, stravaConnected, reloadCount])
+
+  async function handleLoadMoreActivities() {
+    const next = activityPage + 1
+    setIsLoadingMore(true)
+    setLoadMoreError(null)
+    try {
+      const { routes: more, hasMore } = await loadActivityPage(next)
+      setRoutes((prev) => {
+        const known = new Set(prev?.map((r) => r.key))
+        // A new activity recorded meanwhile shifts Strava's pages by one, so
+        // the next page can repeat the last one's final activity.
+        return [...(prev ?? []), ...more.filter((r) => !known.has(r.key))].sort(byNewest)
+      })
+      setActivityPage(next)
+      setActivitiesHaveMore(hasMore)
+    } catch (err) {
+      setLoadMoreError(err instanceof Error ? err.message : "Couldn't load more Strava activities.")
+    } finally {
+      setIsLoadingMore(false)
+    }
+  }
 
   async function handleImport(route: RemoteRoute) {
     if (mode !== "import") return
     setImportingKey(route.key)
+    setImportError(null)
     try {
       const blob = await downloadAsGpx(route)
       const file = new File([blob], `${route.name || `${route.source}-route`}.gpx`, { type: "application/gpx+xml" })
       props.onImport(file, route.source)
       onOpenChange(false)
     } catch (err) {
-      toast(
-        err instanceof Error ? err.message : `Failed to import the ${SOURCE_NAMES[route.source]} route.`,
-        "error",
+      setImportError(
+        err instanceof Error ? err.message : `Couldn't import "${route.name}" from ${SOURCE_NAMES[route.source]}.`,
       )
     } finally {
       setImportingKey(null)
@@ -227,6 +349,11 @@ export function FitnessAppRoutesDialog(props: FitnessAppRoutesDialogProps) {
     }
   }
 
+  // Read when the dialog renders: connecting again (from the fitness-apps
+  // dialog) updates the stored scope, and the dialog is closed meanwhile.
+  const activitiesNeedReconnect =
+    mode === "import" && stravaConnected && !hasStravaActivityScope(loadStravaTokens()?.scope)
+
   const manageDescription = stravaConnected
     ? wahooConnected
       ? "Rename or delete your Wahoo routes. Strava routes can only be changed on Strava."
@@ -240,70 +367,178 @@ export function FitnessAppRoutesDialog(props: FitnessAppRoutesDialogProps) {
           <DialogHeader>
             <DialogTitle>{mode === "import" ? "Import a route" : "Manage your routes"}</DialogTitle>
             <DialogDescription>
-              {mode === "import" ? "Pick a route from your fitness apps to import." : manageDescription}
+              {mode === "import"
+                ? stravaConnected
+                  ? "Pick a route, or an activity to ride again, from your fitness apps."
+                  : "Pick a route from your fitness apps to import."
+                : manageDescription}
             </DialogDescription>
           </DialogHeader>
+
+          {/* Inline rather than a toast: toasts sit under this full-screen
+              dialog. */}
+          {activitiesNeedReconnect && (
+            <p className="text-sm text-muted-foreground">
+              To import your Strava activities too, disconnect and reconnect Strava from "Manage fitness apps" -
+              it needs your permission to read them.
+            </p>
+          )}
+
+          {!isLoading && failures.length > 0 && (
+            <div role="alert" className="flex flex-col gap-2 rounded-md border border-destructive/40 p-3 text-sm">
+              {failures.map((failure) => (
+                <div key={failure.failed} className="flex items-start gap-2">
+                  <CircleAlertIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
+                  <div className="flex flex-col">
+                    <span className="font-medium">{failure.failed}</span>
+                    {failure.reason && <span className="text-muted-foreground">{failure.reason}</span>}
+                  </div>
+                </div>
+              ))}
+              <Button
+                variant="outline"
+                size="sm"
+                className="w-fit"
+                onClick={() => setReloadCount((count) => count + 1)}
+              >
+                <RotateCwIcon className="size-4" />
+                Try again
+              </Button>
+            </div>
+          )}
+
+          {importError && (
+            <p role="alert" className="flex items-center gap-2 text-sm text-destructive">
+              <CircleAlertIcon className="size-4 shrink-0" />
+              {importError}
+            </p>
+          )}
 
           {isLoading ? (
             <p className="text-sm text-muted-foreground">Loading your routes…</p>
           ) : routes && routes.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No routes in your connected apps.</p>
+            // Only claim there's nothing when every app actually answered -
+            // a failed one is shown above instead.
+            failures.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                {mode === "import" && stravaConnected
+                  ? "No routes or activities in your connected apps."
+                  : "No routes in your connected apps."}
+              </p>
+            )
           ) : (
-            <ul className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
-              {routes?.map((route) => (
-                <li key={route.key} className="flex items-center gap-2">
-                  <SourceBadge source={route.source} />
-                  <span className="flex-1 text-sm">
-                    {route.name} - {(route.distanceM / 1000).toFixed(1)}km
-                  </span>
-                  {mode === "import" ? (
-                    <Button
-                      onClick={() => handleImport(route)}
-                      loading={importingKey === route.key}
-                      disabled={importingKey !== null}
-                      size="sm"
-                    >
-                      Import
-                    </Button>
-                  ) : route.wahoo ? (
-                    <>
-                      <Button
-                        onClick={() => setRenameTarget(route.wahoo ?? null)}
-                        loading={renamingId === route.wahoo.id}
-                        disabled={renamingId !== null || deletingId !== null}
-                        size="icon-sm"
-                        variant="ghost"
-                        aria-label={`Rename ${route.name}`}
-                      >
-                        <PencilIcon className="size-4" />
-                      </Button>
-                      <Button
-                        onClick={() => setPendingDelete(route.wahoo ?? null)}
-                        loading={deletingId === route.wahoo.id}
-                        disabled={renamingId !== null || deletingId !== null}
-                        size="icon-sm"
-                        variant="ghost"
-                        aria-label={`Delete ${route.name}`}
-                      >
-                        <Trash2Icon className="size-4" />
-                      </Button>
-                    </>
-                  ) : (
-                    <Button asChild size="icon-sm" variant="ghost">
-                      <a
-                        href={stravaRouteUrl(route.id)}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label={`Open ${route.name} on Strava`}
-                        title="Open on Strava"
-                      >
-                        <ExternalLinkIcon className="size-4" />
-                      </a>
-                    </Button>
+            <div className="min-h-0 flex-1 overflow-auto">
+              {/* Scrolls sideways too: six columns don't fit a phone's width. */}
+              <table className="w-full min-w-[40rem] text-sm">
+                {/* Sticky so the columns stay labelled while a long list scrolls. */}
+                <thead className="sticky top-0 z-10 bg-background text-left text-xs text-muted-foreground">
+                  <tr className="border-b">
+                    <th scope="col" className="py-2 pr-3 font-medium sm:pr-4">
+                      Name
+                    </th>
+                    <th scope="col" className="w-24 py-2 pr-3 font-medium sm:w-32 sm:pr-4">
+                      Type
+                    </th>
+                    <th scope="col" className="w-20 py-2 pr-3 font-medium sm:w-28 sm:pr-4">
+                      Provenance
+                    </th>
+                    <th scope="col" className="w-24 py-2 pr-3 text-right font-medium sm:pr-4">
+                      Distance
+                    </th>
+                    <th scope="col" className="w-24 py-2 pr-3 text-right font-medium sm:pr-4">
+                      <span title="Total climb">Elevation</span>
+                    </th>
+                    {/* Pinned right, so the row's action stays in reach while a
+                        phone scrolls the other columns sideways. */}
+                    <th scope="col" className="sticky right-0 w-px bg-background py-2 pl-2">
+                      <span className="sr-only">Actions</span>
+                    </th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {routes?.map((route) => (
+                    <tr key={route.key} className="border-b last:border-b-0">
+                      <td className="py-2 pr-3 sm:pr-4">
+                        {route.name || "(unnamed)"}
+                      </td>
+                      <td className="py-2 pr-3 text-muted-foreground sm:pr-4">{route.label}</td>
+                      <td className="py-2 pr-3 sm:pr-4">
+                        <SourceBadge source={route.source} />
+                      </td>
+                      <td className="py-2 pr-3 text-right tabular-nums whitespace-nowrap sm:pr-4">
+                        {(route.distanceM / 1000).toFixed(1)} km
+                      </td>
+                      <td className="py-2 pr-3 text-right tabular-nums whitespace-nowrap sm:pr-4">
+                        {Math.round(route.ascentM).toLocaleString()} m
+                      </td>
+                      <td className="sticky right-0 bg-background py-2 pl-2">
+                        <div className="flex items-center justify-end gap-1">
+                          {mode === "import" ? (
+                            <Button
+                              onClick={() => handleImport(route)}
+                              loading={importingKey === route.key}
+                              disabled={importingKey !== null}
+                              size="sm"
+                            >
+                              Import
+                            </Button>
+                          ) : route.wahoo ? (
+                            <>
+                              <Button
+                                onClick={() => setRenameTarget(route.wahoo ?? null)}
+                                loading={renamingId === route.wahoo.id}
+                                disabled={renamingId !== null || deletingId !== null}
+                                size="icon-sm"
+                                variant="ghost"
+                                aria-label={`Rename ${route.name}`}
+                              >
+                                <PencilIcon className="size-4" />
+                              </Button>
+                              <Button
+                                onClick={() => setPendingDelete(route.wahoo ?? null)}
+                                loading={deletingId === route.wahoo.id}
+                                disabled={renamingId !== null || deletingId !== null}
+                                size="icon-sm"
+                                variant="ghost"
+                                aria-label={`Delete ${route.name}`}
+                              >
+                                <Trash2Icon className="size-4" />
+                              </Button>
+                            </>
+                          ) : (
+                            <Button asChild size="icon-sm" variant="ghost">
+                              <a
+                                href={stravaRouteUrl(route.id)}
+                                target="_blank"
+                                rel="noreferrer"
+                                aria-label={`Open ${route.name} on Strava`}
+                                title="Open on Strava"
+                              >
+                                <ExternalLinkIcon className="size-4" />
+                              </a>
+                            </Button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {mode === "import" && activitiesHaveMore && (
+                <div className="flex flex-col items-center gap-2 py-4">
+                  <Button variant="outline" size="sm" loading={isLoadingMore} onClick={handleLoadMoreActivities}>
+                    Load more activities
+                  </Button>
+                  {loadMoreError && (
+                    <p role="alert" className="flex items-center gap-2 text-sm text-destructive">
+                      <CircleAlertIcon className="size-4 shrink-0" />
+                      {loadMoreError}
+                    </p>
                   )}
-                </li>
-              ))}
-            </ul>
+                </div>
+              )}
+            </div>
           )}
         </DialogContent>
       </Dialog>

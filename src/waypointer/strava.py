@@ -10,7 +10,9 @@ and the credentials, and no dependence on Strava's CORS headers.
 Still stateless: the visitor's tokens live in their browser (localStorage)
 and are handed to each request that needs them, never stored or logged
 here. Strava's API has no route write endpoints at all (no create, rename
-or delete - /uploads takes activities only), so this module only reads.
+or delete - /uploads takes activities only), so this module only reads:
+saved routes, and recorded activities, whose GPS track is imported as a
+route to follow again.
 
 Structured like routing.py/geocode.py - an external HTTP dependency with the
 shared User-Agent and a small set of errors main.py maps to status codes.
@@ -20,21 +22,31 @@ import os
 from dataclasses import dataclass
 from urllib.parse import urlencode
 
+import gpxpy.gpx
 import requests
 
+from waypointer.gpx_io import to_xml_bytes
 from waypointer.routing import USER_AGENT
 
 STRAVA_OAUTH_BASE = "https://www.strava.com/oauth"
 STRAVA_API_BASE = "https://www.strava.com/api/v3"
 
 # `read` covers public routes, `read_all` private ones - most people's
-# planned routes are private. Strava's scopes are comma-separated.
-STRAVA_SCOPES = "read,read_all"
+# planned routes are private. `activity:read_all` is for importing a
+# recorded activity's track: unlike `activity:read`, it includes the
+# stretches inside the athlete's privacy zones, and a track with its ends
+# cut off isn't a route you can follow. It stays in their own browser.
+# Strava's scopes are comma-separated.
+STRAVA_SCOPES = "read,read_all,activity:read_all"
 
 # Strava pages route lists; stop after this many so a runaway account can't
 # turn one dialog opening into dozens of calls against the per-app quota.
 ROUTES_PER_PAGE = 100
 MAX_ROUTE_PAGES = 5
+# Activities come one page at a time, newest first, and the dialog asks
+# for the next page only when the visitor wants more: an athlete can have
+# thousands, and most imports are a recent ride.
+ACTIVITIES_PER_PAGE = 20
 
 TIMEOUT_S = 20
 
@@ -75,6 +87,18 @@ class StravaRoute:
     distance_m: float
     ascent_m: float
     created_at: str
+
+
+@dataclass(frozen=True)
+class StravaActivity:
+    # A string for the same reason as StravaRoute.id, and to keep one shape.
+    id: str
+    name: str
+    # Strava's sport_type, e.g. "Ride", "GravelRide", "Hike".
+    sport_type: str
+    distance_m: float
+    ascent_m: float
+    start_date: str
 
 
 def _credentials() -> tuple[str, str]:
@@ -216,13 +240,104 @@ def list_routes(access_token: str, athlete_id: int, session: requests.Session | 
     return routes
 
 
+def _activity(raw: dict) -> StravaActivity | None:
+    # An activity recorded without GPS (a trainer session, a manual entry)
+    # has no track to import, so it isn't offered at all.
+    if not raw.get("start_latlng") or raw.get("trainer") or raw.get("manual"):
+        return None
+    try:
+        return StravaActivity(
+            id=str(raw["id"]),
+            name=str(raw.get("name") or ""),
+            sport_type=str(raw.get("sport_type") or raw.get("type") or ""),
+            distance_m=float(raw.get("distance") or 0.0),
+            ascent_m=float(raw.get("total_elevation_gain") or 0.0),
+            start_date=str(raw.get("start_date") or ""),
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def list_activities(
+    access_token: str, page: int = 1, session: requests.Session | None = None
+) -> tuple[list[StravaActivity], bool]:
+    """One page (1-based) of the athlete's activities that have a GPS track,
+    newest first (Strava's own order for this endpoint), and whether there
+    may be more after it.
+
+    A page can hold fewer than ACTIVITIES_PER_PAGE, since activities without
+    a GPS track are dropped - "more" is judged on what Strava sent, before
+    that, so a page of indoor rides doesn't end the list early."""
+    response = _send(
+        "GET",
+        f"{STRAVA_API_BASE}/athlete/activities",
+        "activities",
+        session,
+        params={"page": page, "per_page": ACTIVITIES_PER_PAGE},
+        headers=_bearer(access_token),
+    )
+    try:
+        batch = response.json()
+    except ValueError as exc:
+        raise StravaError(f"Strava returned malformed activities: {exc}") from exc
+    if not isinstance(batch, list):
+        raise StravaError("Strava returned malformed activities.")
+    activities = [a for a in (_activity(r) for r in batch if isinstance(r, dict)) if a]
+    return activities, len(batch) == ACTIVITIES_PER_PAGE
+
+
+def _check_id(value: str, what: str) -> None:
+    # All digits, so nothing the caller sends can shape the URL beyond one id.
+    if not value.isascii() or not value.isdigit():
+        raise ValueError(f"{what} must be a Strava id.")
+
+
+def export_activity_gpx(
+    access_token: str, activity_id: str, name: str = "", session: requests.Session | None = None
+) -> bytes:
+    """An activity's GPS track as a GPX route. Strava's API has no GPX
+    export for activities (only the website does), so this builds one from
+    the activity's streams: positions, and elevation where it was recorded -
+    elevation matters, since a FIT course without it renders flat on a ROAM.
+
+    Raises ValueError for a malformed id, or an activity with no GPS track."""
+    _check_id(activity_id, "activity_id")
+    response = _send(
+        "GET",
+        f"{STRAVA_API_BASE}/activities/{activity_id}/streams",
+        "activity streams",
+        session,
+        params={"keys": "latlng,altitude", "key_by_type": "true"},
+        headers=_bearer(access_token),
+    )
+    try:
+        streams = response.json()
+        latlngs = streams.get("latlng", {}).get("data") or []
+        altitudes = streams.get("altitude", {}).get("data") or []
+        points = [(float(lat), float(lon)) for lat, lon in latlngs]
+    except (ValueError, TypeError, AttributeError) as exc:
+        raise StravaError(f"Strava returned malformed activity streams: {exc}") from exc
+    if len(points) < 2:
+        raise ValueError("This activity has no GPS track.")
+
+    gpx = gpxpy.gpx.GPX()
+    track = gpxpy.gpx.GPXTrack(name=name or None)
+    segment = gpxpy.gpx.GPXTrackSegment()
+    for i, (lat, lon) in enumerate(points):
+        # The two streams are index-parallel; altitude may be missing entirely.
+        elevation = altitudes[i] if i < len(altitudes) and isinstance(altitudes[i], (int, float)) else None
+        segment.points.append(gpxpy.gpx.GPXTrackPoint(lat, lon, elevation=elevation))
+    track.segments.append(segment)
+    gpx.tracks.append(track)
+    return to_xml_bytes(gpx)
+
+
 def export_route_gpx(access_token: str, route_id: str, session: requests.Session | None = None) -> bytes:
     """The route's GPX as Strava exports it. `route_id` must be all digits,
     so nothing the caller sends can shape the URL beyond one route id.
 
     Raises ValueError for a malformed id."""
-    if not route_id.isascii() or not route_id.isdigit():
-        raise ValueError("route_id must be a Strava route id.")
+    _check_id(route_id, "route_id")
     response = _send(
         "GET",
         f"{STRAVA_API_BASE}/routes/{route_id}/export_gpx",
