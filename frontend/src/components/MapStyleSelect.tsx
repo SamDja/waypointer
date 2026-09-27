@@ -35,7 +35,7 @@ export function MapStyleSelect({ value, onChange }: MapStyleSelectProps) {
         position="popper"
         align="start"
         sideOffset={4}
-        className="w-(--radix-select-trigger-width) rounded-xl p-1 shadow-lg"
+        className="w-(--radix-select-trigger-width) rounded-xl shadow-lg"
       >
         {MAP_STYLES.map((s) => (
           <SelectItem key={s.key} value={s.key}>

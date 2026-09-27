@@ -85,8 +85,12 @@ function SelectContent({
             // in popper mode, which clips the list to the height of one
             // trigger - a two-item menu shows as a sliver. Only the width
             // constraints are wanted: they're what makes a popper-positioned
-            // menu line up with its trigger.
-            "data-[position=popper]:w-full data-[position=popper]:min-w-(--radix-select-trigger-width)",
+            // menu line up with its trigger. The padding lives here rather
+            // than on the content: the viewport is at least the trigger's
+            // width, so padding on a trigger-width content pushes it 8px past
+            // the right edge, where overflow-x-hidden clips the inset off the
+            // items and their highlight runs flush to the edges.
+            "data-[position=popper]:w-full data-[position=popper]:min-w-(--radix-select-trigger-width) data-[position=popper]:p-1",
           )}
         >
           {children}
