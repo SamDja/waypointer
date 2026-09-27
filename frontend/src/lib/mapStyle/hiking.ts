@@ -15,13 +15,6 @@ import {
   type StylePatch,
 } from "./compose"
 import { CONTOUR_SOURCE_ID, contourLayers, contourSource } from "./contours"
-import {
-  BARE_ROCK_PATTERN_ID,
-  FOREST_PATTERN_ID,
-  SCREE_PATTERN_ID,
-  SCRUB_PATTERN_ID,
-  VINEYARD_PATTERN_ID,
-} from "./terrainPatterns"
 
 /**
  * The hiking activity patch: the walking network stands out, and what you
@@ -189,13 +182,6 @@ const PEAK_MIN_ZOOM = 11
  * Ground a walker has to plan around. The base style fills wood, grass, ice,
  * wetland and sand, and draws `class=rock` not at all - so above the
  * treeline its map goes blank exactly where the going gets hardest.
- *
- * Flat tints for now. A topo map stipples scree and hatches bare rock, which
- * needs a `fill-pattern`, which needs an image in the sprite that
- * OpenFreeMap's doesn't carry - so it would mean generating the patterns at
- * runtime and registering them the way RouteDirectionArrows registers its
- * arrowhead. Worth doing, but the texture is the kind of thing that has to
- * be seen to be judged, so it isn't being guessed at here.
  */
 const byClass = (cls: string): Expression => ["==", ["get", "class"], cls]
 const bySubclass = (cls: string, ...subclasses: string[]): Expression => [
@@ -211,53 +197,32 @@ const bySubclass = (cls: string, ...subclasses: string[]): Expression => [
  * one green, so forest, scrub, meadow and pasture are indistinguishable -
  * and farmland isn't drawn at all, despite being most of what a valley
  * walk crosses. On foot the difference is the walk: forest is shade and no
- * view, scrub is slow and scratchy, a vineyard usually has no way through,
- * scree is loose underfoot.
+ * view, scrub is slow and scratchy, scree is loose underfoot.
  *
- * Each entry is a tint plus, where texture earns its keep, a generated
- * pattern drawn over it (see terrainPatterns.ts). Order matters: later
- * entries draw over earlier ones, so the narrower subclass layers come
- * after the broad class ones they refine.
+ * Each entry is a flat tint. Order matters: later entries draw over earlier
+ * ones, so the narrower subclass layers come after the broad class ones they
+ * refine. Forest isn't here: the base's own landcover_wood already fills it,
+ * and is recoloured in hikingStyle below.
  */
 export const TERRAIN_FILLS: {
   id: string
   filter: Expression
-  // Omitted where the base style already fills this ground and only the
-  // texture is being added - see the forest entry.
-  color?: string
+  color: string
   opacity?: number
-  patternId?: string
 }[] = [
-    // Forest gets its tint from the base's own landcover_wood (recoloured
-    // below); this entry exists only to lay canopy texture over it.
-    {
-      id: "landcover_forest",
-      filter: byClass("wood"),
-      patternId: FOREST_PATTERN_ID,
-      opacity: 0.4
-    },
-    // Cultivated ground, which the base style leaves blank. Warm, to separate
-    // the worked valley floor from the green of rough grazing above it.
+    // Cultivated ground, which the base style leaves blank.
     {
       id: "landcover_farmland",
       filter: byClass("farmland"),
-      color: tailwindHex(colors.yellow[100]),
-      opacity: 0.4,
+      color: tailwindHex(colors.lime[500]),
+      opacity: 0.16,
     },
-    {
-      id: "landcover_vineyard",
-      filter: bySubclass("farmland", "vineyard", "orchard", "plant_nursery"),
-      color: tailwindHex(colors.amber[100]),
-      opacity: 0.6,
-      patternId: VINEYARD_PATTERN_ID,
-    },
-    // Open grazing and meadow: the easiest ground there is, so it stays a
-    // plain wash with no texture competing with the route line.
+    // Open grazing and meadow: the easiest ground there is.
     {
       id: "landcover_grassland",
       filter: bySubclass("grass", "grassland", "meadow", "pasture", "heath"),
-      color: tailwindHex(colors.lime[100]),
-      opacity: 0.4,
+      color: tailwindHex(colors.green[500]),
+      opacity: 0.16,
     },
     // Scrub is not grass to walk through, whatever the tiles say by lumping
     // them in one class.
@@ -266,43 +231,32 @@ export const TERRAIN_FILLS: {
       filter: bySubclass("grass", "scrub"),
       color: tailwindHex(colors.lime[200]),
       opacity: 0.5,
-      patternId: SCRUB_PATTERN_ID,
     },
     // Loose stone: the paler of the two rocks, since it's the more common
-    // ground and shouldn't dominate a whole cirque. Stippled.
+    // ground and shouldn't dominate a whole cirque.
     {
       id: "landcover_scree",
       filter: bySubclass("rock", "scree"),
-      color: tailwindHex(colors.stone[200]),
-      opacity: 0.85,
-      patternId: SCREE_PATTERN_ID,
+      color: tailwindHex(colors.stone[500]),
+      opacity: 0.16,
     },
-    // Solid rock and cliff faces: darker and hatched, so the difference
+    // Solid rock and cliff faces: darker, so the difference
     // between "slow going" and "not walkable" reads at a glance.
     {
       id: "landcover_bare_rock",
       filter: bySubclass("rock", "bare_rock"),
-      color: tailwindHex(colors.stone[400]),
-      opacity: 0.55,
-      patternId: BARE_ROCK_PATTERN_ID,
+      color: tailwindHex(colors.stone[800]),
+      opacity: 0.2,
     },
   ]
 
-// The layer the terrain fills sit directly beneath, which is also where the
-// pattern overlays have to be inserted so they land on top of their own
-// tint and still under every road.
-export const TERRAIN_BEFORE_ID = "landuse_pitch"
-
 const terrainLayers = (): LayerSpecification[] =>
-  TERRAIN_FILLS.filter(({ color }) => color !== undefined).map(({ id, filter, color, opacity }) => ({
+  TERRAIN_FILLS.map(({ id, filter, color, opacity }) => ({
     id,
     type: "fill",
     source: "openmaptiles",
     "source-layer": "landcover",
     filter,
-    // The flat tint is the floor: it renders immediately and with no
-    // dependency on an image, so terrain is never simply missing while the
-    // pattern images are being registered (or if that fails outright).
     paint: { "fill-color": color, "fill-opacity": opacity, "fill-antialias": false },
   })) as unknown as LayerSpecification[]
 
@@ -440,8 +394,7 @@ export const hikingStyle = (): StylePatch[] => [
 
   // Forest keeps the base's own layer - it already filters class=wood - but
   // in a green that separates it from open ground rather than blending in.
-  // Its canopy texture is added by the pattern overlay.
-  setPaint("landcover_wood", { "fill-color": tailwindHex(colors.green[200]), "fill-opacity": 0.55 }),
+  setPaint("landcover_wood", { "fill-color": tailwindHex(colors.green[700]), "fill-opacity": 0.2 }),
 
   // Names belong to the walking network here, not to the road network. The
   // base labels every road class, which on a hiking map is a screen of

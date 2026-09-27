@@ -27,8 +27,7 @@ Now the backend and frontend, side by side:
 ```bash
 uv sync
 uv run pytest
-POSTGIS_URL=postgresql://waypointer:waypointer@localhost:5432/pois \
-  uv run uvicorn waypointer.main:app --reload
+uv run --env-file .env uvicorn waypointer.main:app --reload
 ```
 
 ```bash
