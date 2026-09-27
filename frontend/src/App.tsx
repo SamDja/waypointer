@@ -12,7 +12,7 @@ import { ElevationProfile } from "@/components/ElevationProfile"
 import type { PlannerPoint } from "@/components/PlannerPointList"
 import { MapStyleSelect } from "@/components/MapStyleSelect"
 import { Toaster } from "@/components/Toaster"
-import { WahooProfileMenu } from "@/components/WahooProfileMenu"
+import { FitnessAppsMenu } from "@/components/FitnessAppsMenu"
 import { ActivitySwitchDialog, type ActivitySwitchConsequences } from "@/components/ActivitySwitchDialog"
 import { OffRouteDialog, type OffRouteItem } from "@/components/OffRouteDialog"
 import { ApiError, NETWORK_ERROR_MESSAGE, cooldownRemainingMs, findPois, lookupPoi, routeLeg } from "@/lib/api"
@@ -1774,7 +1774,7 @@ export default function App() {
           />
         </div>
         <div className="flex h-11 items-center rounded-xl bg-card px-1 shadow-lg ring-1 ring-foreground/10">
-          <WahooProfileMenu wahooTokens={wahooTokens} onWahooTokensChange={setWahooTokens} />
+          <FitnessAppsMenu wahooTokens={wahooTokens} onWahooTokensChange={setWahooTokens} />
         </div>
       </header>
 
