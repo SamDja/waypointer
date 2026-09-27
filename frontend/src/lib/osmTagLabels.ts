@@ -2,6 +2,8 @@
 // RouteMap.tsx's OsmTagList) - mirrors the lookup-table convention used by
 // poiTypes.ts's POI_TYPES, just keyed by raw OSM tag key instead of poi_type.
 
+import { isPhotoTag } from "@/lib/poiPhotos"
+
 // Friendly labels only - whether a value renders as a link is inferred
 // generically from the key/value shape (see inferHref) rather than curated
 // per key, so arbitrary contact:* / social tags (facebook, instagram, ...)
@@ -123,8 +125,9 @@ export interface FormattedOsmTag {
   wikiUrl: string
 }
 
+// Photo tags are shown as photos (see PoiPhotos.tsx), not as table rows.
 export function isExcludedOsmTag(key: string): boolean {
-  return EXCLUDED_OSM_TAGS.has(key)
+  return EXCLUDED_OSM_TAGS.has(key) || isPhotoTag(key)
 }
 
 export function formatOsmTag(key: string, value: string): FormattedOsmTag {

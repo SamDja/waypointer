@@ -43,6 +43,9 @@ GEOCODE_REQUESTS_PER_WINDOW = 30
 # Map POIs are fetched per viewport, debounced, and only past a zoom - so
 # this is panning around, not a fan-out like find-pois.
 MAP_POI_REQUESTS_PER_WINDOW = 60
+# One request per POI popup opened that has photo tags - clicking around the
+# map, and it protects Commons/Panoramax/Mapillary rather than our own DB.
+PHOTO_REQUESTS_PER_WINDOW = 60
 
 WINDOW_S = 60.0
 
@@ -94,3 +97,4 @@ lookup_poi_rate_limit = make_rate_limit("lookup_poi", LOOKUP_POI_REQUESTS_PER_WI
 routing_rate_limit = make_rate_limit("routing", ROUTING_REQUESTS_PER_WINDOW)
 geocode_rate_limit = make_rate_limit("geocode", GEOCODE_REQUESTS_PER_WINDOW)
 map_poi_rate_limit = make_rate_limit("map_poi", MAP_POI_REQUESTS_PER_WINDOW)
+photo_rate_limit = make_rate_limit("photos", PHOTO_REQUESTS_PER_WINDOW)

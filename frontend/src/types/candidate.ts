@@ -19,6 +19,7 @@ export interface PoiSearchConfig {
 // request bodies, so bloating it with tags would bloat every save/export
 // round trip too, not just the search response.
 export interface CandidateDetails {
+  osm_type: string // "node" | "way" | "relation"
   tags: Record<string, string>
   last_edited: string | null
 }
@@ -118,4 +119,30 @@ export interface MapPoi {
 
 export interface MapPoiResponse {
   pois: MapPoi[]
+}
+
+// Mirrors schemas.py's PoiPhoto/PhotoLink/PoiPhotosResponse - an OSM
+// element's photos, resolved from its tags by the backend's photos.py.
+export interface PoiPhoto {
+  source: "commons" | "panoramax" | "mapillary" | "web"
+  thumb_url: string
+  full_url: string
+  page_url: string
+  // ISO 8601 UTC - when taken where the service says, else when uploaded.
+  taken_at: string | null
+  author: string | null
+  license: string | null
+}
+
+// A photo that can only be linked to, not shown.
+export interface PhotoLink {
+  source: "mapillary" | "web"
+  url: string
+}
+
+export interface PoiPhotosResponse {
+  // Newest first, undated last.
+  photos: PoiPhoto[]
+  links: PhotoLink[]
+  failed_sources: string[]
 }

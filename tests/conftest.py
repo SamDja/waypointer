@@ -14,10 +14,12 @@ def _reset_shared_state():
     for why.)"""
     from waypointer.rate_limit import _requests_by_ip
     from waypointer.geocode import _cache as geocode_cache
+    from waypointer.photos import clear_caches as clear_photo_caches
     from waypointer.routing import _cache as routing_cache
 
     routing_cache.clear()
     geocode_cache.clear()
+    clear_photo_caches()
     _requests_by_ip.clear()
     yield
 
@@ -45,3 +47,23 @@ def brouter_response_json() -> dict:
 def photon_json() -> dict:
     """A real Photon response for "Trento" - see test_geocode.py."""
     return json.loads((FIXTURES_DIR / "photon_response.json").read_text())
+
+
+@pytest.fixture
+def commons_category_json() -> dict:
+    """A real Commons imageinfo response for two files of
+    Category:Rifugio_Tonini (bulky srcset fields dropped) - see test_photos.py."""
+    return json.loads((FIXTURES_DIR / "commons_category_response.json").read_text())
+
+
+@pytest.fixture
+def panoramax_json() -> dict:
+    """A real Panoramax meta-catalogue answer for one picture id (its bulky
+    exif/semantics properties dropped) - see test_photos.py."""
+    return json.loads((FIXTURES_DIR / "panoramax_response.json").read_text())
+
+
+@pytest.fixture
+def wikidata_p18_json() -> dict:
+    """A real wbgetclaims P18 response for Q3376 (Trento)."""
+    return json.loads((FIXTURES_DIR / "wikidata_p18_response.json").read_text())

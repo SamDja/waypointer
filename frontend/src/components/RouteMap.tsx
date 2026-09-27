@@ -30,6 +30,7 @@ import {
   Trash2Icon,
   type LucideIcon,
 } from "lucide-react"
+import { PoiPhotos } from "@/components/PoiPhotos"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
@@ -1343,8 +1344,11 @@ const BASEMAP_POI_LAYER_IDS = ["poi_r20", "poi_r7", "poi_r1"]
 // unclickable label.
 const HIKING_POI_LAYER_IDS = ["hiking_poi", "mountain_peak_point"]
 
-function osmEditNodeUrl(osmId: number): string {
-  return `https://www.openstreetmap.org/edit?editor=id&node=${osmId}`
+// osmType is "node", "way" or "relation" - iD takes the element's kind as
+// the parameter name, so a way's id passed as `node=` opens some unrelated
+// node instead.
+function osmEditUrl(osmType: string, osmId: number): string {
+  return `https://www.openstreetmap.org/edit?editor=id&${osmType}=${osmId}`
 }
 
 function osmEditNewNodeUrl(lat: number, lon: number): string {
@@ -1391,15 +1395,13 @@ function OsmTagLabel({ tag }: { tag: FormattedOsmTag }) {
 // reads better than a plain list once there are more than a couple of rows.
 // Values are truncated (see osmTagLabels.truncateOsmValue) rather than left
 // to wrap/overflow, since a long unbroken value (a URL) can force the popup
-// wider than its maxWidth. Wrapped in its own scroll container (rather than
-// the whole popup scrolling) so the header/checkbox/edit-link stay visible
-// once a tag-heavy POI's table exceeds the popup's own max-height (see
-// index.css's --rm-map-height-driven .maplibregl-popup-content rule).
+// wider than its maxWidth. Scrolls together with the photos above it (see
+// PoiPopupContent), not the whole popup.
 function OsmTagList({ tags }: { tags: Record<string, string> }) {
   const entries = groupOsmTags(tags)
   if (entries.length === 0) return null
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden">
+    <div>
       <table className="w-full mt-1 text-xs text-muted-foreground">
         <tbody>
           {entries.map((tag) => (
@@ -1508,7 +1510,15 @@ function PoiPopupContent({
           Edit on OpenStreetMap
         </a>
       </div>
-      <OsmTagList tags={tags} />
+      {/* Photos and tags share one scroll container, so the header and the
+          Include checkbox stay visible once they outgrow the popup's
+          max-height (see index.css's --rm-map-height-driven
+          .maplibregl-popup-content rule) - which on a phone's half-height
+          map is almost immediately. */}
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden flex flex-col gap-1">
+        <PoiPhotos name={name} tags={tags} osmEditUrl={osmEditUrl} />
+        <OsmTagList tags={tags} />
+      </div>
       <div className="shrink-0">
         {footer}
       </div>
@@ -1857,7 +1867,7 @@ export function RouteMap({
                       poiTypeLabel={poiType?.label}
                       tags={candidateDetails[candidate.osm_id]?.tags ?? {}}
                       lastEdited={candidateDetails[candidate.osm_id]?.last_edited ?? null}
-                      osmEditUrl={osmEditNodeUrl(candidate.osm_id)}
+                      osmEditUrl={osmEditUrl(candidateDetails[candidate.osm_id]?.osm_type ?? "node", candidate.osm_id)}
                       metaLine={
                         <p className="text-muted-foreground">{candidate.distance_m.toFixed(0)}m from route</p>
                       }
@@ -1928,7 +1938,7 @@ export function RouteMap({
                           poiTypeLabel={poiType?.label}
                           tags={result.tags}
                           lastEdited={result.last_edited}
-                          osmEditUrl={osmEditNodeUrl(result.osm_id)}
+                          osmEditUrl={osmEditUrl(result.osm_type, result.osm_id)}
                           footer={
                             hasRoute ? (
                               <div className="flex items-center gap-2">

@@ -57,10 +57,12 @@ from waypointer.rate_limit import (
     geocode_rate_limit,
     lookup_poi_rate_limit,
     map_poi_rate_limit,
+    photo_rate_limit,
     rate_limit,
     routing_rate_limit,
 )
 from waypointer.geocode import GeocodeError, GeocodeRateLimitedError, search_places
+from waypointer.photos import resolve_photos
 from waypointer.routing import USER_AGENT, RoutingError, RoutingRateLimitedError, route_leg
 from waypointer.schemas import (
     Candidate,
@@ -70,8 +72,11 @@ from waypointer.schemas import (
     FindPoisResponse,
     MapPoi,
     MapPoiResponse,
+    PhotoLink,
     PlaceResult,
     PoiLookupResult,
+    PoiPhoto,
+    PoiPhotosResponse,
     PoiSearchConfig,
     RouteLegResponse,
     SurfaceRunResponse,
@@ -118,6 +123,7 @@ _existing_waypoint_types_adapter = TypeAdapter(dict[str, str])
 # Values are left as parsed (Any): routing.resolve_options checks each one's
 # kind itself, where a bool | float adapter could quietly coerce 1 to True.
 _routing_options_adapter = TypeAdapter(dict[str, Any])
+_photo_tags_adapter = TypeAdapter(dict[str, str])
 
 
 async def _read_gpx_upload(gpx_file: UploadFile) -> tuple[GPX, list[LatLon]]:
@@ -276,7 +282,7 @@ async def find_pois(
                     )
                 )
                 candidate_details[node.id] = CandidateDetails(
-                    tags=node.tags, last_edited=node.timestamp
+                    osm_type=node.osm_type, tags=node.tags, last_edited=node.timestamp
                 )
 
     candidates.sort(key=lambda c: c.distance_m)
@@ -808,6 +814,39 @@ async def geocode_endpoint(
         PlaceResult(name=p.name, context=p.context, kind=p.kind, lat=p.lat, lon=p.lon, bbox=p.bbox)
         for p in places
     ]
+
+
+@app.post(
+    "/api/poi-photos",
+    response_model=PoiPhotosResponse,
+    dependencies=[Depends(photo_rate_limit)],
+)
+async def poi_photos_endpoint(tags: str = Form(...)) -> PoiPhotosResponse:
+    """The photos an OSM element's tags point to (`image`,
+    `wikimedia_commons`, `panoramax`, `mapillary`, `wikidata`), for its map
+    popup. Takes the tags rather than an OSM id so it works for any element
+    the frontend already holds tags for - a search candidate or a clicked
+    basemap POI - without a database round trip.
+
+    Proxied rather than resolved in the browser so the Mapillary token stays
+    server-side and answers are cached across visitors. Only 502s when there
+    were photos to find and every service holding them failed.
+    """
+    try:
+        parsed_tags = _photo_tags_adapter.validate_json(tags)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail="tags must be a JSON object of strings") from exc
+    result = await asyncio.to_thread(resolve_photos, parsed_tags)
+    if result.failed_sources and not result.photos and not result.links:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Photo lookup failed: {', '.join(result.failed_sources)}",
+        )
+    return PoiPhotosResponse(
+        photos=[PoiPhoto(**vars(photo)) for photo in result.photos],
+        links=[PhotoLink(source=link.source, url=link.url) for link in result.links],
+        failed_sources=list(result.failed_sources),
+    )
 
 
 # Catch-all mount for the built SPA - MUST be registered last. StaticFiles
