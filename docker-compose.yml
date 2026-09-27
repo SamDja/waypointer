@@ -27,6 +27,12 @@ services:
       # they're offered as links instead. Runtime, server-side only: never a
       # build arg, since it must not end up in the frontend bundle.
       - MAPILLARY_TOKEN=${MAPILLARY_TOKEN:-}
+      # Optional Strava API app credentials, for connecting a Strava account
+      # and importing its routes - see strava.py. Runtime, server-side only
+      # (Strava's token exchange needs the secret, so the frontend never sees
+      # either). Unset, the Strava row says it isn't set up.
+      - STRAVA_CLIENT_ID=${STRAVA_CLIENT_ID:-}
+      - STRAVA_CLIENT_SECRET=${STRAVA_CLIENT_SECRET:-}
     volumes:
       - ${CERTS_DIR:-./certs}:/certs:ro
     networks:

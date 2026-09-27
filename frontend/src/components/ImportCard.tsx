@@ -8,19 +8,17 @@ import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
 import { RemoveRouteButton } from "@/components/RemoveRouteButton"
 import { RouteStats } from "@/components/RouteStats"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { WahooRoutesDialog } from "@/components/WahooRoutesDialog"
-import { toast, updateToast } from "@/lib/toast"
-import { track } from "@/lib/analytics"
-import { missingWahooScopeWarning } from "@/lib/wahooAuth"
-import { connectWahoo } from "@/lib/wahooConnect"
-import { type WahooTokens } from "@/lib/wahooSettings"
+import { FitnessAppRoutesDialog, type RouteSource } from "@/components/FitnessAppRoutesDialog"
+import { FitnessAppsDialog } from "@/components/FitnessAppsDialog"
+import type { StravaTokens } from "@/lib/stravaSettings"
+import type { WahooTokens } from "@/lib/wahooSettings"
 import { cn } from "@/lib/utils"
 import { ArrowRightIcon, FileUp, FileText, PencilLine, Route } from "lucide-react"
 import type { ExistingWaypoint } from "@/types/candidate"
 
 export interface ImportCardProps {
   file: File | null
-  onFileChange: (file: File, source: "drop" | "browse" | "wahoo") => void
+  onFileChange: (file: File, source: "drop" | "browse" | RouteSource) => void
   onRemove: () => void
   onNext: () => void
   pointCount: number | null
@@ -37,6 +35,8 @@ export interface ImportCardProps {
   onAvgSpeedChange: (speedKmh: number) => void
   wahooTokens: WahooTokens | null
   onWahooTokensChange: (tokens: WahooTokens | null) => void
+  stravaTokens: StravaTokens | null
+  onStravaTokensChange: (tokens: StravaTokens | null) => void
   onHoverWaypoint?: (index: number | null) => void
   // Planning a new route is the alternative to loading one, and the same
   // planner edits a route that's already loaded. While it's active, App
@@ -63,13 +63,16 @@ export function ImportCard({
   onAvgSpeedChange,
   wahooTokens,
   onWahooTokensChange,
+  stravaTokens,
+  onStravaTokensChange,
   onHoverWaypoint,
   onStartPlanning,
 }: ImportCardProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [isDragActive, setIsDragActive] = useState(false)
-  const [isConnectingWahoo, setIsConnectingWahoo] = useState(false)
-  const [showWahooImport, setShowWahooImport] = useState(false)
+  const [showAppsDialog, setShowAppsDialog] = useState(false)
+  const [showRoutesImport, setShowRoutesImport] = useState(false)
+  const anyAppConnected = wahooTokens !== null || stravaTokens !== null
   const [activeTab, setActiveTab] = useState("info")
 
   // The first "Next" click routes through the Waypoints tab (if the file
@@ -89,24 +92,6 @@ export function ImportCard({
     setIsDragActive(false)
     const dropped = e.dataTransfer.files?.[0]
     if (dropped) onFileChange(dropped, "drop")
-  }
-
-  async function handleConnectWahoo() {
-    setIsConnectingWahoo(true)
-    const toastId = toast("Connecting to Wahoo...", "loading")
-    track("wahoo_connect_initiated", { source: "import_card" })
-    try {
-      const tokens = await connectWahoo()
-      onWahooTokensChange(tokens)
-      const scopeWarning = missingWahooScopeWarning(tokens)
-      updateToast(toastId, scopeWarning ?? "Connected to Wahoo.", scopeWarning !== null ? "error" : "success")
-      track("wahoo_connect_succeeded", { source: "import_card" })
-    } catch (err) {
-      updateToast(toastId, err instanceof Error ? err.message : "Failed to connect to Wahoo.", "error")
-      track("wahoo_connect_failed", { source: "import_card" })
-    } finally {
-      setIsConnectingWahoo(false)
-    }
   }
 
   if (file) {
@@ -246,18 +231,13 @@ export function ImportCard({
           />
         </div>
 
-        {wahooTokens ? (
-          <Button variant="secondary" className="w-full" onClick={() => setShowWahooImport(true)}>
-            Import from Wahoo
+        {anyAppConnected ? (
+          <Button variant="secondary" className="w-full" onClick={() => setShowRoutesImport(true)}>
+            Import from your fitness apps
           </Button>
         ) : (
-          <Button
-            variant="secondary"
-            className="w-full"
-            loading={isConnectingWahoo}
-            onClick={handleConnectWahoo}
-          >
-            {isConnectingWahoo ? "Connecting…" : "Connect Wahoo to import a route"}
+          <Button variant="secondary" className="w-full" onClick={() => setShowAppsDialog(true)}>
+            Connect a fitness app to import a route
           </Button>
         )}
       </section>
@@ -282,11 +262,21 @@ export function ImportCard({
         </div>
       </section>
 
-      <WahooRoutesDialog
-        open={showWahooImport}
-        onOpenChange={setShowWahooImport}
+      <FitnessAppRoutesDialog
+        open={showRoutesImport}
+        onOpenChange={setShowRoutesImport}
         mode="import"
-        onImport={(file) => onFileChange(file, "wahoo")}
+        wahooConnected={wahooTokens !== null}
+        stravaConnected={stravaTokens !== null}
+        onImport={(file, source) => onFileChange(file, source)}
+      />
+      <FitnessAppsDialog
+        open={showAppsDialog}
+        onOpenChange={setShowAppsDialog}
+        wahooTokens={wahooTokens}
+        onWahooTokensChange={onWahooTokensChange}
+        stravaTokens={stravaTokens}
+        onStravaTokensChange={onStravaTokensChange}
       />
     </div>
   )

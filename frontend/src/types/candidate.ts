@@ -146,3 +146,42 @@ export interface PoiPhotosResponse {
   links: PhotoLink[]
   failed_sources: string[]
 }
+
+// Mirrors schemas.StravaTokenResponse - /api/strava/token's answer.
+export interface StravaTokenResponse {
+  access_token: string
+  refresh_token: string
+  // Epoch seconds.
+  expires_at: number
+  // Only after a code exchange - a refresh doesn't carry the athlete.
+  athlete_id: number | null
+  athlete_label: string | null
+}
+
+// Mirrors schemas.StravaRouteResponse. `id` is a string: Strava's route ids
+// overflow a JS number.
+export interface StravaRouteResponse {
+  id: string
+  name: string
+  distance_m: number
+  ascent_m: number
+  created_at: string
+}
+
+// Mirrors schemas.StravaActivityResponse - a recorded activity with a GPS
+// track, importable as a route to follow again.
+export interface StravaActivityResponse {
+  id: string
+  name: string
+  // Strava's sport_type, e.g. "Ride", "GravelRide", "Hike".
+  sport_type: string
+  distance_m: number
+  ascent_m: number
+  start_date: string
+}
+
+// Mirrors schemas.StravaActivitiesPage - activities come 20 at a time.
+export interface StravaActivitiesPage {
+  activities: StravaActivityResponse[]
+  has_more: boolean
+}

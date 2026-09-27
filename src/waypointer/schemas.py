@@ -202,3 +202,49 @@ class WahooRoutePayload(BaseModel):
     ascent_m: float
     start_lat: float
     start_lng: float
+
+
+class StravaAuthorizeUrl(BaseModel):
+    # Where the Strava connect popup goes - built server-side because the
+    # client id lives in the server's env with the secret (see strava.py).
+    url: str
+
+
+class StravaTokenResponse(BaseModel):
+    # /api/strava/token's answer, for the browser to keep in localStorage.
+    access_token: str
+    refresh_token: str
+    # Epoch seconds, as Strava sends it.
+    expires_at: int
+    # Only present after a code exchange - a refresh doesn't carry the athlete.
+    athlete_id: int | None
+    athlete_label: str | None
+
+
+class StravaRouteResponse(BaseModel):
+    # One of the visitor's Strava routes - see strava.StravaRoute. `id` is a
+    # string because Strava's route ids overflow a JS number.
+    id: str
+    name: str
+    distance_m: float
+    ascent_m: float
+    created_at: str
+
+
+class StravaActivityResponse(BaseModel):
+    # One of the visitor's recorded Strava activities with a GPS track - see
+    # strava.StravaActivity. Imported as a route to follow again.
+    id: str
+    name: str
+    # Strava's sport_type, e.g. "Ride", "GravelRide", "Hike".
+    sport_type: str
+    distance_m: float
+    ascent_m: float
+    start_date: str
+
+
+class StravaActivitiesPage(BaseModel):
+    # One page of /api/strava/activities - the dialog asks for the next one
+    # only while `has_more` and the visitor wants more.
+    activities: list[StravaActivityResponse]
+    has_more: bool

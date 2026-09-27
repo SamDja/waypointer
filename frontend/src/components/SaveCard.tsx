@@ -33,7 +33,7 @@ import { missingWahooScopeWarning } from "@/lib/wahooAuth"
 import { connectWahoo } from "@/lib/wahooConnect"
 import { getValidWahooAccessToken, type WahooTokens } from "@/lib/wahooSettings"
 import type { Candidate, ExistingWaypoint } from "@/types/candidate"
-import { Download, Upload } from "lucide-react"
+import { Download, ExternalLink, Upload } from "lucide-react"
 
 // The visitor's chosen GPX <sym> for this type, if any, else the
 // registry's suggested default, else the type's own label - mirrors
@@ -58,6 +58,9 @@ export interface SaveCardProps {
   wahooSync: boolean
   wahooTokens: WahooTokens | null
   onWahooTokensChange: (tokens: WahooTokens | null) => void
+  // Strava's API can't receive a route (no route write endpoint at all), so
+  // a connected Strava only gets directions for adding the file by hand.
+  stravaConnected: boolean
 }
 
 export function SaveCard({
@@ -71,6 +74,7 @@ export function SaveCard({
   wahooSync,
   wahooTokens,
   onWahooTokensChange,
+  stravaConnected,
 }: SaveCardProps) {
   const [isSaving, setIsSaving] = useState(false)
   const [isConnectingWahoo, setIsConnectingWahoo] = useState(false)
@@ -276,6 +280,23 @@ export function SaveCard({
         {isSaving ? "Saving…" : "Download route"}
         <Download className="size-4"></Download>
       </Button>
+
+      {stravaConnected && (
+        <p className="text-xs text-muted-foreground">
+          To add it to Strava, download it as {isFit ? "a GPX file (choose Generic above)" : "GPX"} and import it
+          from{" "}
+          <a
+            href="https://www.strava.com/athlete/routes"
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-0.5 underline underline-offset-2 hover:text-foreground"
+          >
+            your routes on Strava
+            <ExternalLink className="size-3" />
+          </a>{" "}
+          - Strava doesn't let other apps send routes to it directly.
+        </p>
+      )}
 
       <RouteNameDialog
         open={showSaveNameDialog}

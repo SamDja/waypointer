@@ -93,6 +93,7 @@ import {
 import { clearDraft, loadDraft, saveDraft, type PlannerDraft } from "@/lib/plannerDraft"
 import { useElementHeight, useMapInsets } from "@/lib/useMapInsets"
 import { dismissToast, toast, updateToast } from "@/lib/toast"
+import { loadStravaTokens, type StravaTokens } from "@/lib/stravaSettings"
 import { loadWahooTokens, type WahooTokens } from "@/lib/wahooSettings"
 import type {
   Candidate,
@@ -204,6 +205,7 @@ export default function App() {
   } | null>(null)
   const [openStep, setOpenStep] = useState<Step | null>("import")
   const [wahooTokens, setWahooTokens] = useState<WahooTokens | null>(() => loadWahooTokens())
+  const [stravaTokens, setStravaTokens] = useState<StravaTokens | null>(() => loadStravaTokens())
   const [avgSpeedKmh, setAvgSpeedKmh] = useState<number>(() => loadAvgSpeedKmh(loadMapStyleKey()))
   const [mapStyleKey, setMapStyleKey] = useState<string>(() => loadMapStyleKey())
   // The activity a visitor has asked to switch to, held while they confirm.
@@ -431,7 +433,7 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [plannerState])
 
-  async function handleFileChange(newFile: File, source: "drop" | "browse" | "wahoo") {
+  async function handleFileChange(newFile: File, source: "drop" | "browse" | "wahoo" | "strava") {
     setFile(newFile)
     setFindResult(null)
     setSelectedIds(new Set())
@@ -1774,7 +1776,12 @@ export default function App() {
           />
         </div>
         <div className="flex h-11 items-center rounded-xl bg-card px-1 shadow-lg ring-1 ring-foreground/10">
-          <FitnessAppsMenu wahooTokens={wahooTokens} onWahooTokensChange={setWahooTokens} />
+          <FitnessAppsMenu
+            wahooTokens={wahooTokens}
+            onWahooTokensChange={setWahooTokens}
+            stravaTokens={stravaTokens}
+            onStravaTokensChange={setStravaTokens}
+          />
         </div>
       </header>
 
@@ -1924,6 +1931,8 @@ export default function App() {
                     onAvgSpeedChange={handleAvgSpeedChange}
                     wahooTokens={wahooTokens}
                     onWahooTokensChange={setWahooTokens}
+                    stravaTokens={stravaTokens}
+                    onStravaTokensChange={setStravaTokens}
                     onStartPlanning={() => handleStartPlanning()}
                   />
                 </StepCard>
@@ -1968,6 +1977,7 @@ export default function App() {
                     wahooSync={wahooSyncForStyle(mapStyleKey)}
                     wahooTokens={wahooTokens}
                     onWahooTokensChange={setWahooTokens}
+                    stravaConnected={stravaTokens !== null}
                   />
                 )}
               </>

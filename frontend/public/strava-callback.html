@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Connecting Strava…</title>
+</head>
+<body>
+  <p>Connecting your Strava account…</p>
+  <script>
+    var params = new URLSearchParams(window.location.search)
+    if (window.opener) {
+      window.opener.postMessage(
+        {
+          type: "strava-oauth",
+          code: params.get("code"),
+          state: params.get("state"),
+          error: params.get("error"),
+          scope: params.get("scope"),
+        },
+        window.location.origin
+      )
+    }
+    window.close()
+  </script>
+</body>
+</html>
