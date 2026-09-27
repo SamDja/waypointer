@@ -46,6 +46,10 @@ MAP_POI_REQUESTS_PER_WINDOW = 60
 # One request per POI popup opened that has photo tags - clicking around the
 # map, and it protects Commons/Panoramax/Mapillary rather than our own DB.
 PHOTO_REQUESTS_PER_WINDOW = 60
+# Every /api/strava/* call - connecting, listing routes, importing one. All of
+# them spend this app's single Strava quota (shared by every visitor), so a
+# visitor gets a few dialog openings and imports per minute, not a fan-out.
+STRAVA_REQUESTS_PER_WINDOW = 20
 
 WINDOW_S = 60.0
 
@@ -98,3 +102,4 @@ routing_rate_limit = make_rate_limit("routing", ROUTING_REQUESTS_PER_WINDOW)
 geocode_rate_limit = make_rate_limit("geocode", GEOCODE_REQUESTS_PER_WINDOW)
 map_poi_rate_limit = make_rate_limit("map_poi", MAP_POI_REQUESTS_PER_WINDOW)
 photo_rate_limit = make_rate_limit("photos", PHOTO_REQUESTS_PER_WINDOW)
+strava_rate_limit = make_rate_limit("strava", STRAVA_REQUESTS_PER_WINDOW)

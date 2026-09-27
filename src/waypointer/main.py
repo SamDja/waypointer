@@ -16,7 +16,7 @@ from typing import Any
 from urllib.parse import urlparse
 
 import requests
-from fastapi import Depends, FastAPI, Form, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, Form, Header, HTTPException, UploadFile
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from gpxpy.gpx import GPX, GPXException, GPXWaypoint
@@ -60,10 +60,12 @@ from waypointer.rate_limit import (
     photo_rate_limit,
     rate_limit,
     routing_rate_limit,
+    strava_rate_limit,
 )
 from waypointer.geocode import GeocodeError, GeocodeRateLimitedError, search_places
 from waypointer.photos import resolve_photos
 from waypointer.routing import USER_AGENT, RoutingError, RoutingRateLimitedError, route_leg
+from waypointer import strava
 from waypointer.schemas import (
     Candidate,
     CandidateDetails,
@@ -81,6 +83,9 @@ from waypointer.schemas import (
     RouteLegResponse,
     SurfaceRunResponse,
     SearchRange,
+    StravaAuthorizeUrl,
+    StravaRouteResponse,
+    StravaTokenResponse,
     WahooRoutePayload,
 )
 
@@ -102,6 +107,9 @@ WAHOO_FILE_HOST_SUFFIX = ".wahooligan.com"
 # Photon) throttles us with a 429 - they send no Retry-After of their own.
 # 30s follows the cool-down the OSM wiki recommends for its public services.
 UPSTREAM_RETRY_AFTER_S = 30
+# The only redirect /api/strava/authorize-url will build a URL for: the
+# popup's own callback page (frontend/public/strava-callback.html).
+STRAVA_CALLBACK_PATH = "/strava-callback.html"
 
 app = FastAPI(title="Sulla Via")
 
@@ -582,6 +590,126 @@ def wahoo_import_route(file_url: str = Form(...)) -> Response:
         content=gpx_bytes,
         media_type="application/gpx+xml",
         headers={"Content-Disposition": 'attachment; filename="wahoo_route.gpx"'},
+    )
+
+
+def _strava_http_error(exc: strava.StravaError) -> HTTPException:
+    """One Strava failure as the response the frontend expects: a 401 means
+    connect again, a 429 means back off, anything else is a 502."""
+    if isinstance(exc, strava.StravaNotConfiguredError):
+        return HTTPException(status_code=503, detail=str(exc))
+    if isinstance(exc, strava.StravaUnauthorizedError):
+        return HTTPException(
+            status_code=401,
+            detail="Strava didn't accept your connection - disconnect and reconnect Strava, then try again.",
+        )
+    if isinstance(exc, strava.StravaRateLimitedError):
+        return HTTPException(
+            status_code=429,
+            detail="Strava is busy - please wait a moment and try again.",
+            headers={"Retry-After": str(UPSTREAM_RETRY_AFTER_S)},
+        )
+    return HTTPException(status_code=502, detail=f"Strava request failed: {exc}")
+
+
+def _strava_access_token(authorization: str | None) -> str:
+    """The visitor's Strava access token, sent as `Authorization: Bearer`
+    and passed straight on to Strava - never stored or logged."""
+    scheme, _, token = (authorization or "").partition(" ")
+    if scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(status_code=401, detail="Connect Strava first.")
+    return token.strip()
+
+
+@app.get(
+    "/api/strava/authorize-url",
+    response_model=StravaAuthorizeUrl,
+    dependencies=[Depends(strava_rate_limit)],
+)
+def strava_authorize_url(redirect_uri: str, state: str) -> StravaAuthorizeUrl:
+    """Where the Strava connect popup should go. Built here rather than in
+    the browser because the client id is configured alongside the secret,
+    in the server's env. Only ever for our own callback page - Strava
+    checks the callback domain itself, this keeps the path fixed too."""
+    parsed = urlparse(redirect_uri)
+    if parsed.scheme not in ("http", "https") or not parsed.netloc or parsed.path != STRAVA_CALLBACK_PATH:
+        raise HTTPException(status_code=400, detail=f"redirect_uri must point at {STRAVA_CALLBACK_PATH}.")
+    try:
+        return StravaAuthorizeUrl(url=strava.authorize_url(redirect_uri, state))
+    except strava.StravaError as exc:
+        raise _strava_http_error(exc) from exc
+
+
+@app.post(
+    "/api/strava/token",
+    response_model=StravaTokenResponse,
+    dependencies=[Depends(strava_rate_limit)],
+)
+def strava_token(code: str | None = Form(None), refresh_token: str | None = Form(None)) -> StravaTokenResponse:
+    """Exchanges the popup's authorization code, or refreshes an expiring
+    token - the one step that needs the client secret, which is why Strava
+    is proxied at all (no PKCE on Strava's side, unlike Wahoo)."""
+    if (code is None) == (refresh_token is None):
+        raise HTTPException(status_code=400, detail="Send exactly one of code or refresh_token.")
+    try:
+        tokens = strava.exchange_code(code) if code is not None else strava.refresh_tokens(refresh_token or "")
+    except strava.StravaError as exc:
+        raise _strava_http_error(exc) from exc
+    return StravaTokenResponse(**vars(tokens))
+
+
+@app.post("/api/strava/deauthorize", status_code=204, dependencies=[Depends(strava_rate_limit)])
+def strava_deauthorize(authorization: str | None = Header(None)) -> Response:
+    """Revokes this app's access on Strava's side when the visitor
+    disconnects, rather than only forgetting the token in the browser."""
+    try:
+        strava.deauthorize(_strava_access_token(authorization))
+    except strava.StravaError as exc:
+        raise _strava_http_error(exc) from exc
+    return Response(status_code=204)
+
+
+@app.get(
+    "/api/strava/routes",
+    response_model=list[StravaRouteResponse],
+    dependencies=[Depends(strava_rate_limit)],
+)
+def strava_routes(athlete_id: int, authorization: str | None = Header(None)) -> list[StravaRouteResponse]:
+    """The visitor's Strava routes, for the import/manage dialog."""
+    try:
+        routes = strava.list_routes(_strava_access_token(authorization), athlete_id)
+    except strava.StravaError as exc:
+        raise _strava_http_error(exc) from exc
+    return [StravaRouteResponse(**vars(route)) for route in routes]
+
+
+@app.post("/api/strava/import-route", dependencies=[Depends(strava_rate_limit)])
+def strava_import_route(route_id: str = Form(...), authorization: str | None = Header(None)) -> Response:
+    """One Strava route as GPX, so it enters the same GPX pipeline as an
+    upload - Strava already exports GPX, so unlike /api/wahoo/import-route
+    there's no conversion, only a check that it's a route we can use."""
+    try:
+        gpx_bytes = strava.export_route_gpx(_strava_access_token(authorization), route_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="That isn't a Strava route id.") from exc
+    except strava.StravaError as exc:
+        raise _strava_http_error(exc) from exc
+
+    try:
+        coords = route_coordinates(parse_gpx(gpx_bytes))
+    except GPXException as exc:
+        raise HTTPException(
+            status_code=400, detail="This Strava route's file couldn't be read, so it can't be imported."
+        ) from exc
+    if not coords:
+        raise HTTPException(
+            status_code=400, detail="This Strava route has no track to follow, so it can't be imported."
+        )
+
+    return Response(
+        content=gpx_bytes,
+        media_type="application/gpx+xml",
+        headers={"Content-Disposition": 'attachment; filename="strava_route.gpx"'},
     )
 
 

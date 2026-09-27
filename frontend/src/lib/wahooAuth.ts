@@ -26,10 +26,6 @@ export function generateCodeVerifier(): string {
   return randomString(64)
 }
 
-export function generateState(): string {
-  return randomString(16)
-}
-
 export async function deriveCodeChallenge(codeVerifier: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(codeVerifier))
   return base64UrlEncode(new Uint8Array(digest))

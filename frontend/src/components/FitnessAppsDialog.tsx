@@ -1,8 +1,12 @@
 import { useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { WahooLogo } from "@/components/FitnessAppLogos"
+import { StravaWordmark, WahooLogo } from "@/components/FitnessAppLogos"
 import { track } from "@/lib/analytics"
+import { missingStravaScopeWarning } from "@/lib/stravaAuth"
+import { revokeStravaAccess } from "@/lib/stravaApi"
+import { connectStrava } from "@/lib/stravaConnect"
+import { clearStravaTokens, getValidStravaTokens, type StravaTokens } from "@/lib/stravaSettings"
 import { toast, updateToast } from "@/lib/toast"
 import { revokeWahooAccess } from "@/lib/wahooApi"
 import { missingWahooScopeWarning } from "@/lib/wahooAuth"
@@ -15,10 +19,12 @@ export interface FitnessAppsDialogProps {
   onOpenChange: (open: boolean) => void
   wahooTokens: WahooTokens | null
   onWahooTokensChange: (tokens: WahooTokens | null) => void
+  stravaTokens: StravaTokens | null
+  onStravaTokensChange: (tokens: StravaTokens | null) => void
 }
 
-// One row per app a visitor can connect. Only Wahoo exists today; Strava,
-// Garmin and the rest join this list, each bringing its own connect and
+// One row per app a visitor can connect - Wahoo and Strava today; Garmin
+// and the rest join this list, each bringing its own connect and
 // disconnect, and the dialog around them doesn't change.
 interface FitnessAppRow {
   key: string
@@ -34,8 +40,16 @@ interface FitnessAppRow {
 
 // Both "Connect your fitness apps" and the menu's "Manage fitness apps" open
 // this: connected apps can be disconnected, the others connected.
-export function FitnessAppsDialog({ open, onOpenChange, wahooTokens, onWahooTokensChange }: FitnessAppsDialogProps) {
+export function FitnessAppsDialog({
+  open,
+  onOpenChange,
+  wahooTokens,
+  onWahooTokensChange,
+  stravaTokens,
+  onStravaTokensChange,
+}: FitnessAppsDialogProps) {
   const [wahooBusy, setWahooBusy] = useState(false)
+  const [stravaBusy, setStravaBusy] = useState(false)
 
   async function handleConnectWahoo() {
     setWahooBusy(true)
@@ -79,6 +93,45 @@ export function FitnessAppsDialog({ open, onOpenChange, wahooTokens, onWahooToke
     }
   }
 
+  async function handleConnectStrava() {
+    setStravaBusy(true)
+    const toastId = toast("Connecting to Strava...", "loading")
+    track("strava_connect_initiated", { source: "fitness_apps" })
+    try {
+      const tokens = await connectStrava()
+      onStravaTokensChange(tokens)
+      const scopeWarning = missingStravaScopeWarning(tokens.scope ?? null)
+      updateToast(toastId, scopeWarning ?? "Connected to Strava.", scopeWarning !== null ? "error" : "success")
+      track("strava_connect_succeeded", { source: "fitness_apps" })
+    } catch (err) {
+      updateToast(toastId, err instanceof Error ? err.message : "Failed to connect to Strava.", "error")
+      track("strava_connect_failed", { source: "fitness_apps" })
+    } finally {
+      setStravaBusy(false)
+    }
+  }
+
+  async function handleDisconnectStrava() {
+    setStravaBusy(true)
+    const toastId = toast("Disconnecting from Strava...", "loading")
+    try {
+      // Revoke on Strava's side too, so disconnecting here really removes
+      // Sulla Via from the visitor's Strava account. As with Wahoo, forget
+      // the token locally whatever happens, so nobody is stuck "connected".
+      try {
+        const tokens = await getValidStravaTokens()
+        await revokeStravaAccess(tokens.accessToken)
+      } catch {
+        // best-effort
+      }
+      clearStravaTokens()
+      onStravaTokensChange(null)
+      updateToast(toastId, "Disconnected from Strava.", "success")
+    } finally {
+      setStravaBusy(false)
+    }
+  }
+
   const apps: FitnessAppRow[] = [
     {
       key: "wahoo",
@@ -88,6 +141,15 @@ export function FitnessAppsDialog({ open, onOpenChange, wahooTokens, onWahooToke
       busy: wahooBusy,
       onConnect: handleConnectWahoo,
       onDisconnect: handleDisconnectWahoo,
+    },
+    {
+      key: "strava",
+      name: "Strava",
+      logo: <StravaWordmark className="text-sm" />,
+      account: stravaTokens ? (stravaTokens.athleteLabel ?? "") : null,
+      busy: stravaBusy,
+      onConnect: handleConnectStrava,
+      onDisconnect: handleDisconnectStrava,
     },
   ]
 

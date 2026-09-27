@@ -146,3 +146,24 @@ export interface PoiPhotosResponse {
   links: PhotoLink[]
   failed_sources: string[]
 }
+
+// Mirrors schemas.StravaTokenResponse - /api/strava/token's answer.
+export interface StravaTokenResponse {
+  access_token: string
+  refresh_token: string
+  // Epoch seconds.
+  expires_at: number
+  // Only after a code exchange - a refresh doesn't carry the athlete.
+  athlete_id: number | null
+  athlete_label: string | null
+}
+
+// Mirrors schemas.StravaRouteResponse. `id` is a string: Strava's route ids
+// overflow a JS number.
+export interface StravaRouteResponse {
+  id: string
+  name: string
+  distance_m: number
+  ascent_m: number
+  created_at: string
+}
