@@ -1765,9 +1765,9 @@ export default function App() {
         ref={headerRef}
         className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-wrap items-center justify-between gap-2 px-4 pt-4 [&>*]:pointer-events-auto"
       >
-        <FloatingSurface className="flex h-11 items-center gap-1.5 px-3">
+        <FloatingSurface className="flex items-center h-11 gap-2 px-3">
           <Logo className="w-6" />
-          <h1 className="text-lg font-semibold">Sulla Via</h1>
+          <h1 className="text-lg font-semibold mt-1">Sulla Via</h1>
         </FloatingSurface>
         {/* Between the two pills on desktop; on a phone it wraps onto its own
             full-width row, below them. */}
