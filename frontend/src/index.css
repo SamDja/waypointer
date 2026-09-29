@@ -53,7 +53,8 @@
   --elevation-floating: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
 }
 
-/* Nothing sets .dark yet; /styleguide.html toggles it so these stay checked. */
+/* Set on <html> by the header's theme button (lib/theme.ts), and by
+   /styleguide.html's light/dark switch. */
 .dark {
   color-scheme: dark;
   --background: oklch(21.6% 0.006 56.043); /* stone-900 */

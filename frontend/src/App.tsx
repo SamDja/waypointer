@@ -13,6 +13,8 @@ import type { PlannerPoint } from "@/components/PlannerPointList"
 import { MapStyleSelect } from "@/components/MapStyleSelect"
 import { Toaster } from "@/components/Toaster"
 import { FitnessAppsMenu } from "@/components/FitnessAppsMenu"
+import { ThemeToggle } from "@/components/ThemeToggle"
+import { Logo } from "@/components/Logo"
 import { ActivitySwitchDialog, type ActivitySwitchConsequences } from "@/components/ActivitySwitchDialog"
 import { OffRouteDialog, type OffRouteItem } from "@/components/OffRouteDialog"
 import { ApiError, NETWORK_ERROR_MESSAGE, cooldownRemainingMs, findPois, lookupPoi, routeLeg } from "@/lib/api"
@@ -1764,7 +1766,7 @@ export default function App() {
         className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-wrap items-center justify-between gap-2 px-4 pt-4 [&>*]:pointer-events-auto"
       >
         <FloatingSurface className="flex h-11 items-center gap-1.5 px-3">
-          <img src="favicon.svg" className="w-6" />
+          <Logo className="w-6" />
           <h1 className="text-lg font-semibold">Sulla Via</h1>
         </FloatingSurface>
         {/* Between the two pills on desktop; on a phone it wraps onto its own
@@ -1776,7 +1778,8 @@ export default function App() {
             onAddPoint={plannerState ? handlePlaceAddPoint : undefined}
           />
         </div>
-        <FloatingSurface className="flex h-11 items-center px-1">
+        <FloatingSurface className="flex h-11 items-center gap-0.5 px-1">
+          <ThemeToggle />
           <FitnessAppsMenu
             wahooTokens={wahooTokens}
             onWahooTokensChange={setWahooTokens}

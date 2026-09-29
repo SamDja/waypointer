@@ -40,7 +40,7 @@ Components use **roles**, never palette steps: `bg-muted`, `text-warning-foregro
 
 **`--accent` is the only "row you're on" highlight.** It covers `hover`, `focus`, Radix's `data-highlighted` and cmdk's `data-selected`, in select, command and dropdown-menu items, list rows (`PoiListItem`, planner points) and tab hover. Those states overlap: Radix focuses an item on hover, and cmdk selects one on pointer-move. When they had different colours, which one showed depended on the order Tailwind emitted the rules. Upstream shadcn's grey accent was also invisible against our popover colour.
 
-**Dark mode** is fully themed in olive/stone in `.dark`, but nothing turns it on yet. Check new tokens in the style guide's dark view.
+**Dark mode** is fully themed in olive/stone in `.dark`. The header's `ThemeToggle` cycles light → dark → auto (auto follows the system, live), via `lib/theme.ts`, saved under `"waypointer.theme"`; `index.html` applies it before the first paint. The map's cartography is its own style and stays light. The header logo is `components/Logo.tsx` (the favicon inlined, so its magnifier turns `foreground` under `.dark`); the tab icon, `public/favicon.svg`, follows the system through its own media query instead, since the browser's tab bar does - keep their paths in step. Check new tokens in the style guide's dark view.
 
 **Data colours are a separate thing.** Map styling, route markers and the elevation profile's gradient and surface bands encode meaning, not UI chrome. They come from `tailwindcss/colors` steps (e.g. `colors.zinc[600]`), never from plain hex in `.tsx`.
 

@@ -1,31 +1,38 @@
 import { MessageSquarePlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { TALLY_FORM_ID } from "@/lib/feedbackConfig"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 
 // Renders nothing if no form is configured, rather than a dead button.
 export function FeedbackWidget() {
   if (!TALLY_FORM_ID) return null
 
   return (
-    <Button
-      variant="outline"
-      size="icon"
-      // Tally's embed.js (loaded in index.html) reads these data-tally-*
-      // attributes and opens its hosted form as a modal on click - no
-      // click handler of our own needed.
-      data-tally-open={TALLY_FORM_ID}
-      data-tally-layout="modal"
-      // z-[1300]: a tier above every other fixed/overlay element in this
-      // codebase (current max is z-[1210] on Popover/Select content, see
-      // components/ui/popover.tsx/select.tsx) - this button must stay
-      // clickable above any open Dialog/AlertDialog/toast.
-      // bottom-12: sits just above MapLibre's attribution button, which
-      // index.css pins to the page's bottom-right corner.
-      className="fixed right-4 bottom-12 z-[1300] rounded-full shadow-floating"
-      aria-label="Send feedback"
-      title="Send feedback"
-    >
-      <MessageSquarePlus className="size-4" />
-    </Button>
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            variant="map"
+            size="icon"
+            // Tally's embed.js (loaded in index.html) reads these data-tally-*
+            // attributes and opens its hosted form as a modal on click - no
+            // click handler of our own needed.
+            data-tally-open={TALLY_FORM_ID}
+            data-tally-layout="modal"
+            // z-[1300]: a tier above every other fixed/overlay element in this
+            // codebase (current max is z-[1210] on Popover/Select content, see
+            // components/ui/popover.tsx/select.tsx) - this button must stay
+            // clickable above any open Dialog/AlertDialog/toast.
+            // bottom-12: sits just above MapLibre's attribution button, which
+            // index.css pins to the page's bottom-right corner.
+            className="fixed right-4 bottom-12 z-[1300] rounded-full shadow-floating"
+            aria-label="Send feedback"
+          >
+            <MessageSquarePlus className="size-4" />
+          </Button>
+        </TooltipTrigger>
+        <TooltipContent>Send feedback</TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
   )
 }

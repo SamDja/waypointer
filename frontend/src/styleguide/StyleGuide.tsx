@@ -65,6 +65,7 @@ import { StepCard } from "@/components/StepCard"
 import { Toaster } from "@/components/Toaster"
 import { toast } from "@/lib/toast"
 import { cn } from "@/lib/utils"
+import { Logo } from "@/components/Logo"
 
 // The living style guide: every primitive in components/ui/ and every shared
 // app-level piece, in each of its states, next to what it's for. The rules
@@ -179,7 +180,7 @@ export function StyleGuide() {
       <div className="min-h-screen bg-background text-foreground">
         <header className="sticky top-0 z-20 flex items-center justify-between gap-4 border-b bg-background/90 px-6 py-3 backdrop-blur">
           <div className="flex items-center gap-2">
-            <img src="favicon.svg" className="w-6" />
+            <Logo className="w-6" />
             <h1 className="text-lg font-semibold">Sulla Via style guide</h1>
           </div>
           <nav className="hidden gap-4 text-sm md:flex">
@@ -423,7 +424,7 @@ export function StyleGuide() {
               avoid="rebuild it from rounded/bg/shadow/ring classes."
             >
               <FloatingSurface className="flex h-11 items-center gap-1.5 px-3">
-                <img src="favicon.svg" className="w-6" />
+                <Logo className="w-6" />
                 <span className="text-lg font-semibold">Sulla Via</span>
               </FloatingSurface>
               <div className={cn(floatingSurfaceClass, "px-4 py-3 text-sm")}>floatingSurfaceClass</div>

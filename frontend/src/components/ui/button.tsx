@@ -15,7 +15,7 @@ const buttonVariants = cva(
           "border-border bg-background hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input dark:bg-input/30 dark:hover:bg-input/50",
         secondary: "bg-secondary text-secondary-foreground hover:bg-accent aria-expanded:bg-accent aria-expanded:text-secondary-foreground",
         ghost:
-          "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-muted/50",
+          "hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:hover:bg-accent",
         destructive:
           "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:border-destructive/40 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
         // Solid red: the confirm button of an irreversible action (delete,
@@ -25,7 +25,7 @@ const buttonVariants = cva(
         link: "text-primary underline-offset-4 hover:underline",
         // A control floating over the map: outline plus raised elevation so it
         // separates from the basemap, which is close in tone to --background.
-        map: "border-border bg-background shadow-raised hover:bg-muted hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input",
+        map: "border-border bg-background shadow-raised hover:bg-accent hover:text-foreground aria-expanded:bg-muted aria-expanded:text-foreground dark:border-input",
       },
       size: {
         default:
