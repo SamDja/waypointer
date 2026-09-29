@@ -6,6 +6,8 @@ import { composeStyle } from "./mapStyle/compose"
 import { hikingStyle } from "./mapStyle/hiking"
 import { houseStyle } from "./mapStyle/houseStyle"
 import { roadCyclingStyle } from "./mapStyle/roadCycling"
+import { darkenBase } from "./mapStyle/darkBase"
+import type { MapTheme } from "./theme"
 
 export interface RoadLegendCategory {
   label: string
@@ -94,8 +96,9 @@ export interface MapStyleConfig {
   // a maplibre protocol the first time it's built. Read it through
   // mapStyleFor(), which memoises, so only the activity a visitor actually
   // selects pays for itself - and so the map and the legend are handed the
-  // identical object and can't drift.
-  buildStyle: () => StyleSpecification
+  // identical object and can't drift. One per theme: the dark map is the
+  // same composition with dark colours, not a separate style.
+  buildStyle: (theme: MapTheme) => StyleSpecification
   // BRouter profile the route planner routes with while this style is
   // active. Deliberately lives here rather than behind its own selector:
   // this registry is already an activity list (see the commented-out gravel/
@@ -259,6 +262,10 @@ const HIKING_LEGEND: RoadLegendCategory[] = [
   },
 ]
 
+// The dark theme first turns liberty's own colours dark (darkBase.ts), then
+// applies the same patches with their dark palettes.
+const baseFor = (theme: MapTheme) => (theme === "dark" ? [darkenBase] : [])
+
 // Each activity's cartography is composed from one vendored copy of
 // OpenFreeMap's "liberty" style plus two patches - see
 // lib/mapStyle/compose.ts for the whole arrangement, houseStyle.ts for the
@@ -270,7 +277,7 @@ export const MAP_STYLES: MapStyleConfig[] = [
     key: "road_cycling",
     label: "Road Cycling",
     icon: Bike,
-    buildStyle: () => composeStyle(...houseStyle, ...roadCyclingStyle()),
+    buildStyle: (theme) => composeStyle(...baseFor(theme), ...houseStyle(theme), ...roadCyclingStyle(theme)),
     // Road-bike oriented (prefers paved, avoids tracks) - the same judgement
     // roadCycling.ts makes visually by dimming unpaved and bike-prohibited
     // ways. fastbike rather than fastbike-lowtraffic: the two profiles are
@@ -299,7 +306,7 @@ export const MAP_STYLES: MapStyleConfig[] = [
     key: "hiking",
     label: "Hiking",
     icon: Footprints,
-    buildStyle: () => composeStyle(...houseStyle, ...hikingStyle()),
+    buildStyle: (theme) => composeStyle(...baseFor(theme), ...houseStyle(theme), ...hikingStyle(theme)),
     // See routing.py's PROFILE_OPTIONS for why hiking-mountain rather than
     // the hiking-beta the public BRouter instance also serves.
     routingProfile: "hiking-mountain",
@@ -343,12 +350,13 @@ export const DEFAULT_MAP_STYLE_KEY = "road_cycling"
 // identical but distinct objects would make it redo the whole thing.
 const composedStyles = new Map<string, StyleSpecification>()
 
-export function mapStyleFor(key: string): StyleSpecification {
+export function mapStyleFor(key: string, theme: MapTheme = "light"): StyleSpecification {
   const config = MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]
-  let style = composedStyles.get(config.key)
+  const cacheKey = `${config.key}:${theme}`
+  let style = composedStyles.get(cacheKey)
   if (!style) {
-    style = config.buildStyle()
-    composedStyles.set(config.key, style)
+    style = config.buildStyle(theme)
+    composedStyles.set(cacheKey, style)
   }
   return style
 }

@@ -40,7 +40,15 @@ import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
 import { buildAddablePoiFilter, resolvePoiTypeFromFeatureProps } from "@/lib/basemapPoiMapping"
 import { cumulativeDistancesM, pointAtDistanceM, projectOntoPolylineM } from "@/lib/geometry"
 import { setHoveredDistanceM, useHoveredDistanceM } from "@/lib/hoverDistance"
-import { PLANNER_POINT_COLOR, ROUTE_END_COLOR, ROUTE_START_COLOR, START_FINISH_BACKGROUND } from "@/lib/mapColors"
+import {
+  MAP_LABEL_COLORS,
+  PLANNER_POINT_COLOR,
+  ROUTE_END_COLOR,
+  ROUTE_LINE_COLORS,
+  ROUTE_START_COLOR,
+  START_FINISH_BACKGROUND,
+} from "@/lib/mapColors"
+import { useResolvedTheme } from "@/lib/theme"
 import { CircleMarkerIcon, SearchedPlacePin, UserLocationMarker } from "@/lib/mapIcons"
 import { MAP_STYLES, mapStyleFor } from "@/lib/mapStyles"
 import {
@@ -51,7 +59,6 @@ import {
 } from "@/lib/osmTagLabels"
 import { POI_TYPES } from "@/lib/poiTypes"
 import { toast } from "@/lib/toast"
-import { tailwindHex } from "@/lib/color"
 import { fetchMapPois } from "@/lib/api"
 import type { MapPoi } from "@/types/candidate"
 import type { MapInsets } from "@/lib/useMapInsets"
@@ -209,12 +216,6 @@ const ARROW_IMAGE_ID = "route-arrow"
 // pre-rasterized PNG works reliably. Rasterized at 2x (48px) for crispness,
 // rendered at icon-size 0.5 below to display at the original 24px scale.
 const ARROW_ICON_URL = "/arrow-big.png"
-
-// Tailwind v4's palette (tailwindcss/colors) returns oklch() strings, which
-// MapLibre's style validator rejects for paint properties (unlike plain
-// CSS, which resolves oklch() natively) - so the violet-600 step is converted
-// to sRGB hex (the same colour the browser paints for it).
-const ROUTE_LINE_COLOR = tailwindHex(colors.violet[600])
 
 // Whether a screen point lands on the route's (invisible, wider) hit layer.
 // The layer only exists while planning a route that already has geometry,
@@ -756,6 +757,7 @@ const ROUTE_HIT_LAYER_ID = "route-line-hit"
 const INSERT_DRAG_THRESHOLD_PX = 4
 
 function PendingLegLines({ pendingLegs }: { pendingLegs: [number, number][][] }) {
+  const theme = useResolvedTheme()
   if (pendingLegs.length === 0) return null
   return (
     <Source
@@ -774,7 +776,7 @@ function PendingLegLines({ pendingLegs }: { pendingLegs: [number, number][][] })
         id="planner-pending-line"
         type="line"
         paint={{
-          "line-color": PLANNER_ANCHOR_COLOR,
+          "line-color": ROUTE_LINE_COLORS[theme],
           "line-width": 2,
           "line-dasharray": [2, 2],
           "line-opacity": 0.7,
@@ -1135,6 +1137,7 @@ const MAP_POI_DEBOUNCE_MS = 400
  */
 function MapPoiOverlay({ poiTypes }: { poiTypes: readonly string[] }) {
   const { current: map } = useMap()
+  const theme = useResolvedTheme()
   const [pois, setPois] = useState<MapPoi[]>([])
 
   useEffect(() => {
@@ -1230,8 +1233,8 @@ function MapPoiOverlay({ poiTypes }: { poiTypes: readonly string[] }) {
           "text-max-width": 9,
         }}
         paint={{
-          "text-color": tailwindHex(colors.stone[700]),
-          "text-halo-color": "#ffffff",
+          "text-color": MAP_LABEL_COLORS[theme].text,
+          "text-halo-color": MAP_LABEL_COLORS[theme].halo,
           "text-halo-width": 1.2,
         }}
       />
@@ -1559,7 +1562,10 @@ export function RouteMap({
   const center = hasRoute ? routeCoords[0] : DEFAULT_CENTER
   const zoom = hasRoute ? 13 : DEFAULT_ZOOM
   const isHovering = hoveredPoi !== null
-  const mapStyle = mapStyleFor(mapStyleKey)
+  // The cartography follows the app's theme; switching it swaps in the
+  // other composed style, which MapLibre diffs into paint updates.
+  const theme = useResolvedTheme()
+  const mapStyle = mapStyleFor(mapStyleKey, theme)
   // POIs this activity wants drawn from our own import, on top of the
   // basemap's - see MapPoiOverlay.
   const overlayPoiTypes = MAP_STYLES.find((style) => style.key === mapStyleKey)?.overlayPoiTypes ?? EMPTY_POI_TYPES
@@ -1722,12 +1728,12 @@ export function RouteMap({
 
           {hasRoute && (
             <Source id={ROUTE_SOURCE_ID} type="geojson" data={toRouteLineGeoJson(routeCoords)}>
-              <Layer id="route-line" type="line" paint={{ "line-color": ROUTE_LINE_COLOR, "line-width": 3 }} />
+              <Layer id="route-line" type="line" paint={{ "line-color": ROUTE_LINE_COLORS[theme], "line-width": 3 }} />
               {planning && (
                 <Layer
                   id={ROUTE_HIT_LAYER_ID}
                   type="line"
-                  paint={{ "line-color": ROUTE_LINE_COLOR, "line-width": 16, "line-opacity": 0 }}
+                  paint={{ "line-color": ROUTE_LINE_COLORS[theme], "line-width": 16, "line-opacity": 0 }}
                 />
               )}
             </Source>

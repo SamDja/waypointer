@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 import colors from "tailwindcss/colors"
-import { tailwindHex } from "@/lib/color"
+import { oklchToCss, srgbToOklch, tailwindHex } from "@/lib/color"
 
 describe("tailwindHex", () => {
   it("converts Tailwind v4 palette colours to sRGB hex", () => {
@@ -23,5 +23,21 @@ describe("tailwindHex", () => {
   it("returns anything that isn't an oklch() colour unchanged", () => {
     expect(tailwindHex("#123456")).toBe("#123456")
     expect(tailwindHex("transparent")).toBe("transparent")
+  })
+})
+
+describe("oklchToCss / srgbToOklch", () => {
+  it("round-trips an sRGB colour", () => {
+    const { lightness, chroma, hue } = srgbToOklch(0x2b / 255, 0x7f / 255, 1)
+    expect(oklchToCss(lightness, chroma, hue)).toBe("#2b7fff")
+  })
+
+  it("puts white and black at the ends of the lightness axis", () => {
+    expect(srgbToOklch(1, 1, 1).lightness).toBeCloseTo(1, 3)
+    expect(srgbToOklch(0, 0, 0).lightness).toBeCloseTo(0, 3)
+  })
+
+  it("keeps a translucent colour translucent", () => {
+    expect(oklchToCss(1, 0, 0, 0.5)).toBe("rgba(255, 255, 255, 0.5)")
   })
 })

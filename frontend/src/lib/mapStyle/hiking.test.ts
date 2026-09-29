@@ -19,6 +19,8 @@ const cycling = mapStyleFor("road_cycling")
 
 const ZOOM = 16
 
+const THEMES = ["light", "dark"] as const
+
 const PATH_LAYERS_UNDER_TEST = ["road_path_pedestrian", "bridge_path_pedestrian", "tunnel_path_pedestrian"]
 
 const paint = (style: typeof hiking, layerId: string, properties: Record<string, unknown> = {}) => {
@@ -127,8 +129,10 @@ describe("hiking style", () => {
     // would fail on at runtime, where a bad expression means a blank map
     // and a console error rather than a test failure.
     for (const { key } of MAP_STYLES) {
-      const style = mapStyleFor(key)
-      expect(validateStyleMin(style).map((e) => `${e.message}`), key).toEqual([])
+      for (const theme of THEMES) {
+        const style = mapStyleFor(key, theme)
+        expect(validateStyleMin(style).map((e) => `${e.message}`), `${key} ${theme}`).toEqual([])
+      }
     }
   })
 
@@ -138,11 +142,13 @@ describe("hiking style", () => {
     // future activity that forgot would get MapLibre's default black, which
     // is loud and easy to miss in review.
     for (const { key } of MAP_STYLES) {
-      const style = mapStyleFor(key)
-      const uncoloured = style.layers
-        .filter((l) => l.type === "line" && (l.paint as Record<string, unknown> | undefined)?.["line-color"] == null)
-        .map((l) => l.id)
-      expect(uncoloured, key).toEqual([])
+      for (const theme of THEMES) {
+        const style = mapStyleFor(key, theme)
+        const uncoloured = style.layers
+          .filter((l) => l.type === "line" && (l.paint as Record<string, unknown> | undefined)?.["line-color"] == null)
+          .map((l) => l.id)
+        expect(uncoloured, `${key} ${theme}`).toEqual([])
+      }
     }
   })
 

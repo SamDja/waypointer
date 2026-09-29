@@ -1,5 +1,8 @@
 import type { LayerSpecification } from "@maplibre/maplibre-gl-style-spec"
+import colors from "tailwindcss/colors"
 
+import { tailwindHex } from "../color"
+import type { MapTheme } from "../theme"
 import {
   dimColorWhen,
   dimOpacityWhen,
@@ -55,22 +58,47 @@ const UNSUITABLE_OR_TRACK: Expression = ["any", ACCESS_BLOCKED, UNPAVED, ["==", 
 // A dimmed way keeps its two-tone structure so it still reads as a road:
 // the casing goes to the darker grey, the fill it outlines to the lighter
 // one.
-const DIM_CASING = "#a3a3a3"
-const DIM_FILL = "#d4d4d4"
+const LIGHT = {
+  dimCasing: "#a3a3a3",
+  dimFill: "#d4d4d4",
+  motorwayFill: "#d4d4d4",
+  motorwayCasing: "#a3a3a3",
+  pedestrian: "#a3a3a3",
+  pedestrianBridgeCasing: "#cfcdca",
+  track: "#a6a09b",
+  cycleway: "#009966",
+}
+
+// On a dark ground "recede" means sinking towards the background, so the
+// dims are dark greys rather than light ones - still two-tone, casing below
+// fill. The cycleway goes a step lighter so it still stands out.
+const DARK: typeof LIGHT = {
+  dimCasing: tailwindHex(colors.neutral[800]),
+  dimFill: tailwindHex(colors.neutral[700]),
+  motorwayFill: tailwindHex(colors.neutral[700]),
+  motorwayCasing: tailwindHex(colors.neutral[800]),
+  pedestrian: tailwindHex(colors.stone[500]),
+  pedestrianBridgeCasing: tailwindHex(colors.stone[700]),
+  track: tailwindHex(colors.stone[500]),
+  cycleway: tailwindHex(colors.emerald[500]),
+}
+
+type Palette = typeof LIGHT
 
 // Three layers dim to a shade of their own. Nothing distinguishes them -
 // they're hand-editing drift from when this was a 12k-line file - and
 // road_minor_casing dimming to white in particular makes a minor road's
 // outline vanish rather than recede. Reproduced here so this refactor
-// changes nothing visible; worth correcting deliberately, on its own.
+// changes nothing visible; worth correcting deliberately, on its own. The
+// dark palette has no such history, so it doesn't reproduce them.
 const DIM_EXCEPTIONS: Record<string, string> = {
   road_minor: "#abab9c",
   road_minor_casing: "#ffffff",
   road_trunk_primary: "#d6d3d1",
 }
 
-const dimColorFor = (layerId: string): string =>
-  DIM_EXCEPTIONS[layerId] ?? (layerId.endsWith("_casing") ? DIM_CASING : DIM_FILL)
+const dimColorFor = (palette: Palette, exceptions: Record<string, string>) => (layerId: string): string =>
+  exceptions[layerId] ?? (layerId.endsWith("_casing") ? palette.dimCasing : palette.dimFill)
 
 // Roads that dim only when they're actually unsuitable - the ordinary case,
 // where the tags decide.
@@ -100,24 +128,20 @@ const TRACK_AWARE_DIMMED = [
 // explicitly tagged bicycle=no fades further still and the rest stay legible
 // as landmarks.
 const MOTORWAY_FILL = ["road_motorway", "road_motorway_link", "tunnel_motorway", "tunnel_motorway_link", "bridge_motorway", "bridge_motorway_link"]
-const MOTORWAY_CASING: Record<string, string> = {
-  road_motorway_casing: "#a6a09b",
-  road_motorway_link_casing: "#a3a3a3",
-  tunnel_motorway_casing: "#a3a3a3",
-  tunnel_motorway_link_casing: "#a3a3a3",
-  bridge_motorway_casing: "#a3a3a3",
-  bridge_motorway_link_casing: "#a3a3a3",
-}
+const MOTORWAY_CASING = [
+  "road_motorway_casing", "road_motorway_link_casing",
+  "tunnel_motorway_casing", "tunnel_motorway_link_casing",
+  "bridge_motorway_casing", "bridge_motorway_link_casing",
+]
+// One more drift of the same kind as DIM_EXCEPTIONS, light only.
+const LIGHT_MOTORWAY_CASING_EXCEPTIONS: Record<string, string> = { road_motorway_casing: "#a6a09b" }
 
 // Footpaths and pedestrian streets are always dim here: a road bike has no
 // business on them regardless of surface. The cycleway layers below then
 // pull the ones that *are* cycling infrastructure back out.
-const PEDESTRIAN: Record<string, string> = {
-  road_path_pedestrian: "#a6a09b",
-  tunnel_path_pedestrian: "#a3a3a3",
-  bridge_path_pedestrian: "#a3a3a3",
-  bridge_path_pedestrian_casing: "#cfcdca",
-}
+const PEDESTRIAN = ["road_path_pedestrian", "tunnel_path_pedestrian", "bridge_path_pedestrian"]
+// The same drift again: light's surface-level footpath is a warmer grey.
+const LIGHT_PEDESTRIAN_EXCEPTIONS: Record<string, string> = { road_path_pedestrian: "#a6a09b" }
 
 // OpenMapTiles files OSM's highway=cycleway under class=path, so the
 // pedestrian layers above would otherwise swallow it. Excluded there,
@@ -138,7 +162,7 @@ const NOT_CYCLEWAY: Expression = [
   ["!=", ["get", "bicycle"], "designated"],
 ]
 
-const cyclewayLayer = (id: string, brunnel: Expression): LayerSpecification =>
+const cyclewayLayer = (id: string, brunnel: Expression, color: string): LayerSpecification =>
   ({
     id,
     type: "line",
@@ -147,7 +171,7 @@ const cyclewayLayer = (id: string, brunnel: Expression): LayerSpecification =>
     filter: CYCLEWAY_FILTER(brunnel),
     layout: { "line-cap": "round", "line-join": "round" },
     paint: {
-      "line-color": "#009966",
+      "line-color": color,
       "line-width": ["interpolate", ["exponential", 1.2], ["zoom"], 10, 0.75, 14, 2, 20, 9],
     },
   }) as unknown as LayerSpecification
@@ -164,27 +188,37 @@ const SURFACE_LEVEL: Expression = ["match", ["get", "brunnel"], ["bridge", "tunn
 const IS_TUNNEL: Expression = ["==", ["get", "brunnel"], "tunnel"]
 const IS_BRIDGE: Expression = ["==", ["get", "brunnel"], "bridge"]
 
-export const roadCyclingStyle = (): StylePatch[] => [
-  dimColorWhen(CONDITIONALLY_DIMMED, UNSUITABLE, dimColorFor),
-  dimOpacityWhen(CONDITIONALLY_DIMMED, UNSUITABLE),
-  dimColorWhen(TRACK_AWARE_DIMMED, UNSUITABLE_OR_TRACK, dimColorFor),
-  dimOpacityWhen(TRACK_AWARE_DIMMED, UNSUITABLE_OR_TRACK),
+export const roadCyclingStyle = (theme: MapTheme): StylePatch[] => {
+  const palette = theme === "dark" ? DARK : LIGHT
+  const light = theme === "light"
+  const dimColor = dimColorFor(palette, light ? DIM_EXCEPTIONS : {})
+  const motorwayCasing = (id: string) =>
+    (light ? LIGHT_MOTORWAY_CASING_EXCEPTIONS[id] : undefined) ?? palette.motorwayCasing
+  const pedestrian = (id: string) => (light ? LIGHT_PEDESTRIAN_EXCEPTIONS[id] : undefined) ?? palette.pedestrian
 
-  ...MOTORWAY_FILL.map((id) => setPaint(id, { "line-color": "#d4d4d4" })),
-  ...Object.entries(MOTORWAY_CASING).map(([id, color]) => setPaint(id, { "line-color": color })),
-  dimOpacityWhen([...MOTORWAY_FILL, ...Object.keys(MOTORWAY_CASING)], UNSUITABLE),
+  return [
+    dimColorWhen(CONDITIONALLY_DIMMED, UNSUITABLE, dimColor),
+    dimOpacityWhen(CONDITIONALLY_DIMMED, UNSUITABLE),
+    dimColorWhen(TRACK_AWARE_DIMMED, UNSUITABLE_OR_TRACK, dimColor),
+    dimOpacityWhen(TRACK_AWARE_DIMMED, UNSUITABLE_OR_TRACK),
 
-  ...Object.entries(PEDESTRIAN).map(([id, color]) => setPaint(id, { "line-color": color, "line-opacity": 0.5 })),
-  setLayerProps("road_path_pedestrian", { filter: pedestrianFilter(SURFACE_LEVEL) }),
-  setLayerProps("tunnel_path_pedestrian", { filter: pedestrianFilter(IS_TUNNEL) }),
-  setLayerProps("bridge_path_pedestrian", { filter: pedestrianFilter(IS_BRIDGE) }),
+    ...MOTORWAY_FILL.map((id) => setPaint(id, { "line-color": palette.motorwayFill })),
+    ...MOTORWAY_CASING.map((id) => setPaint(id, { "line-color": motorwayCasing(id) })),
+    dimOpacityWhen([...MOTORWAY_FILL, ...MOTORWAY_CASING], UNSUITABLE),
 
-  // Unpaved by definition, so they take the same dim treatment as any
-  // unsuitable road rather than the neutral look houseStyle gives them.
-  setPaint("road_track", { "line-color": "#a6a09b", "line-opacity": 0.5 }),
-  setPaint("road_track_casing", { "line-color": "#a6a09b", "line-opacity": 0.5 }),
+    ...PEDESTRIAN.map((id) => setPaint(id, { "line-color": pedestrian(id), "line-opacity": 0.5 })),
+    setPaint("bridge_path_pedestrian_casing", { "line-color": palette.pedestrianBridgeCasing, "line-opacity": 0.5 }),
+    setLayerProps("road_path_pedestrian", { filter: pedestrianFilter(SURFACE_LEVEL) }),
+    setLayerProps("tunnel_path_pedestrian", { filter: pedestrianFilter(IS_TUNNEL) }),
+    setLayerProps("bridge_path_pedestrian", { filter: pedestrianFilter(IS_BRIDGE) }),
 
-  insertLayersAfter("road_motorway_casing", cyclewayLayer("cycleway", SURFACE_LEVEL)),
-  insertLayersAfter("tunnel_motorway_casing", cyclewayLayer("tunnel_cycleway", IS_TUNNEL)),
-  insertLayersAfter("bridge_street_casing", cyclewayLayer("bridge_cycleway", IS_BRIDGE)),
-]
+    // Unpaved by definition, so they take the same dim treatment as any
+    // unsuitable road rather than the neutral look houseStyle gives them.
+    setPaint("road_track", { "line-color": palette.track, "line-opacity": 0.5 }),
+    setPaint("road_track_casing", { "line-color": palette.track, "line-opacity": 0.5 }),
+
+    insertLayersAfter("road_motorway_casing", cyclewayLayer("cycleway", SURFACE_LEVEL, palette.cycleway)),
+    insertLayersAfter("tunnel_motorway_casing", cyclewayLayer("tunnel_cycleway", IS_TUNNEL, palette.cycleway)),
+    insertLayersAfter("bridge_street_casing", cyclewayLayer("bridge_cycleway", IS_BRIDGE, palette.cycleway)),
+  ]
+}

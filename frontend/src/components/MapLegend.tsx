@@ -6,15 +6,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ROUTE_END_COLOR, ROUTE_START_COLOR } from "@/lib/mapColors"
 import { CircleMarkerIcon } from "@/lib/mapIcons"
 import { evaluateLineLayerPaint } from "@/lib/mapStyleLegend"
+import { ROUTE_LINE_COLORS } from "@/lib/mapColors"
 import { MAP_STYLES, mapStyleFor } from "@/lib/mapStyles"
+import { useResolvedTheme } from "@/lib/theme"
 import { POI_TYPES } from "@/lib/poiTypes"
 import type { Candidate, ExistingWaypoint } from "@/types/candidate"
 import colors from "tailwindcss/colors"
-
-// The route line's colour (RouteMap.tsx's ROUTE_LINE_COLOR). This is a plain
-// CSS swatch, so it can take the Tailwind step directly - RouteMap needs the
-// hex form only because MapLibre paint properties reject oklch().
-const ROUTE_LINE_COLOR = colors.violet[600]
 
 // Zoom at which road-color rows evaluate a layer's line-width - chosen so
 // every category in ROAD_CYCLING_LEGEND has a non-degenerate width (e.g.
@@ -78,7 +75,8 @@ function LegendRow({ swatch, label }: { swatch: ReactNode; label: string }) {
 
 export function MapLegend({ candidates, existingWaypoints, mapStyleKey }: MapLegendProps) {
   const styleConfig = MAP_STYLES.find((s) => s.key === mapStyleKey)
-  const styleJson = styleConfig ? mapStyleFor(styleConfig.key) : null
+  const theme = useResolvedTheme()
+  const styleJson = styleConfig ? mapStyleFor(styleConfig.key, theme) : null
 
   const poiTypeKeys = new Set<string>()
   for (const candidate of candidates) poiTypeKeys.add(candidate.poi_type)
@@ -101,7 +99,7 @@ export function MapLegend({ candidates, existingWaypoints, mapStyleKey }: MapLeg
         <div className="flex flex-col gap-3">
           <div className="flex flex-col gap-1.5">
             <h3 className="text-xs font-medium text-muted-foreground">Symbols</h3>
-            <LegendRow swatch={<LineSwatch color={ROUTE_LINE_COLOR} />} label="Route" />
+            <LegendRow swatch={<LineSwatch color={ROUTE_LINE_COLORS[theme]} />} label="Route" />
             <LegendRow
               swatch={<CircleMarkerIcon icon={Play} bgColor={ROUTE_START_COLOR} size={20} />}
               label="Start"

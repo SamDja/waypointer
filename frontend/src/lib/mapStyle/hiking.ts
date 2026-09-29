@@ -2,6 +2,7 @@ import type { LayerSpecification } from "@maplibre/maplibre-gl-style-spec"
 import colors from "tailwindcss/colors"
 
 import { tailwindHex } from "../color"
+import type { MapTheme } from "../theme"
 import {
   addSource,
   dimColorWhen,
@@ -36,17 +37,45 @@ import { CONTOUR_SOURCE_ID, contourLayers, contourSource } from "./contours"
 // a forest road is a vehicle way you happen to be walking on, not a trail,
 // and the two being different colours is what tells them apart at a glance
 // now that neither is grey.
-const TRAIL = tailwindHex(colors.red[700])
+//
 // A made path is still a path, so it stays in the same hue and separates by
-// lightness rather than by turning into a different kind of thing.
-const PAVED_TRAIL = tailwindHex(colors.red[400])
-const TRACK = tailwindHex(colors.amber[700])
-// Same idea on the track side: a surfaced forest road is lighter, not a
-// different colour.
-const PAVED_TRACK = tailwindHex(colors.amber[500])
+// lightness rather than by turning into a different kind of thing. Same idea
+// on the track side: a surfaced forest road is lighter, not a different
+// colour.
+const LIGHT = {
+  trail: tailwindHex(colors.red[700]),
+  pavedTrail: tailwindHex(colors.red[400]),
+  track: tailwindHex(colors.amber[700]),
+  pavedTrack: tailwindHex(colors.amber[500]),
+  dimFill: tailwindHex(colors.neutral[300]),
+  dimCasing: "#a3a3a3", // neutral-400 in Tailwind v3; v4's oklch step resolves slightly lighter
+  // The casing under a path bridge would otherwise stay the base's pale
+  // grey and read as a gap in the trail.
+  pathBridgeCasing: tailwindHex(colors.stone[300]),
+  wood: tailwindHex(colors.green[700]),
+  woodOpacity: 0.2,
+  label: tailwindHex(colors.stone[700]),
+  halo: "#ffffff",
+}
 
-const DIM_FILL = tailwindHex(colors.neutral[300])
-const DIM_CASING = "#a3a3a3" // neutral-400 in Tailwind v3; v4's oklch step resolves slightly lighter
+// On a dark ground the network has to get lighter to stay the brightest
+// thing on the map, so every trail colour moves up two steps - keeping the
+// same hues, and paved still lighter than unpaved.
+const DARK: typeof LIGHT = {
+  trail: tailwindHex(colors.red[500]),
+  pavedTrail: tailwindHex(colors.red[300]),
+  track: tailwindHex(colors.amber[500]),
+  pavedTrack: tailwindHex(colors.amber[300]),
+  dimFill: tailwindHex(colors.neutral[700]),
+  dimCasing: tailwindHex(colors.neutral[800]),
+  pathBridgeCasing: tailwindHex(colors.stone[600]),
+  wood: tailwindHex(colors.green[800]),
+  woodOpacity: 0.35,
+  label: tailwindHex(colors.stone[300]),
+  halo: tailwindHex(colors.stone[900]),
+}
+
+type Palette = typeof LIGHT
 
 // access=no is routinely paired with a foot tag that permits walking anyway
 // (a private drive with a public right of way, a courtyard with
@@ -133,7 +162,8 @@ const PATH_DASH: Expression = [
 // Unknown surface is drawn as unpaved: on a hiking map most untagged paths
 // are, and promising a made surface that isn't there is the worse error.
 const IS_PAVED: Expression = ["==", ["get", "surface"], "paved"]
-const PATH_COLOR: Expression = ["case", IS_PAVED, PAVED_TRAIL, TRAIL]
+const pathColor = (palette: Palette): Expression => ["case", IS_PAVED, palette.pavedTrail, palette.trail]
+const trackColor = (palette: Palette): Expression => ["case", IS_PAVED, palette.pavedTrack, palette.track]
 
 // The track layers inherit a width ramp that only opens at zoom 15.5, from
 // back when a track was something to notice late and avoid. Bringing them
@@ -203,12 +233,19 @@ const bySubclass = (cls: string, ...subclasses: string[]): Expression => [
  * ones, so the narrower subclass layers come after the broad class ones they
  * refine. Forest isn't here: the base's own landcover_wood already fills it,
  * and is recoloured in hikingStyle below.
+ *
+ * Each entry has a dark twin. A tint over near-black needs more opacity to
+ * show at all, and rock turns round: over a pale map the harsher ground is
+ * the darker one, over a dark map it's the lighter one, so bare rock is the
+ * lighter of the two stones there.
  */
 export const TERRAIN_FILLS: {
   id: string
   filter: Expression
   color: string
-  opacity?: number
+  opacity: number
+  darkColor: string
+  darkOpacity: number
 }[] = [
     // Cultivated ground, which the base style leaves blank.
     {
@@ -216,6 +253,8 @@ export const TERRAIN_FILLS: {
       filter: byClass("farmland"),
       color: tailwindHex(colors.lime[500]),
       opacity: 0.16,
+      darkColor: tailwindHex(colors.lime[700]),
+      darkOpacity: 0.2,
     },
     // Open grazing and meadow: the easiest ground there is.
     {
@@ -223,6 +262,8 @@ export const TERRAIN_FILLS: {
       filter: bySubclass("grass", "grassland", "meadow", "pasture", "heath"),
       color: tailwindHex(colors.green[500]),
       opacity: 0.16,
+      darkColor: tailwindHex(colors.green[600]),
+      darkOpacity: 0.2,
     },
     // Scrub is not grass to walk through, whatever the tiles say by lumping
     // them in one class.
@@ -231,6 +272,8 @@ export const TERRAIN_FILLS: {
       filter: bySubclass("grass", "scrub"),
       color: tailwindHex(colors.lime[200]),
       opacity: 0.5,
+      darkColor: tailwindHex(colors.lime[900]),
+      darkOpacity: 0.45,
     },
     // Loose stone: the paler of the two rocks, since it's the more common
     // ground and shouldn't dominate a whole cirque.
@@ -239,6 +282,8 @@ export const TERRAIN_FILLS: {
       filter: bySubclass("rock", "scree"),
       color: tailwindHex(colors.stone[500]),
       opacity: 0.16,
+      darkColor: tailwindHex(colors.stone[500]),
+      darkOpacity: 0.2,
     },
     // Solid rock and cliff faces: darker, so the difference
     // between "slow going" and "not walkable" reads at a glance.
@@ -247,20 +292,25 @@ export const TERRAIN_FILLS: {
       filter: bySubclass("rock", "bare_rock"),
       color: tailwindHex(colors.stone[800]),
       opacity: 0.2,
+      darkColor: tailwindHex(colors.stone[300]),
+      darkOpacity: 0.22,
     },
   ]
 
-const terrainLayers = (): LayerSpecification[] =>
-  TERRAIN_FILLS.map(({ id, filter, color, opacity }) => ({
+const terrainLayers = (theme: MapTheme): LayerSpecification[] =>
+  TERRAIN_FILLS.map(({ id, filter, color, opacity, darkColor, darkOpacity }) => ({
     id,
     type: "fill",
     source: "openmaptiles",
     "source-layer": "landcover",
     filter,
-    paint: { "fill-color": color, "fill-opacity": opacity, "fill-antialias": false },
+    paint: {
+      "fill-color": theme === "dark" ? darkColor : color,
+      "fill-opacity": theme === "dark" ? darkOpacity : opacity,
+      "fill-antialias": false,
+    },
   })) as unknown as LayerSpecification[]
 
-const LABEL_COLOR = tailwindHex(colors.stone[700])
 const IS_POINT: Expression = ["match", ["geometry-type"], ["Point", "MultiPoint"], true, false]
 
 // A peak is worth its elevation; a name alone doesn't say whether it's the
@@ -272,14 +322,13 @@ const PEAK_LABEL: Expression = [
   ["get", "name"],
 ]
 
-const labelPaint = {
-  "text-color": LABEL_COLOR,
-  "text-halo-color": "#ffffff",
-  "text-halo-width": 1.2,
-}
-
-const hikingPoiLayers = (): LayerSpecification[] =>
-  [
+const hikingPoiLayers = (palette: Palette): LayerSpecification[] => {
+  const labelPaint = {
+    "text-color": palette.label,
+    "text-halo-color": palette.halo,
+    "text-halo-width": 1.2,
+  }
+  return [
     {
       id: "hiking_poi",
       type: "symbol",
@@ -346,72 +395,74 @@ const hikingPoiLayers = (): LayerSpecification[] =>
       paint: labelPaint,
     },
   ] as unknown as LayerSpecification[]
+}
 
-export const hikingStyle = (): StylePatch[] => [
-  dimColorWhen(CONDITIONALLY_DIMMED, ACCESS_BLOCKED, (layerId) =>
-    layerId.endsWith("_casing") ? DIM_CASING : DIM_FILL,
-  ),
-  dimOpacityWhen(CONDITIONALLY_DIMMED, ACCESS_BLOCKED),
+export const hikingStyle = (theme: MapTheme): StylePatch[] => {
+  const palette = theme === "dark" ? DARK : LIGHT
+  return [
+    dimColorWhen(CONDITIONALLY_DIMMED, ACCESS_BLOCKED, (layerId) =>
+      layerId.endsWith("_casing") ? palette.dimCasing : palette.dimFill,
+    ),
+    dimOpacityWhen(CONDITIONALLY_DIMMED, ACCESS_BLOCKED),
 
-  ...ALWAYS_DIMMED_FILL.map((id) => setPaint(id, { "line-color": DIM_FILL, "line-opacity": 0.6 })),
-  ...ALWAYS_DIMMED_CASING.map((id) => setPaint(id, { "line-color": DIM_CASING, "line-opacity": 0.6 })),
+    ...ALWAYS_DIMMED_FILL.map((id) => setPaint(id, { "line-color": palette.dimFill, "line-opacity": 0.6 })),
+    ...ALWAYS_DIMMED_CASING.map((id) => setPaint(id, { "line-color": palette.dimCasing, "line-opacity": 0.6 })),
 
-  ...PATH_LAYERS.map((id) =>
-    setPaint(id, { "line-color": PATH_COLOR, "line-width": TRAIL_WIDTH, "line-dasharray": PATH_DASH }),
-  ),
-  setLayerProps("road_path_pedestrian", { minzoom: PATH_MIN_ZOOM }),
-  // The casing under a path bridge would otherwise stay the base's pale grey
-  // and read as a gap in the trail.
-  setPaint("bridge_path_pedestrian_casing", { "line-color": tailwindHex(colors.stone[300]) }),
+    ...PATH_LAYERS.map((id) =>
+      setPaint(id, { "line-color": pathColor(palette), "line-width": TRAIL_WIDTH, "line-dasharray": PATH_DASH }),
+    ),
+    setLayerProps("road_path_pedestrian", { minzoom: PATH_MIN_ZOOM }),
+    setPaint("bridge_path_pedestrian_casing", { "line-color": palette.pathBridgeCasing }),
 
-  // houseStyle splits tracks into their own layers but leaves them
-  // uncoloured, for exactly this reason: the bike dims them and a walker
-  // wants them.
-  // A track has no subclass to split on - OpenMapTiles gives it none - so
-  // the only distinction available is what it's surfaced with. A paved
-  // forest road is a different walk from a muddy one.
-  setPaint("road_track", {
-    "line-color": ["case", IS_PAVED, PAVED_TRACK, TRACK],
-    "line-width": TRACK_WIDTH,
-    "line-dasharray": ["case", IS_PAVED, ["literal", [4, 1]], ["literal", [2, 1.5]]],
-  }),
-  setPaint("road_track_casing", {
-    "line-color": ["case", IS_PAVED, PAVED_TRACK, TRACK],
-    "line-width": TRACK_CASING_WIDTH,
-    "line-opacity": 0.25,
-  }),
-  setLayerProps("road_track", { minzoom: PATH_MIN_ZOOM }),
-  setLayerProps("road_track_casing", { minzoom: PATH_MIN_ZOOM }),
+    // houseStyle splits tracks into their own layers but leaves them
+    // uncoloured, for exactly this reason: the bike dims them and a walker
+    // wants them.
+    // A track has no subclass to split on - OpenMapTiles gives it none - so
+    // the only distinction available is what it's surfaced with. A paved
+    // forest road is a different walk from a muddy one.
+    setPaint("road_track", {
+      "line-color": trackColor(palette),
+      "line-width": TRACK_WIDTH,
+      "line-dasharray": ["case", IS_PAVED, ["literal", [4, 1]], ["literal", [2, 1.5]]],
+    }),
+    setPaint("road_track_casing", {
+      "line-color": trackColor(palette),
+      "line-width": TRACK_CASING_WIDTH,
+      "line-opacity": 0.25,
+    }),
+    setLayerProps("road_track", { minzoom: PATH_MIN_ZOOM }),
+    setLayerProps("road_track_casing", { minzoom: PATH_MIN_ZOOM }),
 
-  // Contours sit under everything else on the map, so the route line, the
-  // trails and the markers all stay legible over them.
-  addSource(CONTOUR_SOURCE_ID, contourSource()),
-  insertLayersBefore("tunnel_motorway_casing", ...contourLayers()),
+    // Contours sit under everything else on the map, so the route line, the
+    // trails and the markers all stay legible over them.
+    addSource(CONTOUR_SOURCE_ID, contourSource()),
+    insertLayersBefore("tunnel_motorway_casing", ...contourLayers(theme)),
 
-  // Above the base's own landcover fills, so these refine them rather than
-  // being hidden under them, and still below every road and path.
-  insertLayersAfter("landcover_wetland", ...terrainLayers()),
+    // Above the base's own landcover fills, so these refine them rather than
+    // being hidden under them, and still below every road and path.
+    insertLayersAfter("landcover_wetland", ...terrainLayers(theme)),
 
-  // Forest keeps the base's own layer - it already filters class=wood - but
-  // in a green that separates it from open ground rather than blending in.
-  setPaint("landcover_wood", { "fill-color": tailwindHex(colors.green[700]), "fill-opacity": 0.2 }),
+    // Forest keeps the base's own layer - it already filters class=wood - but
+    // in a green that separates it from open ground rather than blending in.
+    setPaint("landcover_wood", { "fill-color": palette.wood, "fill-opacity": palette.woodOpacity }),
 
-  // Names belong to the walking network here, not to the road network. The
-  // base labels every road class, which on a hiking map is a screen of
-  // street names over ways a walker is being steered away from - and it
-  // crowds out the one name that matters, the path's. Paths keep their
-  // labels, tracks keep theirs (a forest road's name is how it's signed on
-  // the ground), and the road classes lose them.
-  removeLayer("highway-name-major"),
-  setLayerProps("highway-name-minor", {
-    filter: [
-      "all",
-      ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
-      ["==", ["get", "class"], "track"],
-    ],
-  }),
+    // Names belong to the walking network here, not to the road network. The
+    // base labels every road class, which on a hiking map is a screen of
+    // street names over ways a walker is being steered away from - and it
+    // crowds out the one name that matters, the path's. Paths keep their
+    // labels, tracks keep theirs (a forest road's name is how it's signed on
+    // the ground), and the road classes lose them.
+    removeLayer("highway-name-major"),
+    setLayerProps("highway-name-minor", {
+      filter: [
+        "all",
+        ["match", ["geometry-type"], ["LineString", "MultiLineString"], true, false],
+        ["==", ["get", "class"], "track"],
+      ],
+    }),
 
-  // Straight after the basemap's own (invisible) POI layers, so these sit
-  // with the other point symbols but still below place names.
-  insertLayersAfter("poi_r1", ...hikingPoiLayers()),
-]
+    // Straight after the basemap's own (invisible) POI layers, so these sit
+    // with the other point symbols but still below place names.
+    insertLayersAfter("poi_r1", ...hikingPoiLayers(palette)),
+  ]
+}
