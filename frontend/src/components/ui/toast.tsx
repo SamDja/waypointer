@@ -3,6 +3,7 @@ import { Toast as ToastPrimitive } from "radix-ui"
 import { XIcon } from "lucide-react"
 
 import { cn } from "@/lib/utils"
+import { closeButtonClass } from "@/components/ui/close-button"
 
 function ToastProvider({ ...props }: React.ComponentProps<typeof ToastPrimitive.Provider>) {
   return <ToastPrimitive.Provider data-slot="toast-provider" {...props} />
@@ -45,13 +46,13 @@ function ToastRoot({
       // our store intends.
       duration={Infinity}
       className={cn(
-        "pointer-events-auto flex items-center gap-2 rounded-lg border bg-background p-4 shadow-lg data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-full data-[swipe=end]:animate-out",
+        "pointer-events-auto flex items-center gap-2 rounded-surface border border-transparent bg-background p-4 shadow-floating ring-1 ring-foreground/10 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=open]:slide-in-from-top-full data-[swipe=end]:animate-out",
         // Opaque backgrounds: toasts float over the map, and a tinted,
         // see-through one lets the basemap's labels show through the text.
         variant === "destructive" &&
-          "border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950 dark:text-red-200",
+          "ring-destructive-border bg-destructive-surface text-destructive-foreground",
         variant === "success" &&
-          "border-green-600/40 bg-green-50 text-green-700 dark:bg-green-950 dark:text-green-400",
+          "ring-success-border bg-success-surface text-success-foreground",
         className
       )}
       {...props}
@@ -76,7 +77,7 @@ function ToastAction({ className, ...props }: React.ComponentProps<typeof ToastP
     <ToastPrimitive.Action
       data-slot="toast-action"
       className={cn(
-        "inline-flex h-7 shrink-0 cursor-pointer items-center rounded-md border bg-background px-2.5 text-xs font-medium transition-colors hover:bg-accent focus:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+        "inline-flex h-7 shrink-0 cursor-pointer items-center rounded-control border bg-background px-2.5 text-xs font-medium transition-colors hover:bg-muted focus:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
         className
       )}
       {...props}
@@ -89,7 +90,7 @@ function ToastClose({ className, ...props }: React.ComponentProps<typeof ToastPr
     <ToastPrimitive.Close
       data-slot="toast-close"
       className={cn(
-        "rounded-xs opacity-70 transition-opacity hover:opacity-100 focus:outline-none focus-visible:ring-3 focus-visible:ring-ring/50",
+        closeButtonClass,
         className
       )}
       {...props}

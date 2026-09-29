@@ -110,7 +110,7 @@ export function PlannerPanel({
       </CardHeader>
 
       <CardContent className="flex flex-col gap-3">
-        <p className="rounded-md border border-dashed p-3 text-xs text-muted-foreground">
+        <p className="rounded-control border border-dashed p-3 text-xs text-muted-foreground">
           Click the map to add a point to the end of the route, or drag the route line to add one in the middle.
           Drag any point to move it. Drag the start or end marker to move that end — or drop it back onto the
           route to trim there. Click a point to delete it.

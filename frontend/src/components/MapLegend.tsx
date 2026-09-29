@@ -51,12 +51,12 @@ function LineSwatch({
     <div className="relative flex w-6 shrink-0 items-center justify-center" style={{ height: outerHeight }}>
       {casingColor && (
         <div
-          className="absolute inset-x-0 rounded-xs"
+          className="absolute inset-x-0 rounded-swatch"
           style={{ height: casingWidth ?? width, backgroundColor: casingColor }}
         />
       )}
       <div
-        className="absolute inset-x-0 rounded-xs"
+        className="absolute inset-x-0 rounded-swatch"
         style={{
           height: width,
           backgroundColor: dashed ? "transparent" : color,
@@ -90,7 +90,7 @@ export function MapLegend({ candidates, existingWaypoints, mapStyleKey }: MapLeg
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
-            <Button variant="outline" size="icon-sm" className="bg-background shadow-md" aria-label="Legend">
+            <Button variant="map" size="icon-sm" aria-label="Legend">
               <Info />
             </Button>
           </PopoverTrigger>

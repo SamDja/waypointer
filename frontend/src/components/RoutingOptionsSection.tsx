@@ -20,7 +20,7 @@ export function RoutingOptionsSection({ specs, values, onChange }: RoutingOption
   const set = (key: string, value: boolean | number) => onChange({ ...values, [key]: value })
 
   return (
-    <Collapsible className="rounded-md border">
+    <Collapsible className="rounded-control border">
       <CollapsibleTrigger className="group flex w-full cursor-pointer items-center gap-2 px-3 py-2 text-left text-sm">
         <SlidersHorizontal className="size-4 text-muted-foreground" />
         <span className="flex-1 font-medium">Routing preferences</span>

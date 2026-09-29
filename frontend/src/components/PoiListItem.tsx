@@ -28,7 +28,7 @@ export function PoiListItem({
 }: PoiListItemProps) {
   return (
   <li
-    className="flex items-center gap-2 rounded-xl hover:bg-olive-200 p-2"
+    className="group/row flex items-center gap-2 rounded-item p-2 transition-colors hover:bg-accent"
     onMouseEnter={onMouseEnter}
     onMouseLeave={onMouseLeave}
   >

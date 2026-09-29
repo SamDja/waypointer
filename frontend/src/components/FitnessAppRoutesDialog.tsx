@@ -35,6 +35,7 @@ import { getValidStravaTokens, loadStravaTokens } from "@/lib/stravaSettings"
 import { toast, updateToast } from "@/lib/toast"
 import { deleteWahooRoute, listWahooRoutes, updateWahooRouteName, type WahooRoute } from "@/lib/wahooApi"
 import { getValidWahooAccessToken } from "@/lib/wahooSettings"
+import { Callout } from "@/components/ui/callout"
 
 // Which connected app a route lives in.
 export type RouteSource = "wahoo" | "strava"
@@ -385,7 +386,7 @@ export function FitnessAppRoutesDialog(props: FitnessAppRoutesDialogProps) {
           )}
 
           {!isLoading && failures.length > 0 && (
-            <div role="alert" className="flex flex-col gap-2 rounded-md border border-destructive/40 p-3 text-sm">
+            <Callout variant="destructive" role="alert" className="flex-col gap-2 p-3">
               {failures.map((failure) => (
                 <div key={failure.failed} className="flex items-start gap-2">
                   <CircleAlertIcon className="mt-0.5 size-4 shrink-0 text-destructive" />
@@ -404,7 +405,7 @@ export function FitnessAppRoutesDialog(props: FitnessAppRoutesDialogProps) {
                 <RotateCwIcon className="size-4" />
                 Try again
               </Button>
-            </div>
+            </Callout>
           )}
 
           {importError && (
@@ -583,7 +584,7 @@ export function FitnessAppRoutesDialog(props: FitnessAppRoutesDialogProps) {
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={handleConfirmDelete} className="bg-red-600 text-white hover:bg-red-700">
+                <AlertDialogAction variant="destructive-solid" onClick={handleConfirmDelete}>
                   Delete
                 </AlertDialogAction>
               </AlertDialogFooter>

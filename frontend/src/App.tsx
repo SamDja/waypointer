@@ -95,6 +95,7 @@ import { useElementHeight, useMapInsets } from "@/lib/useMapInsets"
 import { dismissToast, toast, updateToast } from "@/lib/toast"
 import { loadStravaTokens, type StravaTokens } from "@/lib/stravaSettings"
 import { loadWahooTokens, type WahooTokens } from "@/lib/wahooSettings"
+import { FloatingSurface } from "@/components/FloatingSurface"
 import type {
   Candidate,
   CandidateDetails,
@@ -1762,10 +1763,10 @@ export default function App() {
         ref={headerRef}
         className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-wrap items-center justify-between gap-2 px-4 pt-4 [&>*]:pointer-events-auto"
       >
-        <div className="flex h-11 items-center gap-1.5 rounded-xl bg-card px-3 shadow-lg ring-1 ring-foreground/10">
+        <FloatingSurface className="flex h-11 items-center gap-1.5 px-3">
           <img src="favicon.svg" className="w-6" />
           <h1 className="text-lg font-semibold">Sulla Via</h1>
-        </div>
+        </FloatingSurface>
         {/* Between the two pills on desktop; on a phone it wraps onto its own
             full-width row, below them. */}
         <div className="order-last w-full md:order-none md:w-96">
@@ -1775,14 +1776,14 @@ export default function App() {
             onAddPoint={plannerState ? handlePlaceAddPoint : undefined}
           />
         </div>
-        <div className="flex h-11 items-center rounded-xl bg-card px-1 shadow-lg ring-1 ring-foreground/10">
+        <FloatingSurface className="flex h-11 items-center px-1">
           <FitnessAppsMenu
             wahooTokens={wahooTokens}
             onWahooTokensChange={setWahooTokens}
             stravaTokens={stravaTokens}
             onStravaTokensChange={setStravaTokens}
           />
-        </div>
+        </FloatingSurface>
       </header>
 
       <div className="flex min-h-0 flex-1 flex-col md:block">
@@ -1865,7 +1866,7 @@ export default function App() {
         >
           {/* Everything in here floats over the map on desktop, hence the
               shadows: a card on its own is too close in tone to the map. */}
-          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0 [&>*]:shadow-lg md:[&>*]:pointer-events-auto">
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 [&>*]:shrink-0 [&>*]:shadow-floating md:[&>*]:pointer-events-auto">
             <StepCard
               title="1. Pick the activity you love"
               open={openStep === "activity"}

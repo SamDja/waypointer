@@ -28,7 +28,7 @@ export function RouteStats({
   const durationHours = estimateDurationHours(distanceM, elevationGainM, avgSpeedKmh, durationModel)
 
   return (
-    <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-md border p-4 text-sm">
+    <div className="grid grid-cols-2 gap-x-4 gap-y-2 rounded-control border p-4 text-sm">
       <Stat icon={RulerDimensionLine} label="Distance" value={`${(distanceM / 1000).toFixed(1)}km`} />
       <Stat icon={Clock} label="Est. duration" value={formatDurationHours(durationHours)} />
       <Stat icon={TrendingUp} label="Elevation gain" value={`${Math.round(elevationGainM)}m`} />

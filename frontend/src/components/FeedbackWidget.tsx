@@ -21,7 +21,7 @@ export function FeedbackWidget() {
       // clickable above any open Dialog/AlertDialog/toast.
       // bottom-12: sits just above MapLibre's attribution button, which
       // index.css pins to the page's bottom-right corner.
-      className="fixed right-4 bottom-12 z-[1300] rounded-full shadow-lg"
+      className="fixed right-4 bottom-12 z-[1300] rounded-full shadow-floating"
       aria-label="Send feedback"
       title="Send feedback"
     >

@@ -6,6 +6,7 @@ import type { GradeScale } from "@/lib/mapStyles"
 import { setHoveredDistanceM, useHoveredDistanceM } from "@/lib/hoverDistance"
 import type { SurfaceCategory, SurfaceRun } from "@/lib/routePlanner"
 import colors from "tailwindcss/colors"
+import { floatingSurfaceClass } from "@/components/ui/surface"
 
 export interface ElevationProfileProps {
   coords: [number, number][]
@@ -99,7 +100,7 @@ export function ElevationProfile({
 }: ElevationProfileProps) {
   const [open, setOpen] = useState(defaultOpen)
   return (
-    <Collapsible open={open} onOpenChange={setOpen} className="rounded-xl bg-card shadow-lg ring-1 ring-foreground/10">
+    <Collapsible open={open} onOpenChange={setOpen} className={floatingSurfaceClass}>
       <CollapsibleTrigger className="group flex w-full cursor-pointer items-center gap-3 px-4 py-2 text-left text-sm">
         <span className="font-medium">Elevation</span>
         <span className="flex items-center gap-1 text-muted-foreground">
@@ -242,7 +243,7 @@ function ProfilePlot({
                 y={y(tick)}
                 textAnchor="end"
                 dominantBaseline="middle"
-                className="fill-muted-foreground text-[10px] tabular-nums"
+                className="fill-muted-foreground text-3xs tabular-nums"
               >
                 {tick.toLocaleString()} m
               </text>
@@ -286,7 +287,7 @@ function ProfilePlot({
               x={x(km * 1000)}
               y={surfaceY + SURFACE_BAND_HEIGHT + 14}
               textAnchor="middle"
-              className="fill-muted-foreground text-[10px] tabular-nums"
+              className="fill-muted-foreground text-3xs tabular-nums"
             >
               {km} km
             </text>
@@ -300,7 +301,7 @@ function ProfilePlot({
                 x={Math.min(Math.max(x(peak.distanceM), MARGIN.left + 24), MARGIN.left + plotWidth - 24)}
                 y={y(peak.elevation) - 8}
                 textAnchor="middle"
-                className="fill-foreground text-[11px] font-medium tabular-nums"
+                className="fill-foreground text-2xs font-medium tabular-nums"
               >
                 {Math.round(peak.elevation).toLocaleString()} m
               </text>
@@ -336,7 +337,7 @@ function ProfilePlot({
 
       {hovered && (
         <div
-          className="pointer-events-none absolute top-0 rounded-md bg-popover px-2 py-1 text-xs whitespace-nowrap shadow-md ring-1 ring-foreground/10"
+          className="pointer-events-none absolute top-0 rounded-item bg-popover px-2 py-1 text-xs whitespace-nowrap shadow-raised ring-1 ring-foreground/10"
           style={{ left: Math.min(Math.max(x(hovered.distanceM) - 70, 0), Math.max(width - 190, 0)) }}
         >
           <span className="font-semibold tabular-nums">
@@ -372,12 +373,12 @@ function Legends({
   const cyclewayPct = totalM > 0 ? (100 * cyclewayM) / totalM : 0
 
   return (
-    <div className="flex flex-col gap-1.5 px-4 pb-3 text-[11px] text-muted-foreground">
+    <div className="flex flex-col gap-1.5 px-4 pb-3 text-2xs text-muted-foreground">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="font-medium text-foreground">Surface</span>
         {shares.map((surface) => (
           <span key={surface.category} className="flex items-center gap-1">
-            <span className="h-2 w-3 rounded-[2px]" style={{ backgroundColor: surface.color }} />
+            <span className="h-2 w-3 rounded-swatch" style={{ backgroundColor: surface.color }} />
             {surface.label} {Math.round(surface.pct)}%
           </span>
         ))}
@@ -387,7 +388,7 @@ function Legends({
         <span className="font-medium text-foreground">Gradient</span>
         <GradientScale scale={gradeScale} />
         <span className="flex items-center gap-1">
-          <span className="h-2 w-3 rounded-[2px]" style={{ backgroundColor: FLAT_COLOR }} />
+          <span className="h-2 w-3 rounded-swatch" style={{ backgroundColor: FLAT_COLOR }} />
           Flat (within ±{gradeScale.flatPct}%)
         </span>
       </div>
@@ -411,11 +412,11 @@ function GradientScale({ scale }: { scale: GradeScale }) {
       </span>
       <span className="relative h-3 tabular-nums" style={{ width: swatches.length * 24 }}>
         {edges.map((edge, i) => (
-          <span key={edge} className="absolute -translate-x-1/2 text-[9px]" style={{ left: (i + 1) * 24 }}>
+          <span key={edge} className="absolute -translate-x-1/2 text-3xs" style={{ left: (i + 1) * 24 }}>
             {edge}
           </span>
         ))}
-        <span className="absolute text-[9px]" style={{ left: swatches.length * 24 + 4 }}>
+        <span className="absolute text-3xs" style={{ left: swatches.length * 24 + 4 }}>
           %
         </span>
       </span>

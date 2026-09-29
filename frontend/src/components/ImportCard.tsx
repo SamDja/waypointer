@@ -97,7 +97,7 @@ export function ImportCard({
   if (file) {
     return (
       <div className="flex flex-col gap-3">
-        <div className="flex items-center gap-3 rounded-md border p-4">
+        <div className="flex items-center gap-3 rounded-control border p-4">
           <FileText className="size-8 shrink-0 text-muted-foreground" />
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="truncate text-sm font-medium">{file.name}</span>
@@ -132,7 +132,7 @@ export function ImportCard({
 
           {existingWaypoints.length > 0 && (
             <TabsContent value="waypoints">
-              <div className="rounded-md border p-4 text-sm">
+              <div className="rounded-control border p-4 text-sm">
                 <p className="mb-3 text-xs text-muted-foreground">
                   This file already has {existingWaypoints.length} waypoint
                   {existingWaypoints.length === 1 ? "" : "s"}. We guessed a type for each - adjust any that
@@ -210,7 +210,7 @@ export function ImportCard({
           onDragLeave={() => setIsDragActive(false)}
           onDrop={handleDrop}
           className={cn(
-            "flex flex-col items-center gap-3 rounded-md border-2 border-dashed p-6 text-center transition-colors",
+            "flex flex-col items-center gap-3 rounded-control border-2 border-dashed p-6 text-center transition-colors",
             isDragActive ? "border-primary bg-accent" : "border-input"
           )}
         >
@@ -250,7 +250,7 @@ export function ImportCard({
 
       <section className="flex flex-col gap-3">
         <h3 className="text-sm font-medium">Plan a new route</h3>
-        <div className="flex flex-col items-center gap-3 rounded-md border p-6 text-center">
+        <div className="flex flex-col items-center gap-3 rounded-control border p-6 text-center">
           <Route size={48} strokeWidth={1} />
           <p className="text-sm text-muted-foreground">
             Draw a route on the map, snapped to roads suited to cycling.
