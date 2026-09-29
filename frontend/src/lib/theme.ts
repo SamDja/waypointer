@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react"
+import { useEffect, useState, useSyncExternalStore } from "react"
 
 /**
  * The visitor's colour theme. "auto" follows the system's light/dark
@@ -6,6 +6,10 @@ import { useEffect, useState } from "react"
  * right theme is on before the first paint - keep the two in step.
  */
 export type ThemePreference = "light" | "dark" | "auto"
+
+// What is actually showing, once "auto" has been resolved - the map's
+// cartography has one style per theme (see lib/mapStyles.ts).
+export type MapTheme = "light" | "dark"
 
 export const THEME_ORDER: readonly ThemePreference[] = ["light", "dark", "auto"]
 
@@ -61,4 +65,24 @@ export function useTheme(): [ThemePreference, () => void] {
   }
 
   return [pref, cycle]
+}
+
+function subscribeToAppliedTheme(onChange: () => void): () => void {
+  const observer = new MutationObserver(onChange)
+  observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] })
+  return () => observer.disconnect()
+}
+
+/**
+ * The theme `applyTheme` last put on the page, "auto" already resolved.
+ * Read from `<html>` itself rather than from `useTheme`'s state, so the map
+ * and its legend follow the header's toggle (and the system, under auto)
+ * without the preference being threaded down to them.
+ */
+export function useResolvedTheme(): MapTheme {
+  return useSyncExternalStore(
+    subscribeToAppliedTheme,
+    () => (document.documentElement.classList.contains("dark") ? "dark" : "light"),
+    () => "light",
+  )
 }

@@ -22,13 +22,13 @@ import {
   Info,
   Locate,
   MapPin,
-  Navigation,
   Play,
   Plus,
   Minus,
   Square,
   Trash2Icon,
   type LucideIcon,
+  Navigation2,
 } from "lucide-react"
 import { PoiPhotos } from "@/components/PoiPhotos"
 import { Button } from "@/components/ui/button"
@@ -36,13 +36,22 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { MapLegend } from "@/components/MapLegend"
+import { MapScale } from "@/components/MapScale"
 import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
 import { buildAddablePoiFilter, resolvePoiTypeFromFeatureProps } from "@/lib/basemapPoiMapping"
 import { cumulativeDistancesM, pointAtDistanceM, projectOntoPolylineM } from "@/lib/geometry"
 import { setHoveredDistanceM, useHoveredDistanceM } from "@/lib/hoverDistance"
-import { PLANNER_POINT_COLOR, ROUTE_END_COLOR, ROUTE_START_COLOR, START_FINISH_BACKGROUND } from "@/lib/mapColors"
+import {
+  PLANNER_POINT_COLOR,
+  ROUTE_END_COLOR,
+  ROUTE_LINE_COLORS,
+  ROUTE_START_COLOR,
+  START_FINISH_BACKGROUND,
+} from "@/lib/mapColors"
+import { useResolvedTheme } from "@/lib/theme"
 import { CircleMarkerIcon, SearchedPlacePin, UserLocationMarker } from "@/lib/mapIcons"
 import { MAP_STYLES, mapStyleFor } from "@/lib/mapStyles"
+import { LABELS } from "@/lib/mapStyle/houseStyle"
 import {
   formatExactDateTime,
   formatRelativeDate,
@@ -51,7 +60,6 @@ import {
 } from "@/lib/osmTagLabels"
 import { POI_TYPES } from "@/lib/poiTypes"
 import { toast } from "@/lib/toast"
-import { tailwindHex } from "@/lib/color"
 import { fetchMapPois } from "@/lib/api"
 import type { MapPoi } from "@/types/candidate"
 import type { MapInsets } from "@/lib/useMapInsets"
@@ -209,12 +217,6 @@ const ARROW_IMAGE_ID = "route-arrow"
 // pre-rasterized PNG works reliably. Rasterized at 2x (48px) for crispness,
 // rendered at icon-size 0.5 below to display at the original 24px scale.
 const ARROW_ICON_URL = "/arrow-big.png"
-
-// Tailwind v4's palette (tailwindcss/colors) returns oklch() strings, which
-// MapLibre's style validator rejects for paint properties (unlike plain
-// CSS, which resolves oklch() natively) - so the violet-600 step is converted
-// to sRGB hex (the same colour the browser paints for it).
-const ROUTE_LINE_COLOR = tailwindHex(colors.violet[600])
 
 // Whether a screen point lands on the route's (invisible, wider) hit layer.
 // The layer only exists while planning a route that already has geometry,
@@ -725,7 +727,7 @@ function CompassControl({ bearing, mapRef }: { bearing: number; mapRef: React.Re
           onPointerDown={handlePointerDown}
           aria-label="Rotate map"
         >
-          <Navigation style={{ transform: `rotate(${-bearing}deg)` }} />
+          <Navigation2 style={{ transform: `rotate(${-bearing}deg)` }} />
         </Button>
       </TooltipTrigger>
       <TooltipContent>Drag to rotate, click to reset north</TooltipContent>
@@ -756,6 +758,7 @@ const ROUTE_HIT_LAYER_ID = "route-line-hit"
 const INSERT_DRAG_THRESHOLD_PX = 4
 
 function PendingLegLines({ pendingLegs }: { pendingLegs: [number, number][][] }) {
+  const theme = useResolvedTheme()
   if (pendingLegs.length === 0) return null
   return (
     <Source
@@ -774,7 +777,7 @@ function PendingLegLines({ pendingLegs }: { pendingLegs: [number, number][][] })
         id="planner-pending-line"
         type="line"
         paint={{
-          "line-color": PLANNER_ANCHOR_COLOR,
+          "line-color": ROUTE_LINE_COLORS[theme],
           "line-width": 2,
           "line-dasharray": [2, 2],
           "line-opacity": 0.7,
@@ -885,7 +888,7 @@ function SearchedPlacePopup({
                     <Play fill={colors.lime[700]} strokeWidth="0" className="size-4" />
                   )}
                   {(planning.shape === "loop" || planning.shape === "out-and-back") && (
-                    <Flag fill={colors.black} className="size-4"/>
+                    <Flag fill={colors.black} className="size-4" />
                   )}
                   {startLabel}
                 </Button>
@@ -1135,6 +1138,7 @@ const MAP_POI_DEBOUNCE_MS = 400
  */
 function MapPoiOverlay({ poiTypes }: { poiTypes: readonly string[] }) {
   const { current: map } = useMap()
+  const theme = useResolvedTheme()
   const [pois, setPois] = useState<MapPoi[]>([])
 
   useEffect(() => {
@@ -1230,8 +1234,9 @@ function MapPoiOverlay({ poiTypes }: { poiTypes: readonly string[] }) {
           "text-max-width": 9,
         }}
         paint={{
-          "text-color": tailwindHex(colors.stone[700]),
-          "text-halo-color": "#ffffff",
+          // The style's own label roles, the same as its hiking landmarks.
+          "text-color": LABELS[theme].normal,
+          "text-halo-color": LABELS[theme].halo,
           "text-halo-width": 1.2,
         }}
       />
@@ -1545,6 +1550,7 @@ export function RouteMap({
   // wrapper, so the variable cascades to it with no prop plumbing.
   const mapWrapperRef = useRef<HTMLDivElement>(null)
   const attributionHostRef = useRef<HTMLDivElement>(null)
+  const scaleHostRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = mapWrapperRef.current
     if (!el) return
@@ -1559,7 +1565,10 @@ export function RouteMap({
   const center = hasRoute ? routeCoords[0] : DEFAULT_CENTER
   const zoom = hasRoute ? 13 : DEFAULT_ZOOM
   const isHovering = hoveredPoi !== null
-  const mapStyle = mapStyleFor(mapStyleKey)
+  // The cartography follows the app's theme; switching it swaps in the
+  // other composed style, which MapLibre diffs into paint updates.
+  const theme = useResolvedTheme()
+  const mapStyle = mapStyleFor(mapStyleKey, theme)
   // POIs this activity wants drawn from our own import, on top of the
   // basemap's - see MapPoiOverlay.
   const overlayPoiTypes = MAP_STYLES.find((style) => style.key === mapStyleKey)?.overlayPoiTypes ?? EMPTY_POI_TYPES
@@ -1722,12 +1731,12 @@ export function RouteMap({
 
           {hasRoute && (
             <Source id={ROUTE_SOURCE_ID} type="geojson" data={toRouteLineGeoJson(routeCoords)}>
-              <Layer id="route-line" type="line" paint={{ "line-color": ROUTE_LINE_COLOR, "line-width": 3 }} />
+              <Layer id="route-line" type="line" paint={{ "line-color": ROUTE_LINE_COLORS[theme], "line-width": 3 }} />
               {planning && (
                 <Layer
                   id={ROUTE_HIT_LAYER_ID}
                   type="line"
-                  paint={{ "line-color": ROUTE_LINE_COLOR, "line-width": 16, "line-opacity": 0 }}
+                  paint={{ "line-color": ROUTE_LINE_COLORS[theme], "line-width": 16, "line-opacity": 0 }}
                 />
               )}
             </Source>
@@ -2057,6 +2066,7 @@ export function RouteMap({
             </Marker>
           )}
           <DetachedAttribution hostRef={attributionHostRef} />
+          <MapScale hostRef={scaleHostRef} />
           <FitOnRequest request={fitRequest} routeCoords={routeCoords} padding={fitPadding} />
           <FocusOnRequest request={focusRequest} padding={fitPadding} />
           <HoveredDistanceMarker routeCoords={routeCoords} />
@@ -2081,123 +2091,133 @@ export function RouteMap({
         {/* Every map control lives in one group on the left: the sidebar
             floats over the right side, so controls there would hang in the
             middle of the map. */}
-        <div className="absolute bottom-[calc(var(--map-inset-bottom)+0.5rem)] left-4 z-10 flex flex-col items-start gap-2">
-          <div className="grid grid-cols-3 grid-rows-3 gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="map"
-                  size="icon-sm"
-                  className="col-start-2 row-start-1"
-                  onClick={() => pan(0, -100)}
-                  aria-label="Pan up"
-                >
-                  <ChevronUp />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Pan up</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="map"
-                  size="icon-sm"
-                  className="col-start-1 row-start-2"
-                  onClick={() => pan(-100, 0)}
-                  aria-label="Pan left"
-                >
-                  <ChevronLeft />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Pan left</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="map"
-                  size="icon-sm"
-                  className="col-start-3 row-start-2"
-                  onClick={() => pan(100, 0)}
-                  aria-label="Pan right"
-                >
-                  <ChevronRight />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Pan right</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="map"
-                  size="icon-sm"
-                  className="col-start-2 row-start-3"
-                  onClick={() => pan(0, 100)}
-                  aria-label="Pan down"
-                >
-                  <ChevronDown />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Pan down</TooltipContent>
-            </Tooltip>
-          </div>
-
-          <div className="grid grid-cols-3 gap-1">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="map"
-                  size="icon-sm"
-                  onClick={() => mapRef.current?.getMap().zoomIn({ duration: 200 })}
-                  aria-label="Zoom in"
-                >
-                  <Plus />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Zoom in</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="map"
-                  size="icon-sm"
-                  onClick={() => mapRef.current?.getMap().zoomOut({ duration: 200 })}
-                  aria-label="Zoom out"
-                >
-                  <Minus />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Zoom out</TooltipContent>
-            </Tooltip>
+        <div className="absolute bottom-[calc(var(--map-inset-bottom)+0.5rem)] left-4 z-10 flex flex-row items-end">
+          <div className="flex flex-col items-center gap-2">
             <CompassControl bearing={bearing} mapRef={mapRef} />
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="map"
-                  size="icon-sm"
-                  onClick={handleCenterOnRoute}
-                  disabled={!hasRoute}
-                  aria-label="Center on route"
-                >
-                  <Crosshair />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Center on route</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="map"
-                  size="icon-sm"
-                  loading={locating}
-                  onClick={handleCenterOnLocation}
-                  aria-label="Center on my location"
-                >
-                  <Locate />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Center on my location</TooltipContent>
-            </Tooltip>
+            <div className="flex flex-col">
+              <div className="flex flex-row justify-center w-full">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="map"
+                      size="icon-sm"
+                      onClick={() => pan(0, -100)}
+                      aria-label="Pan up"
+                    >
+                      <ChevronUp />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Pan up</TooltipContent>
+                </Tooltip>
+              </div>
+              <div className="flex flex-row gap-4 w-full">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="map"
+                      size="icon-sm"
+                      onClick={() => pan(-100, 0)}
+                      aria-label="Pan left"
+                    >
+                      <ChevronLeft />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Pan left</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="map"
+                      size="icon-sm"
+                      onClick={() => pan(100, 0)}
+                      aria-label="Pan right"
+                    >
+                      <ChevronRight />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Pan right</TooltipContent>
+                </Tooltip>
+              </div>
+              <div className="flex flex-row justify-center w-full">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="map"
+                      size="icon-sm"
+                      onClick={() => pan(0, 100)}
+                      aria-label="Pan down"
+                    >
+                      <ChevronDown />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Pan down</TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
+
+            <div className="flex flex-col wrap-2 gap-2 w-full">
+              <div className="flex flex-row justify-center gap-2 w-full">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="map"
+                      size="icon-sm"
+                      onClick={() => mapRef.current?.getMap().zoomIn({ duration: 200 })}
+                      aria-label="Zoom in"
+                    >
+                      <Plus />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Zoom in</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="map"
+                      size="icon-sm"
+                      onClick={() => mapRef.current?.getMap().zoomOut({ duration: 200 })}
+                      aria-label="Zoom out"
+                    >
+                      <Minus />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Zoom out</TooltipContent>
+                </Tooltip>
+              </div>
+              <div className="flex flex-row justify-center gap-2 w-full">
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="map"
+                      size="icon-sm"
+                      onClick={handleCenterOnRoute}
+                      disabled={!hasRoute}
+                      aria-label="Center on route"
+                    >
+                      <Crosshair />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Center on route</TooltipContent>
+                </Tooltip>
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      variant="map"
+                      size="icon-sm"
+                      loading={locating}
+                      onClick={handleCenterOnLocation}
+                      aria-label="Center on my location"
+                    >
+                      <Locate />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Center on my location</TooltipContent>
+                </Tooltip>
+              </div>
+            </div>
           </div>
+          {/* MapScale portals itself in here from inside the <Map>. */}
+          <div ref={scaleHostRef} />
         </div>
       </div>
     </TooltipProvider>

@@ -1,9 +1,9 @@
 import type { LayerSpecification, SourceSpecification } from "@maplibre/maplibre-gl-style-spec"
 import * as maplibreModule from "maplibre-gl"
 import mlcontour from "maplibre-contour"
-import colors from "tailwindcss/colors"
 
-import { tailwindHex } from "../color"
+import type { MapTheme } from "../theme"
+import { LABELS } from "./houseStyle"
 
 /**
  * Contour lines for the hiking style.
@@ -103,10 +103,12 @@ export function contourSource(): SourceSpecification {
 // they're inserted under the road casings rather than over them, and drawn
 // in a brown that reads as terrain rather than competing with the amber
 // paths.
-const CONTOUR_COLOR = tailwindHex(colors.stone[500])
 const MAJOR = ["==", ["get", LEVEL_KEY], 1]
 
-export function contourLayers(): LayerSpecification[] {
+export function contourLayers(theme: MapTheme): LayerSpecification[] {
+  // Background detail, so the muted label role - for the lines too, which
+  // keeps each line and its elevation label the same colour.
+  const { muted: line, halo } = LABELS[theme]
   return [
     {
       id: "contour_line",
@@ -115,7 +117,7 @@ export function contourLayers(): LayerSpecification[] {
       "source-layer": CONTOUR_LAYER,
       minzoom: 10,
       paint: {
-        "line-color": CONTOUR_COLOR,
+        "line-color": line,
         // Every fifth line carries the elevation label, so it's drawn
         // heavier - the standard topographic index-contour convention.
         "line-width": ["case", MAJOR, 1, 0.5],
@@ -138,8 +140,8 @@ export function contourLayers(): LayerSpecification[] {
         "text-max-angle": 25,
       },
       paint: {
-        "text-color": CONTOUR_COLOR,
-        "text-halo-color": "#ffffff",
+        "text-color": line,
+        "text-halo-color": halo,
         "text-halo-width": 1.2,
       },
     },
