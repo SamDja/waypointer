@@ -23,9 +23,3 @@ export const ROUTE_LINE_COLORS: Record<MapTheme, string> = {
   light: tailwindHex(colors.violet[600]),
   dark: tailwindHex(colors.violet[400]),
 }
-// Labels for symbols we add to the map at runtime (MapPoiOverlay), matching
-// the hiking style's own landmark labels.
-export const MAP_LABEL_COLORS: Record<MapTheme, { text: string; halo: string }> = {
-  light: { text: tailwindHex(colors.stone[700]), halo: "#ffffff" },
-  dark: { text: tailwindHex(colors.stone[300]), halo: tailwindHex(colors.stone[900]) },
-}

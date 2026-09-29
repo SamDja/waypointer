@@ -16,6 +16,7 @@ import {
   type StylePatch,
 } from "./compose"
 import { CONTOUR_SOURCE_ID, contourLayers, contourSource } from "./contours"
+import { LABELS } from "./houseStyle"
 
 /**
  * The hiking activity patch: the walking network stands out, and what you
@@ -48,14 +49,12 @@ const LIGHT = {
   track: tailwindHex(colors.amber[700]),
   pavedTrack: tailwindHex(colors.amber[500]),
   dimFill: tailwindHex(colors.neutral[300]),
-  dimCasing: "#a3a3a3", // neutral-400 in Tailwind v3; v4's oklch step resolves slightly lighter
+  dimCasing: tailwindHex(colors.neutral[400]),
   // The casing under a path bridge would otherwise stay the base's pale
   // grey and read as a gap in the trail.
   pathBridgeCasing: tailwindHex(colors.stone[300]),
   wood: tailwindHex(colors.green[700]),
   woodOpacity: 0.2,
-  label: tailwindHex(colors.stone[700]),
-  halo: "#ffffff",
 }
 
 // On a dark ground the network has to get lighter to stay the brightest
@@ -71,8 +70,6 @@ const DARK: typeof LIGHT = {
   pathBridgeCasing: tailwindHex(colors.stone[600]),
   wood: tailwindHex(colors.green[800]),
   woodOpacity: 0.35,
-  label: tailwindHex(colors.stone[300]),
-  halo: tailwindHex(colors.stone[900]),
 }
 
 type Palette = typeof LIGHT
@@ -322,10 +319,10 @@ const PEAK_LABEL: Expression = [
   ["get", "name"],
 ]
 
-const hikingPoiLayers = (palette: Palette): LayerSpecification[] => {
+const hikingPoiLayers = (theme: MapTheme): LayerSpecification[] => {
   const labelPaint = {
-    "text-color": palette.label,
-    "text-halo-color": palette.halo,
+    "text-color": LABELS[theme].normal,
+    "text-halo-color": LABELS[theme].halo,
     "text-halo-width": 1.2,
   }
   return [
@@ -463,6 +460,6 @@ export const hikingStyle = (theme: MapTheme): StylePatch[] => {
 
     // Straight after the basemap's own (invisible) POI layers, so these sit
     // with the other point symbols but still below place names.
-    insertLayersAfter("poi_r1", ...hikingPoiLayers(palette)),
+    insertLayersAfter("poi_r1", ...hikingPoiLayers(theme)),
   ]
 }
