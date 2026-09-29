@@ -64,7 +64,7 @@ export function PoiPhotos({
 
   if (!hasRefs) return <PhotoNudge name={name} osmEditUrl={osmEditUrl} />
   if (!state || state.key !== requestKey) {
-    return <div className="mt-2 mx-auto aspect-4/3 w-[min(100%,calc(var(--poi-photo-height)*4/3))] animate-pulse rounded-md bg-muted" aria-label="Loading photos" />
+    return <div className="mt-2 mx-auto aspect-4/3 w-[min(100%,calc(var(--poi-photo-height)*4/3))] animate-pulse rounded-item bg-muted" aria-label="Loading photos" />
   }
   if (state.status === "error") {
     return <p className="mt-1 text-xs text-muted-foreground">Couldn't load photos.</p>
@@ -117,8 +117,8 @@ function PhotoCarousel({ photos }: { photos: PoiPhoto[] }) {
         </CarouselContent>
         {photos.length > 1 && (
           <>
-            <CarouselPrevious className="left-2 shadow-md" />
-            <CarouselNext className="right-2 shadow-md" />
+            <CarouselPrevious variant="map" className="left-2" />
+            <CarouselNext variant="map" className="right-2" />
           </>
         )}
       </Carousel>
@@ -135,7 +135,7 @@ function PhotoImage({ photo }: { photo: PoiPhoto }) {
       target="_blank"
       rel="noreferrer"
       title="Open in a new tab"
-      className="group relative block mx-auto aspect-4/3 w-[min(100%,calc(var(--poi-photo-height)*4/3))] overflow-hidden rounded-md bg-muted"
+      className="group relative block mx-auto aspect-4/3 w-[min(100%,calc(var(--poi-photo-height)*4/3))] overflow-hidden rounded-item bg-muted"
     >
       {failed ? (
         <span className="flex h-full items-center justify-center gap-1 text-xs text-muted-foreground">
@@ -154,7 +154,7 @@ function PhotoImage({ photo }: { photo: PoiPhoto }) {
           className="h-full w-full object-contain"
         />
       )}
-      <span className="absolute top-1.5 right-1.5 rounded-full bg-background/80 p-1 opacity-0 shadow-md transition-opacity group-hover:opacity-100">
+      <span className="absolute top-1.5 right-1.5 rounded-full bg-background/80 p-1 opacity-0 shadow-raised transition-opacity group-hover:opacity-100">
         <ExternalLink className="size-3.5" />
       </span>
     </a>

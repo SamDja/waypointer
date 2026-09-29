@@ -28,14 +28,14 @@ export function MapStyleSelect({ value, onChange }: MapStyleSelectProps) {
         reads as a different kind of control. `popper` drops it below
         instead; sideOffset plus the component's own translate leaves the
         same 8px gap the search results use, the trigger's width keeps the
-        edges flush, and shadow-lg is what lifts it clear of the cards it
-        opens over (they carry shadow-lg themselves).
+        edges flush, and shadow-floating is what lifts it clear of the cards it
+        opens over (they carry shadow-floating themselves).
       */}
       <SelectContent
         position="popper"
         align="start"
         sideOffset={4}
-        className="w-(--radix-select-trigger-width) rounded-xl shadow-lg"
+        className="w-(--radix-select-trigger-width) shadow-floating"
       >
         {MAP_STYLES.map((s) => (
           <SelectItem key={s.key} value={s.key}>

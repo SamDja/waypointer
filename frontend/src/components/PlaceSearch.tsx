@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { ApiError, searchPlaces } from "@/lib/api"
 import type { PlaceResult } from "@/types/candidate"
+import { floatingSurfaceClass } from "@/components/ui/surface"
+import { cn } from "@/lib/utils"
 
 // Wait this long after the last keystroke before searching, and don't search
 // fewer characters than the backend accepts (geocode.MIN_QUERY_LENGTH).
@@ -102,7 +104,7 @@ export function PlaceSearch({ getNear, onSelect, onAddPoint }: PlaceSearchProps)
   return (
     <TooltipProvider>
     <div ref={containerRef} className="relative">
-      <Command shouldFilter={false} className="h-auto overflow-visible rounded-xl bg-card shadow-lg ring-1 ring-foreground/10">
+      <Command shouldFilter={false} className={cn(floatingSurfaceClass, "h-auto overflow-visible")}>
         <div className="flex items-center">
           <Search className="ml-3 size-4 shrink-0 text-muted-foreground" />
           {/* cmdk's raw input: the shadcn CommandInput wrapper is styled for use
@@ -136,14 +138,14 @@ export function PlaceSearch({ getNear, onSelect, onAddPoint }: PlaceSearchProps)
             !focused &&
             !query && (
               // Desktop only: phones have no keyboard shortcut to hint at.
-              <kbd className="mr-3 hidden shrink-0 rounded border bg-muted px-1.5 py-0.5 font-sans text-xs text-muted-foreground md:inline-block">
+              <kbd className="mr-3 hidden shrink-0 rounded-item border bg-muted px-1.5 py-0.5 font-sans text-xs text-muted-foreground md:inline-block">
                 {SHORTCUT_LABEL}
               </kbd>
             )
           )}
         </div>
         {open && !tooShort && (
-          <CommandList className="absolute top-full right-0 left-0 z-10 mt-2 max-h-80 overflow-y-auto rounded-xl bg-popover p-1 shadow-lg ring-1 ring-foreground/10">
+          <CommandList className={cn("absolute top-full right-0 left-0 z-10 mt-2 max-h-80 overflow-y-auto p-1", floatingSurfaceClass)}>
             {status === "done" && <CommandEmpty>No places found.</CommandEmpty>}
             {status === "error" && (
               <div className="px-3 py-2 text-sm text-muted-foreground">{errorMessage}</div>

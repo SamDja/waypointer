@@ -719,9 +719,9 @@ function CompassControl({ bearing, mapRef }: { bearing: number; mapRef: React.Re
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
-          variant="outline"
+          variant="map"
           size="icon-sm"
-          className="bg-background shadow-md touch-none"
+          className="touch-none"
           onPointerDown={handlePointerDown}
           aria-label="Rotate map"
         >
@@ -924,7 +924,7 @@ function PlannerAnchorMarker({
       aria-label={`Route point ${number}`}
       onMouseEnter={() => onHover(true)}
       onMouseLeave={() => onHover(false)}
-      className="flex cursor-grab items-center justify-center rounded-full border-2 border-white text-[11px] font-semibold leading-none text-white active:cursor-grabbing"
+      className="flex cursor-grab items-center justify-center rounded-full border-2 border-white text-2xs font-semibold leading-none text-white active:cursor-grabbing"
       style={{
         width: PLANNER_ANCHOR_SIZE,
         height: PLANNER_ANCHOR_SIZE,
@@ -1319,7 +1319,7 @@ function OsmTagList({ tags }: { tags: Record<string, string> }) {
         <tbody>
           {entries.map((tag) => (
             <tr key={tag.key} className="border-1">
-              <th scope="row" className="bg-olive-100 pl-1 py-1.5 pr-3 text-left font-medium align-top whitespace-nowrap">
+              <th scope="row" className="bg-muted pl-1 py-1.5 pr-3 text-left font-medium align-top whitespace-nowrap">
                 <OsmTagLabel tag={tag} />
               </th>
               <td className="pl-1 py-1.5 min-w-0 break-words align-top">
@@ -2086,9 +2086,9 @@ export function RouteMap({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="outline"
+                  variant="map"
                   size="icon-sm"
-                  className="bg-background shadow-md col-start-2 row-start-1"
+                  className="col-start-2 row-start-1"
                   onClick={() => pan(0, -100)}
                   aria-label="Pan up"
                 >
@@ -2100,9 +2100,9 @@ export function RouteMap({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="outline"
+                  variant="map"
                   size="icon-sm"
-                  className="bg-background shadow-md col-start-1 row-start-2"
+                  className="col-start-1 row-start-2"
                   onClick={() => pan(-100, 0)}
                   aria-label="Pan left"
                 >
@@ -2114,9 +2114,9 @@ export function RouteMap({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="outline"
+                  variant="map"
                   size="icon-sm"
-                  className="bg-background shadow-md col-start-3 row-start-2"
+                  className="col-start-3 row-start-2"
                   onClick={() => pan(100, 0)}
                   aria-label="Pan right"
                 >
@@ -2128,9 +2128,9 @@ export function RouteMap({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="outline"
+                  variant="map"
                   size="icon-sm"
-                  className="bg-background shadow-md col-start-2 row-start-3"
+                  className="col-start-2 row-start-3"
                   onClick={() => pan(0, 100)}
                   aria-label="Pan down"
                 >
@@ -2145,9 +2145,8 @@ export function RouteMap({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="outline"
+                  variant="map"
                   size="icon-sm"
-                  className="bg-background shadow-md"
                   onClick={() => mapRef.current?.getMap().zoomIn({ duration: 200 })}
                   aria-label="Zoom in"
                 >
@@ -2159,9 +2158,8 @@ export function RouteMap({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="outline"
+                  variant="map"
                   size="icon-sm"
-                  className="bg-background shadow-md"
                   onClick={() => mapRef.current?.getMap().zoomOut({ duration: 200 })}
                   aria-label="Zoom out"
                 >
@@ -2174,9 +2172,8 @@ export function RouteMap({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="outline"
+                  variant="map"
                   size="icon-sm"
-                  className="bg-background shadow-md"
                   onClick={handleCenterOnRoute}
                   disabled={!hasRoute}
                   aria-label="Center on route"
@@ -2189,9 +2186,8 @@ export function RouteMap({
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
-                  variant="outline"
+                  variant="map"
                   size="icon-sm"
-                  className="bg-background shadow-md"
                   loading={locating}
                   onClick={handleCenterOnLocation}
                   aria-label="Center on my location"

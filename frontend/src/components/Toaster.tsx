@@ -4,7 +4,7 @@ import { dismissToast, useToasts } from "@/lib/toast"
 
 const VARIANT_STYLE = {
   loading: { root: "default", icon: null },
-  success: { root: "success", icon: <CheckCircle2Icon className="size-4 shrink-0 text-green-600 dark:text-green-400" /> },
+  success: { root: "success", icon: <CheckCircle2Icon className="size-4 shrink-0 text-success" /> },
   error: { root: "destructive", icon: <XCircleIcon className="size-4 shrink-0 text-destructive" /> },
   info: { root: "default", icon: <InfoIcon className="size-4 shrink-0 text-muted-foreground" /> },
 } as const

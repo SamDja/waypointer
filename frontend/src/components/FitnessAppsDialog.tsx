@@ -164,14 +164,14 @@ export function FitnessAppsDialog({
         </DialogHeader>
         <ul className="flex flex-col gap-2">
           {apps.map((app) => (
-            <li key={app.key} className="flex items-center gap-3 rounded-md border p-3">
+            <li key={app.key} className="flex items-center gap-3 rounded-control border p-3">
               <span className="flex w-20 shrink-0 items-center">{app.logo}</span>
               <span className="min-w-0 flex-1 text-sm">
                 {app.account === null ? (
                   <span className="flex flex-row gap-2 items-center text-muted-foreground"><Unlink size={12}/>Not connected</span>
                 ) : (
                   <>
-                    <span className="flex flex-row gap-2 items-center text-green-700"><Link size={12} /> Connected</span>
+                    <span className="flex flex-row gap-2 items-center text-success-foreground"><Link size={12} /> Connected</span>
                     {app.account && <span className="block truncate font-medium">{app.account}</span>}
                   </>
                 )}

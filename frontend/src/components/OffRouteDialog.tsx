@@ -92,7 +92,7 @@ export function OffRouteDialog({
             const Icon = poiType?.icon ?? MapPin
             const color = poiType?.color
             return (
-              <li key={item.key} className="flex items-center gap-2 rounded-md p-1 text-sm">
+              <li key={item.key} className="flex items-center gap-2 rounded-item p-1 text-sm">
                 <Icon className="size-4 shrink-0" style={color ? { color } : undefined} />
                 <span className="min-w-0 flex-1 truncate">
                   {item.name || (poiType?.label ?? "(unnamed)")}

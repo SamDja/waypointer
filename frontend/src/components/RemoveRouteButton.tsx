@@ -36,7 +36,7 @@ export function RemoveRouteButton({ onRemove }: RemoveRouteButtonProps) {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={onRemove} className="bg-red-600 text-white hover:bg-red-700">
+            <AlertDialogAction variant="destructive-solid" onClick={onRemove}>
               Remove
             </AlertDialogAction>
           </AlertDialogFooter>

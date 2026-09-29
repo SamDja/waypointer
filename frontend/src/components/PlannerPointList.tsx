@@ -95,7 +95,7 @@ export function PlannerPointList({
       onDragEnd={handleDragEnd}
     >
       <SortableContext items={points.map((p) => p.id)} strategy={verticalListSortingStrategy}>
-        <ol className="flex flex-col rounded-md border py-1" onMouseLeave={() => onHover(null)}>
+        <ol className="flex flex-col rounded-control border py-1" onMouseLeave={() => onHover(null)}>
           {points.map((point, index) => (
             <PointRow
               key={point.id}
@@ -150,7 +150,7 @@ function PointRow({
       className={cn(
         "relative flex items-center gap-2 px-1 py-1 text-sm",
         highlighted && "bg-accent",
-        isDragging && "z-10 rounded-md bg-card shadow-md ring-1 ring-foreground/10"
+        isDragging && "z-10 rounded-item bg-card shadow-raised ring-1 ring-foreground/10"
       )}
     >
       <button
@@ -162,7 +162,7 @@ function PointRow({
         disabled={!canReorder}
         // touch-none: without it a touch drag on the handle scrolls the
         // sidebar instead of moving the row.
-        className="flex size-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-md text-muted-foreground hover:bg-accent active:cursor-grabbing disabled:cursor-default disabled:opacity-40"
+        className="flex size-7 shrink-0 cursor-grab touch-none items-center justify-center rounded-item text-muted-foreground hover:bg-muted active:cursor-grabbing disabled:cursor-default disabled:opacity-40"
       >
         <GripVertical className="size-4" />
       </button>
@@ -201,7 +201,7 @@ function PointBadge({ point }: { point: Pick<PlannerPoint, "kind" | "number"> })
   const Icon = point.kind === "start" ? Play : point.kind === "end" ? Square : point.kind === "start-finish" ? Flag : null
   return (
     <span
-      className="flex size-5 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold leading-none text-white"
+      className="flex size-5 shrink-0 items-center justify-center rounded-full text-3xs font-semibold leading-none text-white"
       style={{ background }}
     >
       {Icon ? <Icon className="size-3" strokeWidth={2.5} /> : point.number}

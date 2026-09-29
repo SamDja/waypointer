@@ -44,7 +44,7 @@ export function FindPoisCard({ entries, onChange, onFind, disabled, isFinding, p
   return (
     <div>
       <h3 className="text-base">POI types</h3>
-      <div className="flex flex-col rounded-md border p-4 gap-3">
+      <div className="flex flex-col rounded-control border p-4 gap-3">
         {entries.length > 0 &&
           <ul className="grid grid-cols-[auto_1fr_auto_auto_auto_auto] items-center gap-x-2 gap-y-2">
             {entries.map((entry) => {
@@ -125,14 +125,14 @@ function RowSearchStatus({
   if (progress.erroredTypes.has(poiType)) {
     return (
       <span aria-label={`Couldn't search ${label}`} title={`Couldn't search ${label}`}>
-        <TriangleAlert className="size-4 text-amber-600" />
+        <TriangleAlert className="size-4 text-warning" />
       </span>
     )
   }
   if (progress.doneTypes.has(poiType)) {
     return (
       <span aria-label={`${label} found`} title={`${label} found`}>
-        <CheckIcon className="size-4 text-emerald-600" />
+        <CheckIcon className="size-4 text-success" />
       </span>
     )
   }

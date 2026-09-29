@@ -6,6 +6,7 @@ import { PoiListItem } from "@/components/PoiListItem"
 import { POI_TYPES } from "@/lib/poiTypes"
 import { cn } from "@/lib/utils"
 import type { Candidate, FailedPoiType, PoiSearchConfig } from "@/types/candidate"
+import { Callout } from "@/components/ui/callout"
 
 export interface CandidateChecklistProps {
   candidates: Candidate[]
@@ -30,7 +31,7 @@ export function CandidateChecklist({
 
   const failedBanner =
     failedPoiTypes.length > 0 ? (
-      <p className="flex items-start gap-1.5 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+      <Callout variant="warning">
         <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />
         <span>
           Couldn't search{" "}
@@ -39,7 +40,7 @@ export function CandidateChecklist({
             .join(", ")}{" "}
           - other results below are unaffected. Try searching again.
         </span>
-      </p>
+      </Callout>
     ) : null
 
   if (candidates.length === 0) {
@@ -71,7 +72,7 @@ export function CandidateChecklist({
   function chipClass(active: boolean) {
     return cn(
       "flex items-center gap-1 rounded-full px-3 py-1 text-xs font-medium cursor-pointer",
-      active ? "bg-primary text-primary-foreground" : "bg-olive-100 text-stone-800 hover:bg-olive-200"
+      active ? "bg-primary text-primary-foreground" : "bg-background text-foreground hover:bg-muted"
     )
   }
 
@@ -79,7 +80,7 @@ export function CandidateChecklist({
     <div className="flex flex-col gap-2">
       {failedBanner}
       <h3 className="text-base">Results</h3>
-      <div className="flex flex-col rounded-md border p-4 gap-3">
+      <div className="flex flex-col rounded-control border p-4 gap-3">
         <div className="flex flex-wrap gap-1.5">
           <button type="button" onClick={() => setFilter("all")} className={chipClass(filter === "all")}>
             All ({candidates.filter((c) => selectedIds.has(c.osm_id)).length}/{candidates.length})

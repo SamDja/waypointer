@@ -34,7 +34,7 @@ function DropdownMenuContent({
           // Leaflet's CSS uses z-index up to 1000, and this content renders
           // via a Radix portal into document.body, competing with Leaflet's
           // panes/controls directly rather than nesting under RouteMap.
-          "z-[1100] min-w-40 overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+          "z-[1100] min-w-40 overflow-hidden rounded-surface bg-popover p-1 text-popover-foreground shadow-raised ring-1 ring-foreground/10 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
           className
         )}
         {...props}
@@ -51,11 +51,9 @@ function DropdownMenuItem({
     <DropdownMenuPrimitive.Item
       data-slot="dropdown-menu-item"
       className={cn(
-        // Same highlight as select.tsx and command.tsx, so every menu in the
-        // app reads alike. bg-muted is oklch(0.97) against a popover of
-        // oklch(0.966), so what it replaced was a highlight barely visible
-        // at all.
-        "relative flex cursor-pointer items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none select-none hover:bg-olive-300 focus:bg-olive-300 data-highlighted:bg-olive-300 data-[disabled]:pointer-events-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
+        // --accent, the one "row you're on" highlight shared with
+        // select.tsx and command.tsx, so every menu in the app reads alike.
+        "relative flex cursor-pointer items-center gap-2 rounded-item px-2 py-1.5 text-sm outline-none select-none hover:bg-accent focus:bg-accent data-highlighted:bg-accent data-[disabled]:pointer-events-none data-[disabled]:cursor-not-allowed data-[disabled]:opacity-50",
         className
       )}
       {...props}
