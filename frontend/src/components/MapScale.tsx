@@ -50,8 +50,7 @@ export function MapScale({ hostRef }: { hostRef: RefObject<HTMLDivElement | null
 
   if (!state) return null
   return createPortal(
-    <div className="flex items-center gap-2 px-2 py-1 text-xs tabular-nums text-foreground">
-      {/* <span title="Zoom level">z{state.zoom.toFixed(1)}</span> */}
+    <div className="flex items-center gap-2 px-2 py-1 text-xs tabular-nums bg-background/50 text-foreground rounded-control border">
       {state.bar && (
         <span className="flex flex-row items-baseline gap-1" aria-label={`Scale: ${state.bar.label}`}>
           <span>{state.bar.label}</span>
