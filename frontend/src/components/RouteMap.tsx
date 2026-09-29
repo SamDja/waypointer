@@ -36,6 +36,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { MapLegend } from "@/components/MapLegend"
+import { MapScale } from "@/components/MapScale"
 import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
 import { buildAddablePoiFilter, resolvePoiTypeFromFeatureProps } from "@/lib/basemapPoiMapping"
 import { cumulativeDistancesM, pointAtDistanceM, projectOntoPolylineM } from "@/lib/geometry"
@@ -1549,6 +1550,7 @@ export function RouteMap({
   // wrapper, so the variable cascades to it with no prop plumbing.
   const mapWrapperRef = useRef<HTMLDivElement>(null)
   const attributionHostRef = useRef<HTMLDivElement>(null)
+  const scaleHostRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const el = mapWrapperRef.current
     if (!el) return
@@ -2064,6 +2066,7 @@ export function RouteMap({
             </Marker>
           )}
           <DetachedAttribution hostRef={attributionHostRef} />
+          <MapScale hostRef={scaleHostRef} />
           <FitOnRequest request={fitRequest} routeCoords={routeCoords} padding={fitPadding} />
           <FocusOnRequest request={focusRequest} padding={fitPadding} />
           <HoveredDistanceMarker routeCoords={routeCoords} />
@@ -2213,6 +2216,8 @@ export function RouteMap({
               </div>
             </div>
           </div>
+          {/* MapScale portals itself in here from inside the <Map>. */}
+          <div ref={scaleHostRef} />
         </div>
       </div>
     </TooltipProvider>
