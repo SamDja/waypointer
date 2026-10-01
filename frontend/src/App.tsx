@@ -13,12 +13,17 @@ import type { PlannerPoint } from "@/components/PlannerPointList"
 import { MapStyleSelect } from "@/components/MapStyleSelect"
 import { Toaster } from "@/components/Toaster"
 import { FitnessAppsMenu } from "@/components/FitnessAppsMenu"
+import { AccountDialog, type AccountView } from "@/components/AccountDialog"
+import { AccountMenu } from "@/components/AccountMenu"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { Logo } from "@/components/Logo"
 import { ActivitySwitchDialog, type ActivitySwitchConsequences } from "@/components/ActivitySwitchDialog"
 import { OffRouteDialog, type OffRouteItem } from "@/components/OffRouteDialog"
 import { ApiError, NETWORK_ERROR_MESSAGE, cooldownRemainingMs, findPois, lookupPoi, routeLeg } from "@/lib/api"
 import { track } from "@/lib/analytics"
+import { confirmEmailChange, fetchAccountStatus, signOut, verifyEmail } from "@/lib/accountApi"
+import { parseEmailLink, withoutEmailLinkParams } from "@/lib/emailLinks"
+import type { Account } from "@/types/account"
 import { mostSpecificPerElement } from "@/lib/poiTypes"
 import { encodePolyline } from "@/lib/polyline"
 import { elevationGainLossM, projectOntoPolylineM, totalDistanceM } from "@/lib/geometry"
@@ -209,6 +214,17 @@ export default function App() {
   const [openStep, setOpenStep] = useState<Step | null>("import")
   const [wahooTokens, setWahooTokens] = useState<WahooTokens | null>(() => loadWahooTokens())
   const [stravaTokens, setStravaTokens] = useState<StravaTokens | null>(() => loadStravaTokens())
+  // -- Account ------------------------------------------------------------
+  // Optional: the whole app works without one. `accountsEnabled` stays false
+  // until the server says it has an account database, so a deployment
+  // without one never shows a sign-in that can't work.
+  const [accountsEnabled, setAccountsEnabled] = useState(false)
+  const [account, setAccount] = useState<Account | null>(null)
+  const [accountView, setAccountView] = useState<AccountView | null>(null)
+  const [resetToken, setResetToken] = useState<string | null>(null)
+  // StrictMode runs mount effects twice in dev; an email link's token is
+  // single use, so it must only ever be sent once.
+  const emailLinkHandled = useRef(false)
   const [avgSpeedKmh, setAvgSpeedKmh] = useState<number>(() => loadAvgSpeedKmh(loadMapStyleKey()))
   const [mapStyleKey, setMapStyleKey] = useState<string>(() => loadMapStyleKey())
   // The activity a visitor has asked to switch to, held while they confirm.
@@ -220,6 +236,56 @@ export default function App() {
   const [routingOptions, setRoutingOptionsPreference] = useState<RoutingOptions>(() =>
     loadRoutingOptions(loadMapStyleKey())
   )
+
+  useEffect(() => {
+    fetchAccountStatus()
+      .then((status) => {
+        setAccountsEnabled(status.enabled)
+        // An email link handled below may already have signed someone in.
+        setAccount((current) => current ?? status.account)
+      })
+      .catch(() => setAccountsEnabled(false))
+
+    if (emailLinkHandled.current) return
+    emailLinkHandled.current = true
+    const link = parseEmailLink(window.location.search)
+    if (!link) return
+    window.history.replaceState(window.history.state, "", withoutEmailLinkParams(window.location.href))
+    if (link.kind === "verify") {
+      verifyEmail(link.token)
+        .then((verified) => {
+          setAccountsEnabled(true)
+          setAccount(verified)
+          track("email_verified")
+          toast("Email verified - welcome to Sulla Via!")
+        })
+        .catch((err) => toast(err instanceof Error ? err.message : "That link didn't work.", "error"))
+    } else if (link.kind === "confirm-email") {
+      confirmEmailChange(link.token)
+        .then((changed) => {
+          // Only update what's shown if this browser is signed in as that
+          // account - the link may have been opened anywhere.
+          setAccount((current) => (current && current.id === changed.id ? changed : current))
+          toast(`Your email address is now ${changed.email}.`)
+        })
+        .catch((err) => toast(err instanceof Error ? err.message : "That link didn't work.", "error"))
+    } else if (link.kind === "reset") {
+      setResetToken(link.token)
+      setAccountView("reset")
+    } else {
+      setAccountView("forgot")
+    }
+  }, [])
+
+  async function handleSignOut() {
+    try {
+      await signOut()
+      setAccount(null)
+      toast("Signed out.")
+    } catch (err) {
+      toast(err instanceof Error ? err.message : "Couldn't sign out - please try again.", "error")
+    }
+  }
 
   // -- Route planner ------------------------------------------------------
   // Non-null exactly while the planner is active. The planner is the source
@@ -1761,6 +1827,13 @@ export default function App() {
         onConfirm={handleConfirmPendingEdit}
         onCancel={() => setPendingEdit(null)}
       />
+      <AccountDialog
+        view={accountView}
+        onViewChange={setAccountView}
+        resetToken={resetToken}
+        account={account}
+        onAccountChange={setAccount}
+      />
       <header
         ref={headerRef}
         className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-wrap items-center justify-between gap-2 px-4 pt-4 [&>*]:pointer-events-auto"
@@ -1780,6 +1853,9 @@ export default function App() {
         </div>
         <FloatingSurface className="flex h-11 items-center gap-0.5 px-1">
           <ThemeToggle />
+          {accountsEnabled && (
+            <AccountMenu account={account} onOpen={setAccountView} onSignOut={() => void handleSignOut()} />
+          )}
           <FitnessAppsMenu
             wahooTokens={wahooTokens}
             onWahooTokensChange={setWahooTokens}

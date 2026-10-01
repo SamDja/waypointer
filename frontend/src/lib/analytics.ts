@@ -42,6 +42,9 @@ export type AnalyticsEvent =
   | "route_planning_done"
   | "place_search_picked"
   | "place_added_to_route"
+  | "signed_up"
+  | "signed_in"
+  | "email_verified"
 
 // Never throws and never assumes window.umami is present - it may be
 // missing from an ad-blocker, an unset website id, or the script still

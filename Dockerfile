@@ -19,6 +19,11 @@ ENV VITE_TALLY_FORM_ID=$VITE_TALLY_FORM_ID
 # Leaving it unset disables analytics entirely (see lib/analytics.ts).
 ARG VITE_UMAMI_WEBSITE_ID
 ENV VITE_UMAMI_WEBSITE_ID=$VITE_UMAMI_WEBSITE_ID
+# Not secret - Cloudflare Turnstile's public site key for the sign-up/reset
+# captcha (see frontend/src/components/Turnstile.tsx). The matching secret is
+# runtime env (TURNSTILE_SECRET_KEY), never a build arg.
+ARG VITE_TURNSTILE_SITE_KEY
+ENV VITE_TURNSTILE_SITE_KEY=$VITE_TURNSTILE_SITE_KEY
 RUN npm run build
 
 # ---- python stage ----

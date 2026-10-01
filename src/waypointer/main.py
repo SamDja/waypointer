@@ -1,6 +1,7 @@
-"""FastAPI app: stateless endpoints plus the static frontend.
+"""FastAPI app: the route/POI endpoints, the account endpoints (auth.py)
+and the static frontend.
 
-No server-side session/user state is kept between requests - the frontend
+The route/POI endpoints keep no server-side state between requests - the frontend
 holds candidate data from /api/find-pois/route and resubmits the selected
 ones (plus the original file) to /api/save or /api/wahoo/route-payload, so
 one visitor's data never touches another's and a second PostGIS query isn't
@@ -11,6 +12,7 @@ import asyncio
 import base64
 import os
 import re
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -65,7 +67,7 @@ from waypointer.rate_limit import (
 from waypointer.geocode import GeocodeError, GeocodeRateLimitedError, search_places
 from waypointer.photos import resolve_photos
 from waypointer.routing import USER_AGENT, RoutingError, RoutingRateLimitedError, route_leg
-from waypointer import strava
+from waypointer import auth, db, strava
 from waypointer.schemas import (
     Candidate,
     CandidateDetails,
@@ -113,7 +115,16 @@ UPSTREAM_RETRY_AFTER_S = 30
 # popup's own callback page (frontend/public/strava-callback.html).
 STRAVA_CALLBACK_PATH = "/strava-callback.html"
 
-app = FastAPI(title="Sulla Via")
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    # Creates and migrates the account database (db.py). Never fatal: without
+    # one, the account endpoints answer 503 and everything else still works.
+    await asyncio.to_thread(db.init_database)
+    yield
+    db.close_pool()
+
+
+app = FastAPI(title="Sulla Via", lifespan=lifespan)
 
 # Exposes GET /metrics (request count, latency histogram, in-progress gauge,
 # labeled by method/path/status) for the docker-compose Prometheus service to
@@ -1029,6 +1040,8 @@ async def poi_photos_endpoint(tags: str = Form(...)) -> PoiPhotosResponse:
         failed_sources=list(result.failed_sources),
     )
 
+
+app.include_router(auth.router)
 
 # Catch-all mount for the built SPA - MUST be registered last. StaticFiles
 # matches any path not already claimed by a route above it, so mounting

@@ -10,6 +10,9 @@ services:
         VITE_TALLY_FORM_ID: ${VITE_TALLY_FORM_ID:-}
         # Leaving this unset ships this deployment with zero analytics.
         VITE_UMAMI_WEBSITE_ID: ${VITE_UMAMI_WEBSITE_ID:-}
+        # Public Cloudflare Turnstile site key for the sign-up/reset captcha;
+        # pairs with TURNSTILE_SECRET_KEY below. Unset = no captcha shown.
+        VITE_TURNSTILE_SITE_KEY: ${VITE_TURNSTILE_SITE_KEY:-}
     ports:
       - "${PORT:-8000}:8000"
     environment:
@@ -33,6 +36,30 @@ services:
       # either). Unset, the Strava row says it isn't set up.
       - STRAVA_CLIENT_ID=${STRAVA_CLIENT_ID:-}
       - STRAVA_CLIENT_SECRET=${STRAVA_CLIENT_SECRET:-}
+      # User accounts (auth.py) - see CLAUDE.md's "Accounts" section. Their
+      # own database on the same postgis server, created at startup if
+      # missing, kept apart from the POI import's `pois`.
+      - DATABASE_URL=postgresql://waypointer:${POSTGIS_PASSWORD:-}@postgis:5432/sulla_via
+      # The site's public address (e.g. https://sullavia.example). Links in
+      # account emails are built from it, and request origins are checked
+      # against it. Required once SMTP_HOST is set.
+      - PUBLIC_BASE_URL=${PUBLIC_BASE_URL:-}
+      # The session cookie is Secure unless this is "0" - only for browsing
+      # over plain HTTP on the LAN.
+      - COOKIE_SECURE=${COOKIE_SECURE:-1}
+      # Any SMTP relay (Brevo, Mailgun, SES...). Unset SMTP_HOST: emails are
+      # written to the log instead of sent.
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASSWORD=${SMTP_PASSWORD:-}
+      - MAIL_FROM=${MAIL_FROM:-}
+      # Cloudflare Turnstile secret for the sign-up/reset captcha. Unset: no
+      # captcha is checked - set it for any deployment with open sign-up.
+      - TURNSTILE_SECRET_KEY=${TURNSTILE_SECRET_KEY:-}
+      # "1" refuses passwords listed by Have I Been Pwned (k-anonymity: only
+      # a 5-character hash prefix leaves the server).
+      - HIBP_CHECK=${HIBP_CHECK:-}
     volumes:
       - ${CERTS_DIR:-./certs}:/certs:ro
     networks:

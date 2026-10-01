@@ -248,3 +248,23 @@ class StravaActivitiesPage(BaseModel):
     # only while `has_more` and the visitor wants more.
     activities: list[StravaActivityResponse]
     has_more: bool
+
+
+class AccountResponse(BaseModel):
+    # The signed-in visitor's account - /api/auth/me and every endpoint that
+    # signs someone in. Never carries the password hash.
+    id: str
+    email: str
+    email_verified: bool
+    # Opt-in features switched on by hand for a test phase (e.g. "llm").
+    features: list[str]
+    created_at: str
+
+
+class AccountStatus(BaseModel):
+    # /api/auth/me. `account` is null for an anonymous visitor; `enabled` is
+    # false when this server has no account database (DATABASE_URL unset),
+    # so the frontend can hide sign-in entirely rather than offer a broken one.
+    enabled: bool
+    account: AccountResponse | None
+    captcha_required: bool

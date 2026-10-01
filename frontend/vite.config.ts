@@ -23,7 +23,12 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/api": "http://localhost:8000",
+      // Not the "/api": "http://..." shorthand: that sets changeOrigin, which
+      // rewrites Host to localhost:8000 while the browser's Origin stays
+      // localhost:5173, and the backend's same-origin check on account
+      // requests (sessions.require_same_origin) then refuses every POST.
+      // Keeping Host is also what production looks like - one origin.
+      "/api": { target: "http://localhost:8000", changeOrigin: false },
     },
   },
 })
