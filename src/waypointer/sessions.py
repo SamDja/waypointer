@@ -19,7 +19,7 @@ import secrets
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from urllib.parse import urlparse
 
 import psycopg
@@ -95,9 +95,11 @@ def clear_session_cookie(response: Response) -> None:
 
 def create_session(conn: psycopg.Connection, user_id: str, user_agent: str | None) -> str:
     token = new_token()
+    # Every expiry is computed by the database's clock, never this
+    # process's, so a skew between the two can't shorten or stretch one.
     conn.execute(
-        "INSERT INTO sessions (token_hash, user_id, expires_at, user_agent) VALUES (%s, %s, %s, %s)",
-        (hash_token(token), user_id, datetime.now(timezone.utc) + SESSION_TTL, (user_agent or "")[:300]),
+        "INSERT INTO sessions (token_hash, user_id, expires_at, user_agent) VALUES (%s, %s, now() + %s, %s)",
+        (hash_token(token), user_id, SESSION_TTL, (user_agent or "")[:300]),
     )
     return token
 
@@ -119,18 +121,17 @@ def current_user_optional(request: Request, response: Response) -> User | None:
         return None
     with connection() as conn:
         row = conn.execute(
-            f"SELECT {USER_COLUMNS}, s.last_seen_at FROM sessions s JOIN users u ON u.id = s.user_id"
+            f"SELECT {USER_COLUMNS}, now() - s.last_seen_at > %s FROM sessions s JOIN users u ON u.id = s.user_id"
             " WHERE s.token_hash = %s AND s.expires_at > now()",
-            (hash_token(token),),
+            (TOUCH_INTERVAL, hash_token(token)),
         ).fetchone()
         if row is None:
             clear_session_cookie(response)
             return None
-        now = datetime.now(timezone.utc)
-        if now - row[5] > TOUCH_INTERVAL:
+        if row[5]:
             conn.execute(
-                "UPDATE sessions SET last_seen_at = %s, expires_at = %s WHERE token_hash = %s",
-                (now, now + SESSION_TTL, hash_token(token)),
+                "UPDATE sessions SET last_seen_at = now(), expires_at = now() + %s WHERE token_hash = %s",
+                (SESSION_TTL, hash_token(token)),
             )
             set_session_cookie(response, token)
     return user_from_row(row)

@@ -50,6 +50,10 @@ PHOTO_REQUESTS_PER_WINDOW = 60
 # them spend this app's single Strava quota (shared by every visitor), so a
 # visitor gets a few dialog openings and imports per minute, not a fan-out.
 STRAVA_REQUESTS_PER_WINDOW = 20
+# Every /api/wahoo/* call that reaches Wahoo with the account's token -
+# connecting, listing, pushing, renaming, deleting. Wahoo's own per-app
+# limits are generous, but they're still one quota shared by every visitor.
+WAHOO_REQUESTS_PER_WINDOW = 30
 # Account endpoints (auth.py). Login is limited per IP and, separately, per
 # email address, so neither guessing many passwords for one account from many
 # IPs nor one IP spraying many accounts gets far. Anything that sends an email
@@ -124,6 +128,7 @@ geocode_rate_limit = make_rate_limit("geocode", GEOCODE_REQUESTS_PER_WINDOW)
 map_poi_rate_limit = make_rate_limit("map_poi", MAP_POI_REQUESTS_PER_WINDOW)
 photo_rate_limit = make_rate_limit("photos", PHOTO_REQUESTS_PER_WINDOW)
 strava_rate_limit = make_rate_limit("strava", STRAVA_REQUESTS_PER_WINDOW)
+wahoo_rate_limit = make_rate_limit("wahoo", WAHOO_REQUESTS_PER_WINDOW)
 login_rate_limit = make_rate_limit("login", LOGIN_REQUESTS_PER_WINDOW)
 signup_rate_limit = make_rate_limit("signup", SIGNUP_REQUESTS_PER_HOUR, HOUR_S)
 account_rate_limit = make_rate_limit("account", ACCOUNT_REQUESTS_PER_WINDOW)

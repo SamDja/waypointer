@@ -12,9 +12,9 @@ import { ElevationProfile } from "@/components/ElevationProfile"
 import type { PlannerPoint } from "@/components/PlannerPointList"
 import { MapStyleSelect } from "@/components/MapStyleSelect"
 import { Toaster } from "@/components/Toaster"
-import { FitnessAppsMenu } from "@/components/FitnessAppsMenu"
 import { AccountDialog, type AccountView } from "@/components/AccountDialog"
 import { AccountMenu } from "@/components/AccountMenu"
+import { ImportLocalDataDialog } from "@/components/ImportLocalDataDialog"
 import { ThemeToggle } from "@/components/ThemeToggle"
 import { Logo } from "@/components/Logo"
 import { ActivitySwitchDialog, type ActivitySwitchConsequences } from "@/components/ActivitySwitchDialog"
@@ -100,8 +100,7 @@ import {
 import { clearDraft, loadDraft, saveDraft, type PlannerDraft } from "@/lib/plannerDraft"
 import { useElementHeight, useMapInsets } from "@/lib/useMapInsets"
 import { dismissToast, toast, updateToast } from "@/lib/toast"
-import { loadStravaTokens, type StravaTokens } from "@/lib/stravaSettings"
-import { loadWahooTokens, type WahooTokens } from "@/lib/wahooSettings"
+import { useAccountData } from "@/lib/useAccountData"
 import { FloatingSurface } from "@/components/FloatingSurface"
 import type {
   Candidate,
@@ -212,8 +211,6 @@ export default function App() {
     erroredTypes: Set<string>
   } | null>(null)
   const [openStep, setOpenStep] = useState<Step | null>("import")
-  const [wahooTokens, setWahooTokens] = useState<WahooTokens | null>(() => loadWahooTokens())
-  const [stravaTokens, setStravaTokens] = useState<StravaTokens | null>(() => loadStravaTokens())
   // -- Account ------------------------------------------------------------
   // Optional: the whole app works without one. `accountsEnabled` stays false
   // until the server says it has an account database, so a deployment
@@ -286,6 +283,17 @@ export default function App() {
       toast(err instanceof Error ? err.message : "Couldn't sign out - please try again.", "error")
     }
   }
+
+  // The signed-in account's connected apps and settings (useAccountData).
+  const {
+    connections,
+    setConnections,
+    offer: localDataOffer,
+    acceptOffer: acceptLocalDataOffer,
+    dismissOffer: dismissLocalDataOffer,
+    handleAvgSpeedSaved,
+  } = useAccountData(account, mapStyleKey, setAvgSpeedKmh)
+  const openSignIn = useCallback(() => setAccountView("signin"), [])
 
   // -- Route planner ------------------------------------------------------
   // Non-null exactly while the planner is active. The planner is the source
@@ -1312,6 +1320,7 @@ export default function App() {
   function handleAvgSpeedChange(speedKmh: number) {
     setAvgSpeedKmh(speedKmh)
     saveAvgSpeedKmh(mapStyleKey, speedKmh)
+    handleAvgSpeedSaved(mapStyleKey, speedKmh)
   }
 
   /**
@@ -1827,12 +1836,19 @@ export default function App() {
         onConfirm={handleConfirmPendingEdit}
         onCancel={() => setPendingEdit(null)}
       />
+      <ImportLocalDataDialog
+        offer={localDataOffer}
+        onAccept={acceptLocalDataOffer}
+        onDismiss={dismissLocalDataOffer}
+      />
       <AccountDialog
         view={accountView}
         onViewChange={setAccountView}
         resetToken={resetToken}
         account={account}
         onAccountChange={setAccount}
+        connections={connections}
+        onConnectionsChange={setConnections}
       />
       <header
         ref={headerRef}
@@ -1854,14 +1870,13 @@ export default function App() {
         <FloatingSurface className="flex h-11 items-center gap-0.5 px-1">
           <ThemeToggle />
           {accountsEnabled && (
-            <AccountMenu account={account} onOpen={setAccountView} onSignOut={() => void handleSignOut()} />
+            <AccountMenu
+              account={account}
+              connections={connections}
+              onOpen={setAccountView}
+              onSignOut={() => void handleSignOut()}
+            />
           )}
-          <FitnessAppsMenu
-            wahooTokens={wahooTokens}
-            onWahooTokensChange={setWahooTokens}
-            stravaTokens={stravaTokens}
-            onStravaTokensChange={setStravaTokens}
-          />
         </FloatingSurface>
       </header>
 
@@ -2009,10 +2024,10 @@ export default function App() {
                     avgSpeedKmh={avgSpeedKmh}
                     durationModel={durationModelForStyle(mapStyleKey)}
                     onAvgSpeedChange={handleAvgSpeedChange}
-                    wahooTokens={wahooTokens}
-                    onWahooTokensChange={setWahooTokens}
-                    stravaTokens={stravaTokens}
-                    onStravaTokensChange={setStravaTokens}
+                    account={account}
+                    onSignIn={openSignIn}
+                    connections={connections}
+                    onConnectionsChange={setConnections}
                     onStartPlanning={() => handleStartPlanning()}
                   />
                 </StepCard>
@@ -2055,9 +2070,10 @@ export default function App() {
                     settings={deviceSettings}
                     onSettingsChange={handleDeviceSettingsChange}
                     wahooSync={wahooSyncForStyle(mapStyleKey)}
-                    wahooTokens={wahooTokens}
-                    onWahooTokensChange={setWahooTokens}
-                    stravaConnected={stravaTokens !== null}
+                    account={account}
+                    onSignIn={openSignIn}
+                    connections={connections}
+                    onConnectionsChange={setConnections}
                   />
                 )}
               </>

@@ -147,15 +147,27 @@ export interface PoiPhotosResponse {
   failed_sources: string[]
 }
 
-// Mirrors schemas.StravaTokenResponse - /api/strava/token's answer.
-export interface StravaTokenResponse {
-  access_token: string
-  refresh_token: string
-  // Epoch seconds.
-  expires_at: number
-  // Only after a code exchange - a refresh doesn't carry the athlete.
-  athlete_id: number | null
-  athlete_label: string | null
+// Mirrors schemas.ConnectionResponse: one fitness app connected to the
+// signed-in account. Tokens never reach the browser - they stay on the
+// server (connections.py).
+export interface ConnectionResponse {
+  provider: "strava" | "wahoo"
+  // The other app's display name for the account, if it gave one.
+  label: string | null
+  // What the visitor granted, as the app reports it.
+  scope: string | null
+  connected_at: string
+}
+
+// Mirrors schemas.WahooRouteResponse.
+export interface WahooRouteResponse {
+  id: number
+  name: string
+  distance_m: number
+  ascent_m: number
+  created_at: string
+  // Wahoo's CDN URL for the route's FIT file, for /api/wahoo/import-route.
+  file_url: string
 }
 
 // Mirrors schemas.StravaRouteResponse. `id` is a string: Strava's route ids

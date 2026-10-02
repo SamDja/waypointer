@@ -1,9 +1,15 @@
-// PKCE OAuth 2.0 helpers for Wahoo's Cloud API (public-client flow, no
-// client_secret - see wahooConfig.ts). Plain fetch calls, matching api.ts's
-// style; no HTTP-client dependency added for this.
+// Connecting Wahoo. Still Wahoo's PKCE public-client flow, but finished by
+// our backend, which keeps the tokens with the account (connections.py):
+// the browser makes the code verifier and keeps it in memory for the length
+// of the popup, sends only its challenge to get the authorize URL, then
+// hands the verifier over with the code for the server to exchange.
 import { ApiError, request } from "@/lib/api"
-import { WAHOO_CLIENT_ID, WAHOO_OAUTH_BASE, WAHOO_SCOPES } from "@/lib/wahooConfig"
+import { fromConnectionResponse, type Connection } from "@/lib/connections"
+import { WAHOO_SCOPES } from "@/lib/wahooConfig"
+import type { ConnectionResponse } from "@/types/candidate"
 
+// Must match a redirect URI registered in Wahoo's developer dashboard
+// exactly - see CLAUDE.md's note on the misleading error otherwise.
 export function wahooRedirectUri(): string {
   return `${window.location.origin}/wahoo-callback.html`
 }
@@ -14,16 +20,11 @@ function base64UrlEncode(bytes: Uint8Array): string {
   return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")
 }
 
-function randomString(length: number): string {
-  const bytes = new Uint8Array(length)
+export function generateCodeVerifier(): string {
+  // RFC 7636 asks for 43-128 characters; base64url of 64 random bytes is 86.
+  const bytes = new Uint8Array(64)
   crypto.getRandomValues(bytes)
   return base64UrlEncode(bytes)
-}
-
-export function generateCodeVerifier(): string {
-  // RFC 7636 recommends 43-128 chars; base64url of 64 random bytes lands
-  // comfortably in that range.
-  return randomString(64)
 }
 
 export async function deriveCodeChallenge(codeVerifier: string): Promise<string> {
@@ -32,92 +33,52 @@ export async function deriveCodeChallenge(codeVerifier: string): Promise<string>
 }
 
 export async function buildAuthorizeUrl(codeVerifier: string, state: string): Promise<string> {
-  if (!WAHOO_CLIENT_ID) {
-    throw new ApiError("Wahoo integration is not configured (missing client id).")
-  }
-  const codeChallenge = await deriveCodeChallenge(codeVerifier)
   const params = new URLSearchParams({
-    client_id: WAHOO_CLIENT_ID,
     redirect_uri: wahooRedirectUri(),
-    scope: WAHOO_SCOPES,
-    response_type: "code",
-    code_challenge: codeChallenge,
-    code_challenge_method: "S256",
     state,
+    code_challenge: await deriveCodeChallenge(codeVerifier),
   })
-  return `${WAHOO_OAUTH_BASE}/oauth/authorize?${params.toString()}`
-}
-
-export interface WahooTokenResult {
-  accessToken: string
-  refreshToken: string
-  expiresAt: number
-  scope?: string
-}
-
-interface RawWahooTokenResponse {
-  access_token: string
-  refresh_token: string
-  expires_in: number
-  scope?: string
-}
-
-async function requestTokens(params: URLSearchParams): Promise<WahooTokenResult> {
-  // A failed exchange or refresh (typically an expired or revoked
-  // connection) can only be fixed by connecting again.
-  const response = await request(
-    `${WAHOO_OAUTH_BASE}/oauth/token?${params.toString()}`,
-    { method: "POST" },
-    { failed: "Couldn't connect to Wahoo - please connect Wahoo again.", trustDetail: false },
-  )
-  const data = (await response.json()) as RawWahooTokenResponse
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresAt: Date.now() + data.expires_in * 1000,
-    scope: data.scope,
+  try {
+    const response = await request(
+      `/api/wahoo/authorize-url?${params.toString()}`,
+      {},
+      { failed: "Couldn't start connecting Wahoo - please try again in a moment." },
+    )
+    return ((await response.json()) as { url: string }).url
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 503) {
+      throw new ApiError("Wahoo isn't set up on this server yet.", 503)
+    }
+    throw err
   }
+}
+
+export async function completeWahooConnection(code: string, codeVerifier: string): Promise<Connection> {
+  const form = new FormData()
+  form.append("code", code)
+  form.append("code_verifier", codeVerifier)
+  form.append("redirect_uri", wahooRedirectUri())
+  const response = await request(
+    "/api/wahoo/connect",
+    { method: "POST", body: form },
+    {
+      failed: "Couldn't connect to Wahoo - please try again in a moment.",
+      unauthorized: "Couldn't connect to Wahoo - please connect Wahoo again.",
+    },
+  )
+  return fromConnectionResponse((await response.json()) as ConnectionResponse)
 }
 
 // Wahoo can grant fewer scopes than requested (e.g. if the app's dashboard
-// registration doesn't have a scope enabled, even though it's listed in the
-// /oauth/authorize request - see WAHOO_SCOPES in wahooConfig.ts). Without
-// this check, a missing scope fails silently at connect time and only
-// surfaces later as a confusing 403 on first actual use (e.g. listing
-// routes). Returns a user-facing warning, or null if nothing's missing or
-// Wahoo didn't report a scope at all (nothing to check against).
-export function missingWahooScopeWarning(tokens: { scope?: string }): string | null {
-  if (!tokens.scope) return null
-  const granted = tokens.scope.split(/\s+/)
+// registration doesn't have a scope enabled, even though it's in the
+// authorize request). Without this check, a missing scope fails silently at
+// connect time and only surfaces later as a confusing 403 on first use.
+// Returns a visitor-facing warning, or null if nothing's missing or Wahoo
+// didn't report a scope at all (nothing to check against).
+export function missingWahooScopeWarning(scope: string | null): string | null {
+  if (!scope) return null
+  const granted = scope.split(/\s+/)
   const missing = WAHOO_SCOPES.split(/\s+/).filter((s) => !granted.includes(s))
   if (missing.length === 0) return null
   return `Connected to Wahoo, but it didn't grant: ${missing.join(", ")}. Check the scopes enabled for this app in Wahoo's developer dashboard.`
-}
-
-export async function exchangeCodeForTokens(code: string, codeVerifier: string): Promise<WahooTokenResult> {
-  if (!WAHOO_CLIENT_ID) {
-    throw new ApiError("Wahoo integration is not configured (missing client id).")
-  }
-  return requestTokens(
-    new URLSearchParams({
-      client_id: WAHOO_CLIENT_ID,
-      code,
-      redirect_uri: wahooRedirectUri(),
-      grant_type: "authorization_code",
-      code_verifier: codeVerifier,
-    }),
-  )
-}
-
-export async function refreshTokens(refreshToken: string): Promise<WahooTokenResult> {
-  if (!WAHOO_CLIENT_ID) {
-    throw new ApiError("Wahoo integration is not configured (missing client id).")
-  }
-  return requestTokens(
-    new URLSearchParams({
-      client_id: WAHOO_CLIENT_ID,
-      refresh_token: refreshToken,
-      grant_type: "refresh_token",
-    }),
-  )
 }

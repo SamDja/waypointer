@@ -22,7 +22,7 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { RouteNameDialog } from "@/components/RouteNameDialog"
-import { ApiError, fetchWahooRoutePayload, saveRoute } from "@/lib/api"
+import { ApiError, saveRoute } from "@/lib/api"
 import { track } from "@/lib/analytics"
 import { DEVICES } from "@/lib/devices"
 import { POI_TYPES } from "@/lib/poiTypes"
@@ -31,7 +31,8 @@ import { toast, updateToast } from "@/lib/toast"
 import { pushRouteToWahoo } from "@/lib/wahooApi"
 import { missingWahooScopeWarning } from "@/lib/wahooAuth"
 import { connectWahoo } from "@/lib/wahooConnect"
-import { getValidWahooAccessToken, type WahooTokens } from "@/lib/wahooSettings"
+import { findConnection, withConnection, type Connection } from "@/lib/connections"
+import type { Account } from "@/types/account"
 import type { Candidate, ExistingWaypoint } from "@/types/candidate"
 import { Download, ExternalLink, Upload } from "lucide-react"
 
@@ -54,13 +55,16 @@ export interface SaveCardProps {
   // Whether this activity offers the Wahoo push (mapStyles.ts's
   // wahooSync). False hides the tabs entirely rather than leaving a
   // one-trigger TabsList, which reads as a broken control. It does not
-  // affect the header's Wahoo menu or importing a route from Wahoo.
+  // affect the account menu's fitness apps or importing a route from Wahoo.
   wahooSync: boolean
-  wahooTokens: WahooTokens | null
-  onWahooTokensChange: (tokens: WahooTokens | null) => void
-  // Strava's API can't receive a route (no route write endpoint at all), so
-  // a connected Strava only gets directions for adding the file by hand.
-  stravaConnected: boolean
+  // Connecting Wahoo needs a verified account (connections live with it).
+  account: Account | null
+  onSignIn: () => void
+  // The account's connected apps. Strava's API can't receive a route (no
+  // route write endpoint at all), so a connected Strava only gets
+  // directions for adding the file by hand.
+  connections: Connection[]
+  onConnectionsChange: (connections: Connection[]) => void
 }
 
 export function SaveCard({
@@ -72,10 +76,13 @@ export function SaveCard({
   settings,
   onSettingsChange,
   wahooSync,
-  wahooTokens,
-  onWahooTokensChange,
-  stravaConnected,
+  account,
+  onSignIn,
+  connections,
+  onConnectionsChange,
 }: SaveCardProps) {
+  const wahoo = findConnection(connections, "wahoo")
+  const stravaConnected = findConnection(connections, "strava") !== null
   const [isSaving, setIsSaving] = useState(false)
   const [isConnectingWahoo, setIsConnectingWahoo] = useState(false)
   const [isSendingToWahoo, setIsSendingToWahoo] = useState(false)
@@ -83,7 +90,7 @@ export function SaveCard({
   const [showWahooNameDialog, setShowWahooNameDialog] = useState(false)
   const [pendingSaveAction, setPendingSaveAction] = useState<"download" | "wahoo" | null>(null)
   const [activeTab, setActiveTab] = useState<string>(() =>
-    wahooSync && wahooTokens ? "wahoo" : "download"
+    wahooSync && wahoo ? "wahoo" : "download"
   )
   const isFit = settings.device === "wahoo_elemnt_roam_v3"
   const defaultRouteName = file.name.replace(/\.gpx$/i, "")
@@ -170,9 +177,9 @@ export function SaveCard({
     const toastId = toast("Connecting to Wahoo...", "loading")
     track("wahoo_connect_initiated", { source: "save_card" })
     try {
-      const tokens = await connectWahoo()
-      onWahooTokensChange(tokens)
-      const scopeWarning = missingWahooScopeWarning(tokens)
+      const connection = await connectWahoo()
+      onConnectionsChange(withConnection(connections, connection))
+      const scopeWarning = missingWahooScopeWarning(connection.scope)
       updateToast(toastId, scopeWarning ?? "Connected to Wahoo.", scopeWarning !== null ? "error" : "success")
       track("wahoo_connect_succeeded", { source: "save_card" })
     } catch (err) {
@@ -191,15 +198,13 @@ export function SaveCard({
     setIsSendingToWahoo(true)
     const toastId = toast("Sending to Wahoo...", "loading")
     try {
-      const payload = await fetchWahooRoutePayload(
+      await pushRouteToWahoo({
         file,
         selectedCandidates,
         discardedWaypointIndices,
-        keptExistingWaypointTypes(),
+        existingWaypointTypes: keptExistingWaypointTypes(),
         routeName,
-      )
-      const accessToken = await getValidWahooAccessToken()
-      await pushRouteToWahoo(payload, accessToken)
+      })
       updateToast(toastId, "Sent to Wahoo - it will sync to your app and head unit shortly.", "success")
       track("route_sent_to_wahoo", {
         selected_candidate_count: selectedCandidates.length,
@@ -324,10 +329,10 @@ export function SaveCard({
             <TabsContent value="download">{downloadSection}</TabsContent>
 
             <TabsContent value="wahoo" className="flex flex-col gap-2">
-              {wahooTokens ? (
+              {wahoo ? (
                 <>
                   <p className="text-sm text-muted-foreground">
-                    Connected to Wahoo{wahooTokens.athleteLabel ? ` as ${wahooTokens.athleteLabel}` : ""}. Sending
+                    Connected to Wahoo{wahoo.label ? ` as ${wahoo.label}` : ""}. Sending
                     syncs the route to your Wahoo app and head unit automatically.
                   </p>
                   <Button
@@ -339,6 +344,19 @@ export function SaveCard({
                     <Upload className="size-4"></Upload>
                   </Button>
                 </>
+              ) : !account ? (
+                <>
+                  <p className="text-sm text-muted-foreground">
+                    Sign in to connect Wahoo - the connection is kept with your account, so it works on every device.
+                  </p>
+                  <Button onClick={onSignIn} variant="secondary" className="w-fit">
+                    Sign in
+                  </Button>
+                </>
+              ) : !account.email_verified ? (
+                <p className="text-sm text-muted-foreground">
+                  Confirm your email address to connect Wahoo - we sent a link to {account.email}.
+                </p>
               ) : (
                 <Button onClick={handleConnectWahoo} loading={isConnectingWahoo} variant="secondary" className="w-fit">
                   {isConnectingWahoo ? "Connecting…" : "Connect Wahoo"}

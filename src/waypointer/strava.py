@@ -202,6 +202,18 @@ def deauthorize(access_token: str, session: requests.Session | None = None) -> N
     )
 
 
+def get_athlete(access_token: str, session: requests.Session | None = None) -> tuple[int, str | None]:
+    """The connected athlete's id and display name - how a connection brought
+    over from a browser (connections.import_connection) is checked to be
+    real and tied to its athlete, since a refresh doesn't return either."""
+    try:
+        data = _send("GET", f"{STRAVA_API_BASE}/athlete", "athlete", session, headers=_bearer(access_token)).json()
+        label = " ".join(p for p in (data.get("firstname"), data.get("lastname")) if p).strip()
+        return int(data["id"]), label or None
+    except (KeyError, TypeError, ValueError) as exc:
+        raise StravaError(f"Strava returned a malformed athlete: {exc}") from exc
+
+
 def _route(raw: dict) -> StravaRoute | None:
     try:
         route_id = str(raw.get("id_str") or raw["id"])

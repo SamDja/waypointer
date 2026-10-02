@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react"
 import { useResolvedTheme } from "@/lib/theme"
 
 // Cloudflare Turnstile site key - public, baked in at build time like
-// VITE_WAHOO_CLIENT_ID. Unset (local dev, a deployment without captcha):
+// VITE_UMAMI_WEBSITE_ID. Unset (local dev, a deployment without captcha):
 // no script is loaded and nothing renders. The backend's own
 // TURNSTILE_SECRET_KEY decides whether a token is actually required.
 export const TURNSTILE_SITE_KEY = import.meta.env.VITE_TURNSTILE_SITE_KEY as string | undefined

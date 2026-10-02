@@ -4,9 +4,8 @@ services:
       context: .
       args:
         # Non-secret build-time ids baked into the frontend bundle - see
-        # Dockerfile/CLAUDE.md. Leave unset to build without Wahoo/Tally/
-        # analytics integration.
-        VITE_WAHOO_CLIENT_ID: ${VITE_WAHOO_CLIENT_ID:-}
+        # Dockerfile/CLAUDE.md. Leave unset to build without Tally/analytics
+        # integration. (Wahoo's client id is runtime env now - see below.)
         VITE_TALLY_FORM_ID: ${VITE_TALLY_FORM_ID:-}
         # Leaving this unset ships this deployment with zero analytics.
         VITE_UMAMI_WEBSITE_ID: ${VITE_UMAMI_WEBSITE_ID:-}
@@ -36,6 +35,19 @@ services:
       # either). Unset, the Strava row says it isn't set up.
       - STRAVA_CLIENT_ID=${STRAVA_CLIENT_ID:-}
       - STRAVA_CLIENT_SECRET=${STRAVA_CLIENT_SECRET:-}
+      # Wahoo API app id, for connecting a Wahoo account - see wahoo.py. The
+      # server does the OAuth exchange and every Wahoo call now, so it's
+      # runtime env rather than the old VITE_WAHOO_CLIENT_ID build arg,
+      # which is still read as a fallback so an existing .env keeps working.
+      # The secret is optional (only for an app registered as confidential).
+      - WAHOO_CLIENT_ID=${WAHOO_CLIENT_ID:-${VITE_WAHOO_CLIENT_ID:-}}
+      - WAHOO_CLIENT_SECRET=${WAHOO_CLIENT_SECRET:-}
+      # Encrypts the Strava/Wahoo tokens stored with accounts - see
+      # token_crypto.py for how to generate one. Required for connecting
+      # apps; keep it out of the repo and back it up with the database
+      # (without it the stored tokens can't be read, and everyone has to
+      # connect again). A comma-separated list rotates keys, newest first.
+      - TOKEN_ENCRYPTION_KEY=${TOKEN_ENCRYPTION_KEY:-}
       # User accounts (auth.py) - see CLAUDE.md's "Accounts" section. Their
       # own database on the same postgis server, created at startup if
       # missing, kept apart from the POI import's `pois`.

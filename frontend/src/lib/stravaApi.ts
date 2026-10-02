@@ -1,16 +1,14 @@
-// The visitor's Strava routes and activities, through our backend's Strava
-// proxy (see strava.py for why it's proxied). Strava's API is read-only for
-// routes - there's no create, rename or delete - so this is all there is.
+// The visitor's Strava routes and activities, through our backend, which
+// uses the Strava connection stored with the account (connections.py).
+// Strava's API is read-only for routes - there's no create, rename or
+// delete - so this is all there is.
 import { request } from "@/lib/api"
 import type { StravaActivitiesPage, StravaRouteResponse } from "@/types/candidate"
 
-// Every call here already went through getValidStravaTokens' refresh, so a
-// 401 means Strava no longer accepts this connection at all.
-const UNAUTHORIZED = "Strava didn't accept your connection - disconnect and reconnect Strava, then try again."
-
-function bearer(accessToken: string): HeadersInit {
-  return { Authorization: `Bearer ${accessToken}` }
-}
+// The server refreshes the connection itself, so a 401 means there isn't
+// one any more (Strava refused it, and the server forgot it). The
+// backend's message says which; this is the fallback.
+const UNAUTHORIZED = "Strava didn't accept your connection - please connect Strava again."
 
 export interface StravaRoute {
   id: string
@@ -20,11 +18,10 @@ export interface StravaRoute {
   createdAt: string
 }
 
-export async function listStravaRoutes(accessToken: string, athleteId: number): Promise<StravaRoute[]> {
-  const params = new URLSearchParams({ athlete_id: String(athleteId) })
+export async function listStravaRoutes(): Promise<StravaRoute[]> {
   const response = await request(
-    `/api/strava/routes?${params.toString()}`,
-    { headers: bearer(accessToken) },
+    "/api/strava/routes",
+    {},
     { failed: "Couldn't load your Strava routes - please try again in a moment.", unauthorized: UNAUTHORIZED },
   )
   const data = (await response.json()) as StravaRouteResponse[]
@@ -37,20 +34,12 @@ export async function listStravaRoutes(accessToken: string, athleteId: number): 
   }))
 }
 
-export async function revokeStravaAccess(accessToken: string): Promise<void> {
-  await request(
-    "/api/strava/deauthorize",
-    { method: "POST", headers: bearer(accessToken) },
-    { failed: "Couldn't disconnect from Strava - please try again in a moment.", unauthorized: UNAUTHORIZED },
-  )
-}
-
-export async function importStravaRoute(routeId: string, accessToken: string): Promise<Blob> {
+export async function importStravaRoute(routeId: string): Promise<Blob> {
   const formData = new FormData()
   formData.append("route_id", routeId)
   const response = await request(
     "/api/strava/import-route",
-    { method: "POST", headers: bearer(accessToken), body: formData },
+    { method: "POST", body: formData },
     { failed: "Couldn't download that route from Strava - please try again in a moment.", unauthorized: UNAUTHORIZED },
   )
   return response.blob()
@@ -70,13 +59,10 @@ export interface StravaActivity {
 // fetched a page at a time. Needs the activity:read_all scope, which
 // connections made before activity import don't have (see stravaAuth.ts's
 // hasStravaActivityScope).
-export async function listStravaActivities(
-  accessToken: string,
-  page: number,
-): Promise<{ activities: StravaActivity[]; hasMore: boolean }> {
+export async function listStravaActivities(page: number): Promise<{ activities: StravaActivity[]; hasMore: boolean }> {
   const response = await request(
     `/api/strava/activities?page=${page}`,
-    { headers: bearer(accessToken) },
+    {},
     { failed: "Couldn't load your Strava activities - please try again in a moment.", unauthorized: UNAUTHORIZED },
   )
   const data = (await response.json()) as StravaActivitiesPage
@@ -92,13 +78,13 @@ export async function listStravaActivities(
 }
 
 // The activity's track as GPX, built by the backend from its streams.
-export async function importStravaActivity(activityId: string, name: string, accessToken: string): Promise<Blob> {
+export async function importStravaActivity(activityId: string, name: string): Promise<Blob> {
   const formData = new FormData()
   formData.append("activity_id", activityId)
   formData.append("name", name)
   const response = await request(
     "/api/strava/import-activity",
-    { method: "POST", headers: bearer(accessToken), body: formData },
+    { method: "POST", body: formData },
     {
       failed: "Couldn't download that activity from Strava - please try again in a moment.",
       unauthorized: UNAUTHORIZED,

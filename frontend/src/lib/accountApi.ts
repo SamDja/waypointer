@@ -78,3 +78,24 @@ export async function downloadAccountData(): Promise<void> {
   link.click()
   URL.revokeObjectURL(url)
 }
+
+// Settings kept with the account (backend schemas.ProfileSettings). For a
+// signed-in visitor these are the source of truth; the browser keeps a copy
+// in its usual localStorage keys so the rest of the app reads them as before.
+export interface ProfileSettings {
+  // Keyed by activity (map style key).
+  avg_speed_kmh: Record<string, number>
+}
+
+export async function fetchProfileSettings(): Promise<ProfileSettings> {
+  const response = await request("/api/account/settings", {}, { failed: UNAVAILABLE })
+  return (await response.json()) as ProfileSettings
+}
+
+export async function saveProfileSettings(settings: ProfileSettings): Promise<void> {
+  await request(
+    "/api/account/settings",
+    { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) },
+    { failed: "Couldn't save your settings to your account - please try again in a moment." },
+  )
+}

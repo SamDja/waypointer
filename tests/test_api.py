@@ -611,7 +611,29 @@ def test_save_rejects_unknown_device(sample_route_bytes):
     assert response.status_code == 400
 
 
-def test_wahoo_route_payload_returns_fit_and_metadata(sample_route_bytes):
+@pytest.fixture
+def wahoo_push(monkeypatch):
+    """Signs a fake verified user in and captures what would be pushed to
+    Wahoo, instead of storing tokens and calling Wahoo for real (both are
+    covered by test_connections.py)."""
+    from datetime import datetime, timezone
+
+    from waypointer import connections, sessions, wahoo
+
+    pushed: list[wahoo.WahooRouteUpload] = []
+    user = sessions.User(id="u1", email="a@b.co", email_verified=True, features=(), created_at=datetime.now(timezone.utc))
+    app.dependency_overrides[sessions.require_verified_user] = lambda: user
+    monkeypatch.setattr(connections, "access_token", lambda user_id, provider: ("token", None))
+    monkeypatch.setattr(wahoo, "push_route", lambda token, upload, external_id, updated_at: pushed.append(upload))
+    yield pushed
+    app.dependency_overrides.clear()
+
+
+def _push(files, data):
+    return client.post("/api/wahoo/routes", files=files, data=data, headers={"Origin": "http://testserver"})
+
+
+def test_wahoo_push_returns_fit_and_metadata(sample_route_bytes, wahoo_push):
     selected = json.dumps(
         [
             {
@@ -625,76 +647,72 @@ def test_wahoo_route_payload_returns_fit_and_metadata(sample_route_bytes):
             }
         ]
     )
-    response = client.post(
-        "/api/wahoo/route-payload",
+    response = _push(
         files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
         data={"selected_candidates": selected},
     )
-    assert response.status_code == 200
-    data = response.json()
+    assert response.status_code == 204
+    (upload,) = wahoo_push
 
-    assert data["filename"] == "route.fit"
+    assert upload.filename == "route.fit"
     # sample_route.gpx's three trkpts have ele 35.0 -> 36.0 -> 37.0.
-    assert data["ascent_m"] == pytest.approx(2.0)
-    assert data["distance_m"] > 0
-    assert data["start_lat"] == pytest.approx(48.8566)
-    assert data["start_lng"] == pytest.approx(2.3522)
+    assert upload.ascent_m == pytest.approx(2.0)
+    assert upload.distance_m > 0
+    assert upload.start_lat == pytest.approx(48.8566)
+    assert upload.start_lng == pytest.approx(2.3522)
 
-    fit_bytes = base64.b64decode(data["fit_base64"])
+    fit_bytes = upload.fit_bytes
     fit_file = FitFile.from_bytes(fit_bytes)
     messages = [r.message for r in fit_file.records if not r.is_definition]
     course_point = next(m for m in messages if isinstance(m, CoursePointMessage))
     assert course_point.developer_fields[0].get_value(0) == 16
 
 
-def test_wahoo_route_payload_includes_kept_existing_waypoint_with_assigned_type(sample_route_bytes):
-    response = client.post(
-        "/api/wahoo/route-payload",
+def test_wahoo_push_includes_kept_existing_waypoint_with_assigned_type(sample_route_bytes, wahoo_push):
+    response = _push(
         files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
         data={
             "selected_candidates": "[]",
             "existing_waypoint_types": json.dumps({"0": "toilet"}),
         },
     )
-    assert response.status_code == 200
-    data = response.json()
+    assert response.status_code == 204
+    (upload,) = wahoo_push
 
-    fit_bytes = base64.b64decode(data["fit_base64"])
+    fit_bytes = upload.fit_bytes
     fit_file = FitFile.from_bytes(fit_bytes)
     messages = [r.message for r in fit_file.records if not r.is_definition]
     course_point = next(m for m in messages if isinstance(m, CoursePointMessage))
     assert course_point.developer_fields[0].get_value(0) == 59  # toilet
 
 
-def test_wahoo_route_payload_excludes_discarded_existing_waypoint(sample_route_bytes):
-    response = client.post(
-        "/api/wahoo/route-payload",
+def test_wahoo_push_excludes_discarded_existing_waypoint(sample_route_bytes, wahoo_push):
+    response = _push(
         files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
         data={"selected_candidates": "[]", "discarded_waypoint_indices": "[0]"},
     )
-    assert response.status_code == 200
-    data = response.json()
+    assert response.status_code == 204
+    (upload,) = wahoo_push
 
-    fit_bytes = base64.b64decode(data["fit_base64"])
+    fit_bytes = upload.fit_bytes
     fit_file = FitFile.from_bytes(fit_bytes)
     messages = [r.message for r in fit_file.records if not r.is_definition]
     assert not any(isinstance(m, CoursePointMessage) for m in messages)
 
 
-def test_wahoo_route_payload_honors_custom_route_name(sample_route_bytes):
-    response = client.post(
-        "/api/wahoo/route-payload",
+def test_wahoo_push_honors_custom_route_name(sample_route_bytes, wahoo_push):
+    response = _push(
         files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
         data={"selected_candidates": "[]", "route_name": "My Weekend Ride!"},
     )
-    assert response.status_code == 200
-    data = response.json()
+    assert response.status_code == 204
+    (upload,) = wahoo_push
     # filename is sanitized for filesystem safety...
-    assert data["filename"] == "My_Weekend_Ride.fit"
+    assert upload.filename == "My_Weekend_Ride.fit"
     # ...but route_name (Wahoo's display title) preserves the typed name as-is.
-    assert data["route_name"] == "My Weekend Ride!"
+    assert upload.name == "My Weekend Ride!"
 
-    fit_bytes = base64.b64decode(data["fit_base64"])
+    fit_bytes = upload.fit_bytes
     fit_file = FitFile.from_bytes(fit_bytes)
     messages = [r.message for r in fit_file.records if not r.is_definition]
     course = next(m for m in messages if isinstance(m, CourseMessage))
@@ -702,18 +720,16 @@ def test_wahoo_route_payload_honors_custom_route_name(sample_route_bytes):
     assert course.course_name == "My Weekend Ride!"
 
 
-def test_wahoo_route_payload_rejects_invalid_selection_json(sample_route_bytes):
-    response = client.post(
-        "/api/wahoo/route-payload",
+def test_wahoo_push_rejects_invalid_selection_json(sample_route_bytes, wahoo_push):
+    response = _push(
         files={"gpx_file": ("route.gpx", sample_route_bytes, "application/gpx+xml")},
         data={"selected_candidates": "not json"},
     )
     assert response.status_code == 400
 
 
-def test_wahoo_route_payload_rejects_invalid_gpx():
-    response = client.post(
-        "/api/wahoo/route-payload",
+def test_wahoo_push_rejects_invalid_gpx(wahoo_push):
+    response = _push(
         files={"gpx_file": ("bad.gpx", b"not xml", "application/gpx+xml")},
         data={"selected_candidates": "[]"},
     )

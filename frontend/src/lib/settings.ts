@@ -215,6 +215,30 @@ export function saveAvgSpeedKmh(styleKey: string, speedKmh: number): void {
   saveKeyed(AVG_SPEED_KEY, styleKey, speedKmh)
 }
 
+/**
+ * Only the speeds this browser was actually given - no activity defaults -
+ * for moving them into an account. The same rules as loadAvgSpeedKmh, so a
+ * value that would be ignored here isn't uploaded either.
+ */
+export function storedAvgSpeeds(): Record<string, number> {
+  try {
+    const raw = localStorage.getItem(AVG_SPEED_KEY)
+    if (!raw) return {}
+    const parsed: unknown = JSON.parse(raw)
+    const all = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : legacyAsDefault(parsed)
+    return Object.fromEntries(
+      MAP_STYLES.flatMap((style) => {
+        const value = all[style.key]
+        return typeof value === "number" && Number.isFinite(value) && value > 0 ? [[style.key, value]] : []
+      }),
+    )
+  } catch {
+    return {}
+  }
+}
+
 // Distinct from the settings above: this is a display-time concern (which
 // map style to render), not export- or find-time.
 export function loadMapStyleKey(): string {

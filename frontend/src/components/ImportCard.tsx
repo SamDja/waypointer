@@ -10,8 +10,8 @@ import { RouteStats } from "@/components/RouteStats"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FitnessAppRoutesDialog, type RouteSource } from "@/components/FitnessAppRoutesDialog"
 import { FitnessAppsDialog } from "@/components/FitnessAppsDialog"
-import type { StravaTokens } from "@/lib/stravaSettings"
-import type { WahooTokens } from "@/lib/wahooSettings"
+import type { Connection } from "@/lib/connections"
+import type { Account } from "@/types/account"
 import { cn } from "@/lib/utils"
 import { ArrowRightIcon, FileUp, FileText, PencilLine, Route } from "lucide-react"
 import type { ExistingWaypoint } from "@/types/candidate"
@@ -33,10 +33,10 @@ export interface ImportCardProps {
   avgSpeedKmh: number
   durationModel: DurationModel
   onAvgSpeedChange: (speedKmh: number) => void
-  wahooTokens: WahooTokens | null
-  onWahooTokensChange: (tokens: WahooTokens | null) => void
-  stravaTokens: StravaTokens | null
-  onStravaTokensChange: (tokens: StravaTokens | null) => void
+  account: Account | null
+  onSignIn: () => void
+  connections: Connection[]
+  onConnectionsChange: (connections: Connection[]) => void
   onHoverWaypoint?: (index: number | null) => void
   // Planning a new route is the alternative to loading one, and the same
   // planner edits a route that's already loaded. While it's active, App
@@ -61,10 +61,10 @@ export function ImportCard({
   avgSpeedKmh,
   durationModel,
   onAvgSpeedChange,
-  wahooTokens,
-  onWahooTokensChange,
-  stravaTokens,
-  onStravaTokensChange,
+  account,
+  onSignIn,
+  connections,
+  onConnectionsChange,
   onHoverWaypoint,
   onStartPlanning,
 }: ImportCardProps) {
@@ -72,7 +72,7 @@ export function ImportCard({
   const [isDragActive, setIsDragActive] = useState(false)
   const [showAppsDialog, setShowAppsDialog] = useState(false)
   const [showRoutesImport, setShowRoutesImport] = useState(false)
-  const anyAppConnected = wahooTokens !== null || stravaTokens !== null
+  const anyAppConnected = connections.length > 0
   const [activeTab, setActiveTab] = useState("info")
 
   // The first "Next" click routes through the Waypoints tab (if the file
@@ -266,17 +266,16 @@ export function ImportCard({
         open={showRoutesImport}
         onOpenChange={setShowRoutesImport}
         mode="import"
-        wahooConnected={wahooTokens !== null}
-        stravaConnected={stravaTokens !== null}
+        connections={connections}
         onImport={(file, source) => onFileChange(file, source)}
       />
       <FitnessAppsDialog
         open={showAppsDialog}
         onOpenChange={setShowAppsDialog}
-        wahooTokens={wahooTokens}
-        onWahooTokensChange={onWahooTokensChange}
-        stravaTokens={stravaTokens}
-        onStravaTokensChange={onStravaTokensChange}
+        account={account}
+        onSignIn={onSignIn}
+        connections={connections}
+        onConnectionsChange={onConnectionsChange}
       />
     </div>
   )

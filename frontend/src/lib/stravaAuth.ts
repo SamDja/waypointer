@@ -1,8 +1,9 @@
-// Strava's OAuth, via our own backend: Strava's token exchange needs the
-// app's client secret and Strava has no PKCE, so unlike Wahoo (wahooAuth.ts)
-// the browser can't do it itself - see strava.py.
+// Connecting Strava, through our own backend: Strava's token exchange needs
+// the app's client secret and Strava has no PKCE, so the browser can't do
+// it, and the tokens are kept with the account anyway (connections.py).
 import { ApiError, request } from "@/lib/api"
-import type { StravaTokenResponse } from "@/types/candidate"
+import { fromConnectionResponse, type Connection } from "@/lib/connections"
+import type { ConnectionResponse } from "@/types/candidate"
 
 export function stravaRedirectUri(): string {
   return `${window.location.origin}/strava-callback.html`
@@ -13,15 +14,6 @@ export function stravaRedirectUri(): string {
 // is what lets it list activities at all.
 const PRIVATE_ROUTES_SCOPE = "read_all"
 const ACTIVITIES_SCOPE = "activity:read_all"
-
-export interface StravaTokenResult {
-  accessToken: string
-  refreshToken: string
-  // Epoch milliseconds, like WahooTokens.expiresAt.
-  expiresAt: number
-  athleteId: number | null
-  athleteLabel: string | null
-}
 
 export async function buildStravaAuthorizeUrl(state: string): Promise<string> {
   const params = new URLSearchParams({ redirect_uri: stravaRedirectUri(), state })
@@ -41,41 +33,30 @@ export async function buildStravaAuthorizeUrl(state: string): Promise<string> {
   }
 }
 
-async function requestTokens(field: "code" | "refresh_token", value: string): Promise<StravaTokenResult> {
-  const formData = new FormData()
-  formData.append(field, value)
+// Exchanges the popup's code and stores the connection with the account.
+// Strava reports the granted scope on the redirect, not with the tokens,
+// so it's passed along.
+export async function completeStravaConnection(code: string, scope: string | null): Promise<Connection> {
+  const form = new FormData()
+  form.append("code", code)
+  if (scope) form.append("scope", scope)
   const response = await request(
-    "/api/strava/token",
-    { method: "POST", body: formData },
+    "/api/strava/connect",
+    { method: "POST", body: form },
     {
       failed: "Couldn't connect to Strava - please try again in a moment.",
-      // A refused code or refresh token: only connecting again fixes it.
+      // A refused code: only connecting again fixes it.
       unauthorized: "Couldn't connect to Strava - please connect Strava again.",
     },
   )
-  const data = (await response.json()) as StravaTokenResponse
-  return {
-    accessToken: data.access_token,
-    refreshToken: data.refresh_token,
-    expiresAt: data.expires_at * 1000,
-    athleteId: data.athlete_id,
-    athleteLabel: data.athlete_label,
-  }
-}
-
-export function exchangeStravaCode(code: string): Promise<StravaTokenResult> {
-  return requestTokens("code", code)
-}
-
-export function refreshStravaTokens(refreshToken: string): Promise<StravaTokenResult> {
-  return requestTokens("refresh_token", refreshToken)
+  return fromConnectionResponse((await response.json()) as ConnectionResponse)
 }
 
 // Whether this connection may list activities. Connections made before
 // activity import only granted routes; unknown (nothing recorded) is
 // treated as yes, and Strava's own 401 then asks for a reconnect.
-export function hasStravaActivityScope(scope: string | undefined): boolean {
-  return scope === undefined || scope.split(",").includes(ACTIVITIES_SCOPE)
+export function hasStravaActivityScope(scope: string | null | undefined): boolean {
+  return !scope || scope.split(",").includes(ACTIVITIES_SCOPE)
 }
 
 // Strava lets the visitor untick scopes on its consent page, and reports

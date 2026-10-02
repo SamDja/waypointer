@@ -24,7 +24,9 @@ from datetime import datetime, timedelta, timezone
 import psycopg
 from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, status
 
-from waypointer import db, mailer, passwords, turnstile
+from psycopg.types.json import Jsonb
+
+from waypointer import connections, db, mailer, passwords, turnstile
 from waypointer.rate_limit import (
     EMAILS_PER_ADDRESS_PER_HOUR,
     HOUR_S,
@@ -36,7 +38,7 @@ from waypointer.rate_limit import (
     login_rate_limit,
     signup_rate_limit,
 )
-from waypointer.schemas import AccountResponse, AccountStatus
+from waypointer.schemas import AccountResponse, AccountStatus, ProfileSettings
 from waypointer.sessions import (
     USER_COLUMNS,
     User,
@@ -143,8 +145,8 @@ def _issue_token(
     token = new_token()
     conn.execute(
         "INSERT INTO email_tokens (token_hash, user_id, purpose, new_email, expires_at)"
-        " VALUES (%s, %s, %s, %s, %s)",
-        (hash_token(token), user_id, purpose, new_email, datetime.now(timezone.utc) + ttl),
+        " VALUES (%s, %s, %s, %s, now() + %s)",
+        (hash_token(token), user_id, purpose, new_email, ttl),
     )
     return token
 
@@ -481,6 +483,11 @@ def export_account(user: User = Depends(require_user)) -> Response:
             " WHERE user_id = %s ORDER BY created_at",
             (user.id,),
         ).fetchall()
+        # Which apps are connected, never their tokens - those are only
+        # meaningful to this server, and would let anyone holding the export
+        # act on the visitor's Strava/Wahoo account.
+        apps = connections.list_connections(conn, user.id)
+        settings = _load_settings(conn, user.id)
 
     def iso(value: datetime | None) -> str | None:
         return value.isoformat() if value else None
@@ -499,6 +506,11 @@ def export_account(user: User = Depends(require_user)) -> Response:
             {"created_at": iso(s[0]), "last_seen_at": iso(s[1]), "expires_at": iso(s[2]), "user_agent": s[3]}
             for s in sessions
         ],
+        "connections": [
+            {"provider": c.provider, "account": c.label, "scope": c.scope, "connected_at": iso(c.created_at)}
+            for c in apps
+        ],
+        "settings": settings.model_dump(),
     }
     return Response(
         json.dumps(data, indent=2),
@@ -515,8 +527,53 @@ def export_account(user: User = Depends(require_user)) -> Response:
 def delete_account(password: str = Form(...), user: User = Depends(require_user)) -> Response:
     with connection() as conn:
         _check_current_password(conn, user, password)
-        # Sessions and email tokens go with it (ON DELETE CASCADE).
+    # Revoke this app's access at Strava/Wahoo first, so deleting the account
+    # doesn't leave a live grant behind there. Best-effort: the account goes
+    # either way.
+    connections.revoke_all(user.id)
+    with connection() as conn:
+        # Sessions, email tokens, connections and settings go with it
+        # (ON DELETE CASCADE).
         conn.execute("DELETE FROM users WHERE id = %s", (user.id,))
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     clear_session_cookie(response)
     return response
+
+
+# --- profile settings -----------------------------------------------------
+
+
+def _load_settings(conn, user_id: str) -> ProfileSettings:
+    row = conn.execute("SELECT settings FROM user_settings WHERE user_id = %s", (user_id,)).fetchone()
+    if row is None:
+        return ProfileSettings()
+    # Unknown or no-longer-valid keys (from an older version) are dropped
+    # rather than failing the read.
+    try:
+        return ProfileSettings.model_validate(row[0])
+    except ValueError:
+        return ProfileSettings()
+
+
+@router.get("/api/account/settings", response_model=ProfileSettings, dependencies=[Depends(account_rate_limit)])
+def get_settings(user: User = Depends(require_user)) -> ProfileSettings:
+    with connection() as conn:
+        return _load_settings(conn, user.id)
+
+
+@router.put(
+    "/api/account/settings",
+    response_model=ProfileSettings,
+    dependencies=[Depends(require_same_origin), Depends(account_rate_limit)],
+)
+def put_settings(settings: ProfileSettings, user: User = Depends(require_user)) -> ProfileSettings:
+    """Replaces the account's settings document. Logged-in visitors' settings
+    live here (the server is the source of truth); the browser keeps only a
+    copy, and anonymous visitors only that."""
+    with connection() as conn:
+        conn.execute(
+            "INSERT INTO user_settings (user_id, settings) VALUES (%s, %s)"
+            " ON CONFLICT (user_id) DO UPDATE SET settings = excluded.settings, updated_at = now()",
+            (user.id, Jsonb(settings.model_dump())),
+        )
+    return settings

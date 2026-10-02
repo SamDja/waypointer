@@ -1,6 +1,7 @@
+import re
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 
 
 class Candidate(BaseModel):
@@ -187,38 +188,33 @@ class PlaceResult(BaseModel):
     bbox: tuple[float, float, float, float] | None
 
 
-class WahooRoutePayload(BaseModel):
-    # Everything Wahoo's POST /v1/routes needs alongside the FIT file itself
-    # - computed server-side since only the backend has the full-resolution,
-    # elevation-carrying GPX in hand (see main.py's wahoo_route_payload()).
-    fit_base64: str
-    filename: str
-    # Human-readable name for Wahoo's route[name] field - deliberately kept
-    # separate from `filename`, which is sanitized for filesystem safety
-    # (spaces etc. become underscores) and would otherwise mangle a
-    # user-typed route name when reused as the display title.
-    route_name: str
-    distance_m: float
-    ascent_m: float
-    start_lat: float
-    start_lng: float
-
-
-class StravaAuthorizeUrl(BaseModel):
-    # Where the Strava connect popup goes - built server-side because the
-    # client id lives in the server's env with the secret (see strava.py).
+class AuthorizeUrl(BaseModel):
+    # Where a connect popup goes (Strava or Wahoo) - built server-side
+    # because the client ids live in the server's env (see connections.py).
     url: str
 
 
-class StravaTokenResponse(BaseModel):
-    # /api/strava/token's answer, for the browser to keep in localStorage.
-    access_token: str
-    refresh_token: str
-    # Epoch seconds, as Strava sends it.
-    expires_at: int
-    # Only present after a code exchange - a refresh doesn't carry the athlete.
-    athlete_id: int | None
-    athlete_label: str | None
+class ConnectionResponse(BaseModel):
+    # One fitness app connected to the signed-in account. Never carries a
+    # token - those stay on the server (connections.py).
+    provider: Literal["strava", "wahoo"]
+    # The other app's display name for the account, if it gave one.
+    label: str | None
+    # What the visitor granted, as the app reports it (space- or
+    # comma-separated, per app).
+    scope: str | None
+    connected_at: str
+
+
+class WahooRouteResponse(BaseModel):
+    # One of the visitor's Wahoo routes - see wahoo.WahooRoute.
+    id: int
+    name: str
+    distance_m: float
+    ascent_m: float
+    created_at: str
+    # Wahoo's CDN URL for the route's FIT file, for /api/wahoo/import-route.
+    file_url: str
 
 
 class StravaRouteResponse(BaseModel):
@@ -268,3 +264,22 @@ class AccountStatus(BaseModel):
     enabled: bool
     account: AccountResponse | None
     captcha_required: bool
+
+
+class ProfileSettings(BaseModel):
+    # Settings kept with the account rather than in the browser
+    # (/api/account/settings). Keyed by activity (the frontend's map style
+    # key), like the browser's own per-activity preferences.
+    avg_speed_kmh: dict[str, float] = {}
+
+    @field_validator("avg_speed_kmh")
+    @classmethod
+    def _check_speeds(cls, value: dict[str, float]) -> dict[str, float]:
+        if len(value) > 20:
+            raise ValueError("too many activities")
+        for key, speed in value.items():
+            if not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", key):
+                raise ValueError(f"not an activity key: {key!r}")
+            if not 0.5 <= speed <= 100:
+                raise ValueError(f"speed out of range for {key}")
+        return value

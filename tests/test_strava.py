@@ -2,6 +2,7 @@
 itself is stubbed with `responses`; the shapes follow Strava's API reference
 (token exchange with its `athlete` summary, route lists carrying `id_str`)."""
 
+from datetime import datetime, timezone
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -22,7 +23,8 @@ EXPORT_URL = f"{strava.STRAVA_API_BASE}/routes/{ROUTE_ID}/export_gpx"
 ACTIVITIES_URL = f"{strava.STRAVA_API_BASE}/athlete/activities"
 ACTIVITY_ID = "15551234567"
 STREAMS_URL = f"{strava.STRAVA_API_BASE}/activities/{ACTIVITY_ID}/streams"
-BEARER = {"Authorization": "Bearer visitor-token"}
+# State-changing endpoints need the request to come from the site itself.
+ORIGIN = {"Origin": "http://testserver"}
 
 client = TestClient(app)
 
@@ -31,6 +33,23 @@ client = TestClient(app)
 def _strava_credentials(monkeypatch):
     monkeypatch.setenv("STRAVA_CLIENT_ID", "4242")
     monkeypatch.setenv("STRAVA_CLIENT_SECRET", "s3cret")
+
+
+@pytest.fixture(autouse=True)
+def _connected(monkeypatch):
+    """A signed-in, verified visitor whose account holds a Strava connection
+    - stubbed here, since storing and refreshing it is test_connections.py's
+    job. This file is about what's sent to and read from Strava."""
+    from cryptography.fernet import Fernet
+
+    from waypointer import connections, sessions, token_crypto
+
+    user = sessions.User(id="u1", email="a@b.co", email_verified=True, features=(), created_at=datetime.now(timezone.utc))
+    app.dependency_overrides[sessions.require_verified_user] = lambda: user
+    monkeypatch.setenv(token_crypto.TOKEN_ENCRYPTION_KEY_ENV, Fernet.generate_key().decode())
+    monkeypatch.setattr(connections, "access_token", lambda user_id, provider: ("visitor-token", str(ATHLETE_ID)))
+    yield
+    app.dependency_overrides.clear()
 
 
 def _token_json(with_athlete: bool = True) -> dict:
@@ -94,16 +113,15 @@ def test_not_configured_is_a_503(monkeypatch):
 @responses.activate
 def test_code_exchange_sends_the_secret_and_returns_the_athlete():
     responses.add(responses.POST, TOKEN_URL, json=_token_json(), status=200)
-    response = client.post("/api/strava/token", data={"code": "the-code"})
+    tokens = strava.exchange_code("the-code")
 
-    assert response.status_code == 200
-    assert response.json() == {
-        "access_token": "access-1",
-        "refresh_token": "refresh-1",
-        "expires_at": 1_790_000_000,
-        "athlete_id": ATHLETE_ID,
-        "athlete_label": "Ada Lovelace",
-    }
+    assert tokens == strava.StravaTokens(
+        access_token="access-1",
+        refresh_token="refresh-1",
+        expires_at=1_790_000_000,
+        athlete_id=ATHLETE_ID,
+        athlete_label="Ada Lovelace",
+    )
     sent = parse_qs(responses.calls[0].request.body)
     assert sent["client_secret"] == ["s3cret"]
     assert sent["grant_type"] == ["authorization_code"]
@@ -113,25 +131,27 @@ def test_code_exchange_sends_the_secret_and_returns_the_athlete():
 @responses.activate
 def test_refresh_has_no_athlete():
     responses.add(responses.POST, TOKEN_URL, json=_token_json(with_athlete=False), status=200)
-    response = client.post("/api/strava/token", data={"refresh_token": "refresh-0"})
-
-    assert response.status_code == 200
-    assert response.json()["athlete_id"] is None
+    assert strava.refresh_tokens("refresh-0").athlete_id is None
     sent = parse_qs(responses.calls[0].request.body)
     assert sent["grant_type"] == ["refresh_token"]
     assert sent["refresh_token"] == ["refresh-0"]
 
 
-@pytest.mark.parametrize("data", [{}, {"code": "a", "refresh_token": "b"}])
-def test_token_needs_exactly_one_grant(data):
-    assert client.post("/api/strava/token", data=data).status_code == 400
+@responses.activate
+def test_refused_code_is_unauthorized():
+    # Strava answers a bad or reused code with a 400.
+    responses.add(responses.POST, TOKEN_URL, json={"message": "Bad Request"}, status=400)
+    with pytest.raises(strava.StravaUnauthorizedError):
+        strava.exchange_code("stale")
 
 
 @responses.activate
-def test_refused_code_is_a_401():
-    # Strava answers a bad or reused code with a 400.
-    responses.add(responses.POST, TOKEN_URL, json={"message": "Bad Request"}, status=400)
-    assert client.post("/api/strava/token", data={"code": "stale"}).status_code == 401
+def test_get_athlete():
+    responses.add(
+        responses.GET, f"{strava.STRAVA_API_BASE}/athlete", json={"id": 7, "firstname": "Ada", "lastname": ""}
+    )
+    assert strava.get_athlete("visitor-token") == (7, "Ada")
+    assert responses.calls[0].request.headers["Authorization"] == "Bearer visitor-token"
 
 
 @responses.activate
@@ -142,7 +162,7 @@ def test_routes_page_until_a_short_page(monkeypatch):
     )
     responses.add(responses.GET, ROUTES_URL, json=[_route_json("12", "C")], status=200)
 
-    response = client.get("/api/strava/routes", params={"athlete_id": ATHLETE_ID}, headers=BEARER)
+    response = client.get("/api/strava/routes")
 
     assert response.status_code == 200
     routes = response.json()
@@ -154,19 +174,27 @@ def test_routes_page_until_a_short_page(monkeypatch):
     assert responses.calls[0].request.headers["Authorization"] == "Bearer visitor-token"
 
 
-def test_routes_need_a_token():
-    assert client.get("/api/strava/routes", params={"athlete_id": ATHLETE_ID}).status_code == 401
+def test_routes_need_a_connection(monkeypatch):
+    from waypointer import connections
+
+    def not_connected(user_id, provider):
+        raise connections.NotConnectedError(provider)
+
+    monkeypatch.setattr(connections, "access_token", not_connected)
+    response = client.get("/api/strava/routes")
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Connect Strava first."
 
 
 @responses.activate
 def test_upstream_401_and_429_pass_through():
     responses.add(responses.GET, ROUTES_URL, json={"message": "Authorization Error"}, status=401)
     assert (
-        client.get("/api/strava/routes", params={"athlete_id": ATHLETE_ID}, headers=BEARER).status_code == 401
+        client.get("/api/strava/routes").status_code == 401
     )
 
     responses.replace(responses.GET, ROUTES_URL, json={"message": "Rate Limit Exceeded"}, status=429)
-    response = client.get("/api/strava/routes", params={"athlete_id": ATHLETE_ID}, headers=BEARER)
+    response = client.get("/api/strava/routes")
     assert response.status_code == 429
     assert response.headers["Retry-After"]
 
@@ -175,14 +203,14 @@ def test_upstream_401_and_429_pass_through():
 def test_upstream_failure_is_a_502():
     responses.add(responses.GET, ROUTES_URL, body="oops", status=500)
     assert (
-        client.get("/api/strava/routes", params={"athlete_id": ATHLETE_ID}, headers=BEARER).status_code == 502
+        client.get("/api/strava/routes").status_code == 502
     )
 
 
 @responses.activate
 def test_import_returns_the_exported_gpx(sample_route_bytes):
     responses.add(responses.GET, EXPORT_URL, body=sample_route_bytes, status=200)
-    response = client.post("/api/strava/import-route", data={"route_id": ROUTE_ID}, headers=BEARER)
+    response = client.post("/api/strava/import-route", data={"route_id": ROUTE_ID}, headers=ORIGIN)
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("application/gpx+xml")
@@ -191,7 +219,7 @@ def test_import_returns_the_exported_gpx(sample_route_bytes):
 
 @pytest.mark.parametrize("route_id", ["12/../../athlete", "abc", "１２３", ""])
 def test_import_refuses_anything_but_a_numeric_id(route_id):
-    response = client.post("/api/strava/import-route", data={"route_id": route_id}, headers=BEARER)
+    response = client.post("/api/strava/import-route", data={"route_id": route_id}, headers=ORIGIN)
     # An empty form field fails FastAPI's own validation (422) before ours.
     assert response.status_code in (400, 422)
 
@@ -199,14 +227,14 @@ def test_import_refuses_anything_but_a_numeric_id(route_id):
 @responses.activate
 def test_import_refuses_an_unreadable_export():
     responses.add(responses.GET, EXPORT_URL, body=b"<html>not gpx</html>", status=200)
-    response = client.post("/api/strava/import-route", data={"route_id": ROUTE_ID}, headers=BEARER)
+    response = client.post("/api/strava/import-route", data={"route_id": ROUTE_ID}, headers=ORIGIN)
     assert response.status_code == 400
 
 
 @responses.activate
 def test_deauthorize_sends_the_token():
     responses.add(responses.POST, DEAUTHORIZE_URL, json={"access_token": "visitor-token"}, status=200)
-    assert client.post("/api/strava/deauthorize", headers=BEARER).status_code == 204
+    strava.deauthorize("visitor-token")
     assert parse_qs(responses.calls[0].request.body)["access_token"] == ["visitor-token"]
 
 
@@ -239,7 +267,7 @@ def test_activities_skip_ones_without_a_gps_track():
         ],
         status=200,
     )
-    response = client.get("/api/strava/activities", headers=BEARER)
+    response = client.get("/api/strava/activities", headers=ORIGIN)
 
     assert response.status_code == 200
     assert response.json() == {
@@ -269,7 +297,7 @@ def test_activities_come_one_page_of_twenty_at_a_time():
         json=[_activity_json(i, "Zwift", start_latlng=[], trainer=True) for i in range(20)],
         status=200,
     )
-    response = client.get("/api/strava/activities", params={"page": 3}, headers=BEARER)
+    response = client.get("/api/strava/activities", params={"page": 3}, headers=ORIGIN)
 
     assert response.status_code == 200
     assert response.json() == {"activities": [], "has_more": True}
@@ -280,7 +308,7 @@ def test_activities_come_one_page_of_twenty_at_a_time():
 
 @pytest.mark.parametrize("page", [0, -1, "x"])
 def test_activities_refuse_a_bad_page(page):
-    assert client.get("/api/strava/activities", params={"page": page}, headers=BEARER).status_code == 422
+    assert client.get("/api/strava/activities", params={"page": page}, headers=ORIGIN).status_code == 422
 
 
 @responses.activate
@@ -292,7 +320,7 @@ def test_activities_without_the_scope_ask_to_reconnect():
         json={"message": "Authorization Error", "errors": [{"field": "activity:read_permission", "code": "missing"}]},
         status=401,
     )
-    assert client.get("/api/strava/activities", headers=BEARER).status_code == 401
+    assert client.get("/api/strava/activities", headers=ORIGIN).status_code == 401
 
 
 @responses.activate
@@ -308,7 +336,7 @@ def test_import_activity_builds_a_gpx_track_with_elevation():
         status=200,
     )
     response = client.post(
-        "/api/strava/import-activity", data={"activity_id": ACTIVITY_ID, "name": "Morning gravel"}, headers=BEARER
+        "/api/strava/import-activity", data={"activity_id": ACTIVITY_ID, "name": "Morning gravel"}, headers=ORIGIN
     )
 
     assert response.status_code == 200
@@ -325,7 +353,7 @@ def test_import_activity_without_altitude_still_imports():
     responses.add(
         responses.GET, STREAMS_URL, json={"latlng": {"data": [[46.07, 11.12], [46.08, 11.13]]}}, status=200
     )
-    response = client.post("/api/strava/import-activity", data={"activity_id": ACTIVITY_ID}, headers=BEARER)
+    response = client.post("/api/strava/import-activity", data={"activity_id": ACTIVITY_ID}, headers=ORIGIN)
 
     assert response.status_code == 200
     assert route_elevations(parse_gpx(response.content)) == [None, None]
@@ -334,13 +362,13 @@ def test_import_activity_without_altitude_still_imports():
 @responses.activate
 def test_import_activity_without_gps_is_a_400():
     responses.add(responses.GET, STREAMS_URL, json={"time": {"data": [0, 1, 2]}}, status=200)
-    response = client.post("/api/strava/import-activity", data={"activity_id": ACTIVITY_ID}, headers=BEARER)
+    response = client.post("/api/strava/import-activity", data={"activity_id": ACTIVITY_ID}, headers=ORIGIN)
     assert response.status_code == 400
     assert "no GPS track" in response.json()["detail"]
 
 
 @pytest.mark.parametrize("activity_id", ["12/../../athlete", "abc", "１２３"])
 def test_import_activity_refuses_anything_but_a_numeric_id(activity_id):
-    response = client.post("/api/strava/import-activity", data={"activity_id": activity_id}, headers=BEARER)
+    response = client.post("/api/strava/import-activity", data={"activity_id": activity_id}, headers=ORIGIN)
     assert response.status_code == 400
     assert "isn't a Strava activity id" in response.json()["detail"]

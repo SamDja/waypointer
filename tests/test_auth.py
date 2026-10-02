@@ -13,86 +13,17 @@ import responses
 from fastapi import Depends
 from fastapi.testclient import TestClient
 
-from waypointer import db, mailer, passwords, sessions, turnstile
+from account_helpers import link_token as _link_token, signup_and_verify as _signup_and_verify
+from waypointer import db, sessions, turnstile
 from waypointer.main import app
-
-try:
-    from testcontainers.community.postgres import PostgresContainer
-except ImportError:  # pragma: no cover - dev dependency, see pyproject.toml
-    PostgresContainer = None
 
 ORIGIN = "http://testserver"
 PASSWORD = "correct horse battery"
 
 
-@pytest.fixture(scope="module")
-def server_url():
-    if PostgresContainer is None:
-        pytest.skip("testcontainers is not installed")
-    try:
-        container = PostgresContainer("postgres:16-alpine")
-        container.start()
-    except Exception as exc:  # noqa: BLE001 - Docker unavailable in this environment
-        pytest.skip(f"Docker/testcontainers unavailable: {exc}")
-        return
-    url = container.get_connection_url().replace("postgresql+psycopg2://", "postgresql://")
-    yield url
-    container.stop()
-
-
-@pytest.fixture(scope="module")
-def database_url(server_url):
-    # A database that doesn't exist yet, so init_database has to create it -
-    # the same path the Pi's existing volume takes on first deploy.
-    url = psycopg.conninfo.make_conninfo(server_url, dbname="sulla_via_test")
-    with pytest.MonkeyPatch.context() as mp:
-        mp.setenv(db.DATABASE_URL_ENV, url)
-        assert db.init_database()
-        # A second run finds everything already applied.
-        with psycopg.connect(url) as conn:
-            assert db.apply_migrations(conn) == []
-    return url
-
-
 @pytest.fixture(autouse=True)
-def _configure(database_url, monkeypatch):
-    monkeypatch.setenv(db.DATABASE_URL_ENV, database_url)
-    monkeypatch.setenv("COOKIE_SECURE", "0")
-    for name in ("PUBLIC_BASE_URL", "SMTP_HOST", "TURNSTILE_SECRET_KEY", passwords.HIBP_CHECK_ENV):
-        monkeypatch.delenv(name, raising=False)
-    db.close_pool()
-    with psycopg.connect(database_url, autocommit=True) as conn:
-        conn.execute("TRUNCATE users CASCADE")
+def _configure(account_db):
     yield
-    db.close_pool()
-
-
-@pytest.fixture
-def outbox(monkeypatch):
-    sent: list[dict] = []
-    monkeypatch.setattr(mailer, "send_email", lambda to, subject, body: sent.append(
-        {"to": to, "subject": subject, "body": body}
-    ))
-    return sent
-
-
-@pytest.fixture
-def client():
-    with TestClient(app, headers={"Origin": ORIGIN}) as c:
-        yield c
-
-
-def _link_token(mail: dict, param: str) -> str:
-    match = re.search(rf"\?{param}=([\w-]+)", mail["body"])
-    assert match, mail["body"]
-    return match.group(1)
-
-
-def _signup_and_verify(client, outbox, email="rider@example.com", password=PASSWORD) -> dict:
-    assert client.post("/api/auth/signup", data={"email": email, "password": password}).status_code == 202
-    response = client.post("/api/auth/verify", data={"token": _link_token(outbox[-1], "verify")})
-    assert response.status_code == 200
-    return response.json()
 
 
 def test_me_anonymous(client):
@@ -251,11 +182,11 @@ def test_only_the_latest_reset_link_works(client, outbox):
     assert client.post("/api/auth/reset-password", data={"token": second, "password": "a brand new password"}).status_code == 200
 
 
-def test_expired_reset_link(client, outbox, database_url):
+def test_expired_reset_link(client, outbox, account_db):
     _signup_and_verify(client, outbox)
     client.post("/api/auth/forgot-password", data={"email": "rider@example.com"})
     token = _link_token(outbox[-1], "reset")
-    with psycopg.connect(database_url, autocommit=True) as conn:
+    with psycopg.connect(account_db, autocommit=True) as conn:
         conn.execute("UPDATE email_tokens SET expires_at = now() - interval '1 second'")
     response = client.post("/api/auth/reset-password", data={"token": token, "password": "a brand new password"})
     assert response.status_code == 400
@@ -322,12 +253,12 @@ def test_export(client, outbox):
     assert "password" not in response.text
 
 
-def test_delete_account(client, outbox, database_url):
+def test_delete_account(client, outbox, account_db):
     _signup_and_verify(client, outbox)
     assert client.post("/api/account/delete", data={"password": "wrong password!"}).status_code == 400
     assert client.post("/api/account/delete", data={"password": PASSWORD}).status_code == 204
     assert client.get("/api/auth/me").json()["account"] is None
-    with psycopg.connect(database_url) as conn:
+    with psycopg.connect(account_db) as conn:
         for table in ("users", "sessions", "email_tokens"):
             assert conn.execute(f"SELECT count(*) FROM {table}").fetchone()[0] == 0
     assert client.post("/api/auth/login", data={"email": "rider@example.com", "password": PASSWORD}).status_code == 401
@@ -365,27 +296,27 @@ def test_captcha_required_when_configured(client, outbox, monkeypatch):
     assert client.get("/api/auth/me").json()["captcha_required"] is True
 
 
-def test_session_expiry(client, outbox, database_url):
+def test_session_expiry(client, outbox, account_db):
     _signup_and_verify(client, outbox)
-    with psycopg.connect(database_url, autocommit=True) as conn:
+    with psycopg.connect(account_db, autocommit=True) as conn:
         conn.execute("UPDATE sessions SET expires_at = now() - interval '1 second'")
     assert client.get("/api/auth/me").json()["account"] is None
 
 
-def test_session_slides_forward_when_used(client, outbox, database_url):
+def test_session_slides_forward_when_used(client, outbox, account_db):
     _signup_and_verify(client, outbox)
     stale = sessions.TOUCH_INTERVAL + timedelta(minutes=5)
-    with psycopg.connect(database_url, autocommit=True) as conn:
+    with psycopg.connect(account_db, autocommit=True) as conn:
         conn.execute(
             "UPDATE sessions SET last_seen_at = now() - %s, expires_at = now() + interval '1 day'", (stale,)
         )
     client.get("/api/auth/me")
-    with psycopg.connect(database_url) as conn:
+    with psycopg.connect(account_db) as conn:
         remaining = conn.execute("SELECT expires_at - now() FROM sessions").fetchone()[0]
     assert remaining > sessions.SESSION_TTL - timedelta(minutes=1)
 
 
-def test_require_feature(outbox, database_url):
+def test_require_feature(outbox, account_db):
     from fastapi import FastAPI
 
     probe = FastAPI()
@@ -403,6 +334,6 @@ def test_require_feature(outbox, database_url):
     assert probe_client.get("/probe").status_code == 401
     probe_client.cookies.set(sessions.SESSION_COOKIE, cookie)
     assert probe_client.get("/probe").status_code == 403
-    with psycopg.connect(database_url, autocommit=True) as conn:
+    with psycopg.connect(account_db, autocommit=True) as conn:
         conn.execute("UPDATE users SET features = array_append(features, 'llm')")
     assert probe_client.get("/probe").status_code == 200

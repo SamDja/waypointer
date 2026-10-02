@@ -535,7 +535,7 @@ export function StyleGuide() {
                 <DropdownMenuContent>
                   <DropdownMenuLabel>Account</DropdownMenuLabel>
                   <DropdownMenuItem>Manage routes</DropdownMenuItem>
-                  <DropdownMenuItem>Manage fitness apps</DropdownMenuItem>
+                  <DropdownMenuItem>Account settings</DropdownMenuItem>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem disabled>Disabled</DropdownMenuItem>
                 </DropdownMenuContent>

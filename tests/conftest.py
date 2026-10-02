@@ -67,3 +67,88 @@ def panoramax_json() -> dict:
 def wikidata_p18_json() -> dict:
     """A real wbgetclaims P18 response for Q3376 (Trento)."""
     return json.loads((FIXTURES_DIR / "wikidata_p18_response.json").read_text())
+
+
+# --- account database (test_auth.py, test_connections.py) -------------------
+
+ACCOUNT_ORIGIN = "http://testserver"
+ACCOUNT_PASSWORD = "correct horse battery"
+
+
+@pytest.fixture(scope="session")
+def _account_server_url():
+    """One throwaway Postgres for every account test, started on first use.
+    Skips cleanly without Docker, like test_poi_db.py."""
+    try:
+        from testcontainers.community.postgres import PostgresContainer
+    except ImportError:  # pragma: no cover - dev dependency, see pyproject.toml
+        pytest.skip("testcontainers is not installed")
+    try:
+        container = PostgresContainer("postgres:16-alpine")
+        container.start()
+    except Exception as exc:  # noqa: BLE001 - Docker unavailable in this environment
+        pytest.skip(f"Docker/testcontainers unavailable: {exc}")
+        return
+    yield container.get_connection_url().replace("postgresql+psycopg2://", "postgresql://")
+    container.stop()
+
+
+@pytest.fixture(scope="session")
+def _account_database_url(_account_server_url):
+    import psycopg
+
+    from waypointer import db
+
+    # A database that doesn't exist yet, so init_database has to create it -
+    # the same path an existing deployment's volume takes on first start.
+    url = psycopg.conninfo.make_conninfo(_account_server_url, dbname="sulla_via_test")
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setenv(db.DATABASE_URL_ENV, url)
+        assert db.init_database()
+        # A second run finds everything already applied.
+        with psycopg.connect(url) as conn:
+            assert db.apply_migrations(conn) == []
+    return url
+
+
+@pytest.fixture
+def account_db(_account_database_url, monkeypatch):
+    """A clean account database for one test, plus the env the account code
+    reads, with every optional external service (SMTP, captcha, HIBP) off."""
+    import psycopg
+    from cryptography.fernet import Fernet
+
+    from waypointer import db, passwords, token_crypto
+
+    monkeypatch.setenv(db.DATABASE_URL_ENV, _account_database_url)
+    monkeypatch.setenv("COOKIE_SECURE", "0")
+    monkeypatch.setenv(token_crypto.TOKEN_ENCRYPTION_KEY_ENV, Fernet.generate_key().decode())
+    for name in ("PUBLIC_BASE_URL", "SMTP_HOST", "TURNSTILE_SECRET_KEY", passwords.HIBP_CHECK_ENV):
+        monkeypatch.delenv(name, raising=False)
+    db.close_pool()
+    with psycopg.connect(_account_database_url, autocommit=True) as conn:
+        conn.execute("TRUNCATE users CASCADE")
+    yield _account_database_url
+    db.close_pool()
+
+
+@pytest.fixture
+def outbox(monkeypatch):
+    """Every email the account code sends, instead of sending it."""
+    from waypointer import mailer
+
+    sent: list[dict] = []
+    monkeypatch.setattr(
+        mailer, "send_email", lambda to, subject, body: sent.append({"to": to, "subject": subject, "body": body})
+    )
+    return sent
+
+
+@pytest.fixture
+def client(account_db):
+    from fastapi.testclient import TestClient
+
+    from waypointer.main import app
+
+    with TestClient(app, headers={"Origin": ACCOUNT_ORIGIN}) as c:
+        yield c

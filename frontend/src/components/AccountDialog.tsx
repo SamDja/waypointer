@@ -29,6 +29,8 @@ import {
 } from "@/lib/accountApi"
 import { track } from "@/lib/analytics"
 import { toast } from "@/lib/toast"
+import { FitnessAppsList } from "@/components/FitnessAppsList"
+import type { Connection } from "@/lib/connections"
 import type { Account } from "@/types/account"
 
 export type AccountView = "signin" | "signup" | "forgot" | "check-email" | "reset" | "settings"
@@ -44,6 +46,9 @@ export interface AccountDialogProps {
   resetToken: string | null
   account: Account | null
   onAccountChange: (account: Account | null) => void
+  // The account's connected fitness apps, managed in the settings view.
+  connections: Connection[]
+  onConnectionsChange: (connections: Connection[]) => void
 }
 
 // Runs one form's submit: busy while it's in flight, the failure shown
@@ -189,8 +194,8 @@ function SignUpForm({
         Create account
       </Button>
       <p className="text-xs text-muted-foreground">
-        Your routes stay in your browser. An account stores only your email address and a securely hashed password.
-        You can download or delete your data at any time.
+        Your routes stay in your browser. An account stores your email address, a securely hashed password, the
+        fitness apps you connect and your speed settings. You can download or delete your data at any time.
       </p>
       <SwitchLink onClick={() => onViewChange("signin")}>Already have an account? Sign in</SwitchLink>
     </form>
@@ -413,9 +418,10 @@ function DataSection({ onDeleted }: { onDeleted: () => void }) {
   return (
     <SettingsSection title="Your data">
       <p className="text-xs text-muted-foreground">
-        Your account holds your email address, a hashed password (never the password itself) and the list of browsers
-        you're signed in on. Routes and settings stay in your browser. Nothing is shared with anyone, and deleting
-        your account removes all of it straight away.
+        Your account holds your email address, a hashed password (never the password itself), the list of browsers
+        you're signed in on, the fitness apps you've connected (their access is stored encrypted) and your speed
+        settings. Routes stay in your browser. Nothing is shared with anyone, and deleting your account disconnects
+        your fitness apps and removes all of it straight away.
       </p>
       <Button
         variant="outline"
@@ -486,7 +492,15 @@ const TITLES: Record<AccountView, { title: string; description: string }> = {
 
 // Every account screen in one dialog: sign in, sign up, forgot/reset
 // password, and the signed-in account's settings.
-export function AccountDialog({ view, onViewChange, resetToken, account, onAccountChange }: AccountDialogProps) {
+export function AccountDialog({
+  view,
+  onViewChange,
+  resetToken,
+  account,
+  onAccountChange,
+  connections,
+  onConnectionsChange,
+}: AccountDialogProps) {
   const [sent, setSent] = useState<{ email: string; kind: "signup" | "reset" } | null>(null)
   const shown = view ?? "signin"
   const { title, description } = TITLES[shown]
@@ -546,6 +560,14 @@ export function AccountDialog({ view, onViewChange, resetToken, account, onAccou
           ))}
         {shown === "settings" && account && (
           <div className="flex flex-col gap-4">
+            <SettingsSection title="Fitness apps">
+              <FitnessAppsList
+                account={account}
+                onSignIn={() => onViewChange("signin")}
+                connections={connections}
+                onConnectionsChange={onConnectionsChange}
+              />
+            </SettingsSection>
             <EmailSection account={account} />
             <PasswordSection />
             <DataSection

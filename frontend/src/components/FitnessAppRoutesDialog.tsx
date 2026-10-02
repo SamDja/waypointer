@@ -31,10 +31,9 @@ import {
   stravaSportLabel,
   type StravaActivity,
 } from "@/lib/stravaApi"
-import { getValidStravaTokens, loadStravaTokens } from "@/lib/stravaSettings"
+import { findConnection, type Connection } from "@/lib/connections"
 import { toast, updateToast } from "@/lib/toast"
-import { deleteWahooRoute, listWahooRoutes, updateWahooRouteName, type WahooRoute } from "@/lib/wahooApi"
-import { getValidWahooAccessToken } from "@/lib/wahooSettings"
+import { deleteWahooRoute, listWahooRoutes, renameWahooRoute, type WahooRoute } from "@/lib/wahooApi"
 import { Callout } from "@/components/ui/callout"
 
 // Which connected app a route lives in.
@@ -105,8 +104,7 @@ function fromStravaActivity(activity: StravaActivity): RemoteRoute {
 // time (the backend's strava.ACTIVITIES_PER_PAGE, 20), since an athlete
 // can have thousands.
 async function loadActivityPage(page: number): Promise<{ routes: RemoteRoute[]; hasMore: boolean }> {
-  const tokens = await getValidStravaTokens()
-  const { activities, hasMore } = await listStravaActivities(tokens.accessToken, page)
+  const { activities, hasMore } = await listStravaActivities(page)
   return { routes: activities.map(fromStravaActivity), hasMore }
 }
 
@@ -119,13 +117,18 @@ interface Listing {
   load: () => Promise<{ routes: RemoteRoute[]; hasMore?: boolean }>
 }
 
-function listings(wahooConnected: boolean, stravaConnected: boolean, withActivities: boolean): Listing[] {
+function listings(
+  wahooConnected: boolean,
+  stravaConnected: boolean,
+  withActivities: boolean,
+  stravaScope: string | null,
+): Listing[] {
   const result: Listing[] = []
   if (wahooConnected) {
     result.push({
       source: "wahoo",
       failed: "Couldn't load your Wahoo routes.",
-      load: async () => ({ routes: (await listWahooRoutes(await getValidWahooAccessToken())).map(fromWahoo) }),
+      load: async () => ({ routes: (await listWahooRoutes()).map(fromWahoo) }),
     })
   }
   if (stravaConnected) {
@@ -133,8 +136,7 @@ function listings(wahooConnected: boolean, stravaConnected: boolean, withActivit
       source: "strava",
       failed: "Couldn't load your Strava routes.",
       load: async () => {
-        const tokens = await getValidStravaTokens()
-        const routes = await listStravaRoutes(tokens.accessToken, tokens.athleteId)
+        const routes = await listStravaRoutes()
         return {
           routes: routes.map((route) => ({
             source: "strava",
@@ -152,7 +154,7 @@ function listings(wahooConnected: boolean, stravaConnected: boolean, withActivit
     })
     // A connection made before activity import can't list activities: the
     // routes still show, and the dialog says how to get the rest.
-    if (withActivities && hasStravaActivityScope(loadStravaTokens()?.scope)) {
+    if (withActivities && hasStravaActivityScope(stravaScope)) {
       result.push({
         source: "strava",
         failed: "Couldn't load your Strava activities.",
@@ -168,10 +170,7 @@ async function downloadAsGpx(route: RemoteRoute): Promise<Blob> {
   if (route.source === "wahoo" && route.wahoo) {
     return (await importWahooRoute(route.wahoo.fileUrl)).blob
   }
-  const tokens = await getValidStravaTokens()
-  return route.kind === "activity"
-    ? importStravaActivity(route.id, route.name, tokens.accessToken)
-    : importStravaRoute(route.id, tokens.accessToken)
+  return route.kind === "activity" ? importStravaActivity(route.id, route.name) : importStravaRoute(route.id)
 }
 
 // A listing that couldn't be loaded, and why - kept on screen rather than
@@ -195,8 +194,8 @@ function SourceBadge({ source }: { source: RouteSource }) {
 interface CommonProps {
   open: boolean
   onOpenChange: (open: boolean) => void
-  wahooConnected: boolean
-  stravaConnected: boolean
+  // The account's connected apps - the dialog lists routes from each.
+  connections: Connection[]
 }
 
 export type FitnessAppRoutesDialogProps =
@@ -206,7 +205,11 @@ export type FitnessAppRoutesDialogProps =
 // Every route in every connected app, in one list: pick one to import, or
 // (mode "manage") rename or delete it where its app allows that.
 export function FitnessAppRoutesDialog(props: FitnessAppRoutesDialogProps) {
-  const { open, onOpenChange, mode, wahooConnected, stravaConnected } = props
+  const { open, onOpenChange, mode, connections } = props
+  const wahooConnected = findConnection(connections, "wahoo") !== null
+  const strava = findConnection(connections, "strava")
+  const stravaConnected = strava !== null
+  const stravaScope = strava?.scope ?? null
   const [routes, setRoutes] = useState<RemoteRoute[] | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [importingKey, setImportingKey] = useState<string | null>(null)
@@ -230,7 +233,7 @@ export function FitnessAppRoutesDialog(props: FitnessAppRoutesDialogProps) {
     if (!open) return
     // Activities are only offered to import - there's nothing to manage on
     // one, and "Manage routes" is about routes.
-    const toLoad = listings(wahooConnected, stravaConnected, mode === "import")
+    const toLoad = listings(wahooConnected, stravaConnected, mode === "import", stravaScope)
     let cancelled = false
     setIsLoading(true)
     setRoutes(null)
@@ -267,7 +270,7 @@ export function FitnessAppRoutesDialog(props: FitnessAppRoutesDialogProps) {
     return () => {
       cancelled = true
     }
-  }, [open, mode, wahooConnected, stravaConnected, reloadCount])
+  }, [open, mode, wahooConnected, stravaConnected, stravaScope, reloadCount])
 
   async function handleLoadMoreActivities() {
     const next = activityPage + 1
@@ -315,8 +318,7 @@ export function FitnessAppRoutesDialog(props: FitnessAppRoutesDialogProps) {
     setRenamingId(route.id)
     const toastId = toast("Renaming route...", "loading")
     try {
-      const accessToken = await getValidWahooAccessToken()
-      await updateWahooRouteName(route, newName, accessToken)
+      await renameWahooRoute(route.id, newName)
       setRoutes((prev) =>
         prev
           ? prev.map((r) =>
@@ -339,8 +341,7 @@ export function FitnessAppRoutesDialog(props: FitnessAppRoutesDialogProps) {
     setDeletingId(route.id)
     const toastId = toast("Deleting route...", "loading")
     try {
-      const accessToken = await getValidWahooAccessToken()
-      await deleteWahooRoute(route.id, accessToken)
+      await deleteWahooRoute(route.id)
       setRoutes((prev) => (prev ? prev.filter((r) => r.wahoo?.id !== route.id) : prev))
       updateToast(toastId, `Deleted "${route.name}".`, "success")
     } catch (err) {
@@ -353,7 +354,7 @@ export function FitnessAppRoutesDialog(props: FitnessAppRoutesDialogProps) {
   // Read when the dialog renders: connecting again (from the fitness-apps
   // dialog) updates the stored scope, and the dialog is closed meanwhile.
   const activitiesNeedReconnect =
-    mode === "import" && stravaConnected && !hasStravaActivityScope(loadStravaTokens()?.scope)
+    mode === "import" && stravaConnected && !hasStravaActivityScope(stravaScope)
 
   const manageDescription = stravaConnected
     ? wahooConnected
@@ -380,7 +381,7 @@ export function FitnessAppRoutesDialog(props: FitnessAppRoutesDialogProps) {
               dialog. */}
           {activitiesNeedReconnect && (
             <p className="text-sm text-muted-foreground">
-              To import your Strava activities too, disconnect and reconnect Strava from "Manage fitness apps" -
+              To import your Strava activities too, disconnect and reconnect Strava in your account settings -
               it needs your permission to read them.
             </p>
           )}

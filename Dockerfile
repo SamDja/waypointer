@@ -4,12 +4,9 @@ WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
 COPY frontend/ ./
-# Non-secret PKCE public-client id (see frontend/src/lib/wahooConfig.ts) -
-# Vite env vars are baked in at build time, so this must be a build ARG, not
-# a runtime CMD env var. docker-compose.yml forwards it as a build arg (see
+# Vite env vars are baked in at build time, so these must be build ARGs, not
+# runtime CMD env vars. docker-compose.yml forwards them as build args (see
 # `build.args` there) sourced from the host's .env file.
-ARG VITE_WAHOO_CLIENT_ID
-ENV VITE_WAHOO_CLIENT_ID=$VITE_WAHOO_CLIENT_ID
 # Not secret - just identifies the public Tally feedback form (see
 # frontend/src/lib/feedbackConfig.ts) - same build-arg reasoning as above.
 ARG VITE_TALLY_FORM_ID
