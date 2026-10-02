@@ -74,6 +74,19 @@ services:
       - HIBP_CHECK=${HIBP_CHECK:-}
     volumes:
       - ${CERTS_DIR:-./certs}:/certs:ro
+    # The app's logs (one access-log line per request) go to the host's
+    # systemd journal rather than Docker's default json-file, because only
+    # journald can delete them by age - Docker's own drivers rotate by size
+    # alone. The privacy notice promises a retention in days
+    # (privacyConfig.ts's LOG_RETENTION), which the host's journald.conf
+    # enforces - see CLAUDE.md's "Log retention". `docker compose logs`
+    # still works with this driver. On a host without systemd-journald (a
+    # Mac running OrbStack or Docker Desktop), set LOG_DRIVER=json-file in
+    # .env - the container won't start otherwise.
+    logging:
+      driver: ${LOG_DRIVER:-journald}
+      options:
+        tag: waypointer
     networks:
       - waypointer-net
     depends_on:

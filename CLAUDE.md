@@ -67,6 +67,21 @@ then `docker compose up --build -d`. Each browser/device will show a one-time se
 
 Whichever origin a visitor actually uses — the Cloudflare tunnel's public hostname (the normal case) or the LAN-direct address above — needs `<origin>/wahoo-callback.html` added to the registered redirect URIs in the Wahoo developer dashboard: the redirect URI is derived from `window.location.origin` (`frontend/src/lib/wahooAuth.ts`), and Wahoo requires an exact string match, so a registered URI missing the actual port (or carrying one that isn't actually there) fails with a misleading error (see [[project_wahoo_oauth_redirect_uri]]).
 
+#### Log retention
+The privacy notice promises the app's logs are kept for 14 days (`frontend/src/privacy/privacyConfig.ts`'s `LOG_RETENTION`). The access log carries each request's path, query string included, so a search's typed text and map centre end up there. Docker's own logging drivers (`json-file`, `local`) can only rotate by size, so `docker-compose.yml` sends the `waypointer` service's logs to the host's systemd journal (`logging: driver: journald`, tagged `waypointer`), and the retention is enforced on the Pi in `/etc/systemd/journald.conf`, not in the repo:
+```ini
+[Journal]
+Storage=persistent
+MaxRetentionSec=13day
+MaxFileSec=1day
+SystemMaxUse=200M
+```
+then `sudo systemctl restart systemd-journald`. journald deletes a journal file only once everything in it has passed `MaxRetentionSec`, so one file per day (`MaxFileSec`) plus 13 days means nothing is kept past 14. `SystemMaxUse` caps disk use as a safety net. Caveats:
+- The setting is for the **whole journal**, so every system service on the Pi gets the same retention.
+- `Storage=volatile` (in memory) would silently lose the logs at every reboot.
+
+To change the period, change `MaxRetentionSec` and `LOG_RETENTION` together. `docker compose logs waypointer` still reads them, and so does `journalctl CONTAINER_TAG=waypointer`. On a host without journald (a Mac running OrbStack or Docker Desktop), set `LOG_DRIVER=json-file` in `.env` (the driver is `${LOG_DRIVER:-journald}`) - the container won't start otherwise.
+
 ### Telemetry (Prometheus + Grafana + node_exporter)
 Three extra `docker-compose.yml` services, LAN-only, no auth beyond Grafana's own login — the app itself has no login either, relying on Cloudflare's edge (or the Pi's LAN, for anyone with physical/network access) rather than in-app auth; see "Remote access & TLS" above. Not part of the Docker image itself — `waypointer` stays a single-responsibility container; telemetry is bolted on at the compose layer so `docker run waypointer` (no compose) still works standalone.
 

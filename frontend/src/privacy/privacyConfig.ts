@@ -10,8 +10,10 @@ export const CONTACT_EMAIL = "samuelgiacomelli@gmail.com"
 export const HOSTING_COUNTRY = "Italy"
 // The SMTP relay that delivers account emails (Brevo, Mailgun, Amazon SES...).
 export const EMAIL_PROVIDER = "Brevo"
-// How long the server's technical logs are kept - set by the Docker log
-// rotation on the host (docker-compose.yml's `logging`, if configured).
+// How long the server's technical logs are kept. Enforced on the Pi by
+// journald (docker-compose.yml sends the app's logs there): with one
+// journal file per day, MaxRetentionSec=13day keeps nothing older than 14
+// days. Change both together - see CLAUDE.md's "Log retention".
 export const LOG_RETENTION = "14 days"
 // Shown at the top; change it whenever the content changes - and bump the
 // backend's auth.PRIVACY_VERSION with it, so each new account records which
