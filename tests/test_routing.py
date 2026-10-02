@@ -10,6 +10,7 @@ from waypointer.routing import (
     BoolOption,
     ChoiceOption,
     RoutingError,
+    RoutingRateLimitedError,
     build_routing_params,
     resolve_options,
     route_leg,
@@ -49,6 +50,23 @@ def test_route_via_routes_every_point_in_one_request(brouter_response_json):
 def test_route_via_rejects_bad_requests(points, alternative):
     with pytest.raises(ValueError):
         route_via(points, alternative=alternative, use_cache=False)
+
+
+@responses.activate
+@pytest.mark.parametrize(("status", "body"), [(429, ""), (403, "Please, retry later!")])
+def test_being_throttled_is_a_rate_limit_not_a_failure(status, body):
+    # brouter.de throttles with a 403 "Please, retry later!", not a 429.
+    responses.add(responses.GET, ROUTING_URL, body=body, status=status)
+    with pytest.raises(RoutingRateLimitedError):
+        route_leg(START, END, use_cache=False)
+
+
+@responses.activate
+def test_any_other_403_is_a_plain_failure():
+    responses.add(responses.GET, ROUTING_URL, body="forbidden", status=403)
+    with pytest.raises(RoutingError) as info:
+        route_leg(START, END, use_cache=False)
+    assert not isinstance(info.value, RoutingRateLimitedError)
 
 
 def test_route_leg_rejects_unknown_profile():

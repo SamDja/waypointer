@@ -28,6 +28,11 @@ const TRIM_WINDOW_M = 300
 // as the elevation profile's smallest colour chunk, so the number matches a
 // colour the visitor can see rather than one noisy step.
 export const MAX_GRADE_WINDOW_M = 100
+// Route difficulty reads steepness over this much longer window: what makes a
+// route hard is a sustained gradient, while over 100m a single ramp (a bridge
+// approach, a village street) would rate a valley ride like Monte Grappa.
+// Mirrored by src/waypointer/climbs.py's DIFFICULTY_GRADE_WINDOW_M.
+export const DIFFICULTY_GRADE_WINDOW_M = 1000
 
 // Strava's climb categories by score (length in m x average gradient in %).
 export type ClimbCategory = "HC" | 1 | 2 | 3 | 4
@@ -139,9 +144,9 @@ function gradePct(p: Profile, a: number, b: number): number {
   return run > 0 ? ((p.elevation[b] - p.elevation[a]) / run) * 100 : 0
 }
 
-/** Steepest climbing average over MAX_GRADE_WINDOW_M between samples a and b. */
-function steepest(p: Profile, a: number, b: number): number {
-  const window = Math.max(1, Math.round(MAX_GRADE_WINDOW_M / RESAMPLE_M))
+/** Steepest climbing average over windowM between samples a and b. */
+function steepest(p: Profile, a: number, b: number, windowM: number = MAX_GRADE_WINDOW_M): number {
+  const window = Math.max(1, Math.round(windowM / RESAMPLE_M))
   if (b - a < window) return Math.max(0, gradePct(p, a, b))
   let max = 0
   for (let i = a; i + window <= b; i++) max = Math.max(max, gradePct(p, i, i + window))
@@ -250,10 +255,17 @@ export function detectClimbs(
   return climbs
 }
 
-/** The steepest climbing gradient anywhere on the route, over MAX_GRADE_WINDOW_M. */
-export function routeMaxGradePct(coords: [number, number][], elevations: (number | null)[]): number {
+/** The steepest climbing gradient anywhere on the route, over windowM. */
+export function routeMaxGradePct(
+  coords: [number, number][],
+  elevations: (number | null)[],
+  windowM: number = MAX_GRADE_WINDOW_M
+): number {
   const cumulative = cumulativeDistancesM(coords)
-  return profiles(cumulative, elevations).reduce((max, p) => Math.max(max, steepest(p, 0, p.distanceM.length - 1)), 0)
+  return profiles(cumulative, elevations).reduce(
+    (max, p) => Math.max(max, steepest(p, 0, p.distanceM.length - 1, windowM)),
+    0
+  )
 }
 
 // --- Route difficulty ---------------------------------------------------
@@ -269,7 +281,8 @@ export type DifficultyLabel = (typeof DIFFICULTY_LABELS)[number]
 export interface DifficultyThresholds {
   distanceKm: readonly [number, number, number]
   ascentM: readonly [number, number, number]
-  maxGradePct: readonly [number, number, number]
+  // Steepest over DIFFICULTY_GRADE_WINDOW_M.
+  sustainedGradePct: readonly [number, number, number]
   // Omitted on an activity whose climbs aren't categorized.
   climbCategory?: readonly [ClimbCategory, ClimbCategory, ClimbCategory]
 }
@@ -299,7 +312,8 @@ function levelFor(value: number, starts: readonly [number, number, number]): 0 |
 }
 
 export function routeDifficulty(
-  route: { distanceM: number; gainM: number; maxGradePct: number; climbs: Climb[] },
+  // sustainedGradePct: routeMaxGradePct over DIFFICULTY_GRADE_WINDOW_M.
+  route: { distanceM: number; gainM: number; sustainedGradePct: number; climbs: Climb[] },
   thresholds: DifficultyThresholds
 ): Difficulty {
   const criteria: { name: string; value: string; level: 0 | 1 | 2 | 3; reason: string }[] = [
@@ -316,10 +330,10 @@ export function routeDifficulty(
       reason: `${(route.distanceM / 1000).toFixed(0)} km long`,
     },
     {
-      name: `Steepest ${MAX_GRADE_WINDOW_M} m`,
-      value: `${Math.round(route.maxGradePct)}%`,
-      level: levelFor(route.maxGradePct, thresholds.maxGradePct),
-      reason: `up to ${Math.round(route.maxGradePct)}% steep`,
+      name: "Steepest 1 km",
+      value: `${Math.round(route.sustainedGradePct)}%`,
+      level: levelFor(route.sustainedGradePct, thresholds.sustainedGradePct),
+      reason: `${Math.round(route.sustainedGradePct)}% for a whole km`,
     },
   ]
   const hardest = hardestCategory(route.climbs)

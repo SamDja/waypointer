@@ -219,6 +219,54 @@ def test_main_roads_and_ferries_become_routing_options():
     routing.resolve_options(route_candidates.ROUTING_PROFILE, options)
 
 
+# ---- snapping to villages ----------------------------------------------------------
+
+
+def test_only_generated_points_are_snapped():
+    constraints = _constraints(climbs=[_resolved("Passo Manghen", MOUNTAIN)])
+    plans = plan_candidates(constraints, 80)
+    village = (46.0, 11.0)
+    snapped = route_candidates.snap_plans(plans, lambda p: village)
+    for before, after in zip(plans, snapped):
+        assert before.generated, before.id
+        for i, (b, a) in enumerate(zip(before.points, after.points)):
+            if i in before.generated:
+                assert a == village
+            else:
+                # The start and the named climb never move.
+                assert a == b and b in (START, MOUNTAIN)
+
+
+def test_a_point_with_no_village_near_stays_and_avoided_villages_are_refused():
+    plan = Plan("p", "loop", (START, (46.2, 11.5), (46.1, 11.7), START), generated=(1, 2))
+    avoid_here = (46.3, 11.5)
+    snapped = route_candidates.snap_plans(
+        [plan], lambda p: avoid_here if p == (46.2, 11.5) else None, avoid=[avoid_here]
+    )[0]
+    assert snapped.points == plan.points
+
+
+def test_snapping_asks_once_per_point():
+    asked = []
+    plans = plan_candidates(_constraints(), 80)
+    route_candidates.snap_plans(plans, lambda p: asked.append(p) or None)
+    assert len(asked) == len(set(asked))
+
+
+def test_the_pipeline_routes_through_the_snapped_villages():
+    router = FakeRouter()
+    village = destination(START, 45, 9000)
+    generate_routes(
+        _constraints(),
+        route=router,
+        passes_fn=lambda s, r: [],
+        snap=lambda p: village,
+        water=lambda c: None,
+        explain_fn=lambda s, l: {},
+    )
+    assert router.calls and all(points[1] == village for points, *_ in router.calls)
+
+
 # ---- routing --------------------------------------------------------------------
 
 
@@ -467,6 +515,7 @@ def test_generate_routes_ranks_the_named_climb_first():
         constraints,
         route=router,
         passes_fn=lambda start, radius: [],
+        snap=None,
         water=lambda coords: 2,
         explain_fn=lambda shortlist, language: {s.candidate.plan.id: "ok" for s in shortlist},
     )
@@ -490,7 +539,7 @@ def test_generate_routes_with_categories_learns_the_start_elevation_first():
         return [KnownClimb("Passo Manghen", MOUNTAIN, 2047)]
 
     constraints = _constraints(_parsed(distance_km={"min": 60, "max": 90}, climbs={"categories": ["1"], "named": []}))
-    outcome = generate_routes(constraints, route=router, passes_fn=passes, water=lambda c: None, explain_fn=lambda s, l: {})
+    outcome = generate_routes(constraints, route=router, passes_fn=passes, snap=None, water=lambda c: None, explain_fn=lambda s, l: {})
     assert asked
     assert outcome.routed == len(router.calls) <= route_candidates.MAX_CANDIDATES
     assert any(o.candidate.plan.seeded_with for o in outcome.options)
@@ -499,7 +548,7 @@ def test_generate_routes_with_categories_learns_the_start_elevation_first():
 def test_generate_routes_stops_at_an_infeasible_request():
     router = FakeRouter()
     parsed = _parsed(distance_km={"min": 20, "max": 30}, ascent_m={"min": 2000, "max": None})
-    outcome = generate_routes(_constraints(parsed), route=router, passes_fn=lambda s, r: [], explain_fn=lambda s, l: {})
+    outcome = generate_routes(_constraints(parsed), route=router, passes_fn=lambda s, r: [], snap=None, explain_fn=lambda s, l: {})
     assert outcome.infeasible is not None and router.calls == []
 
 

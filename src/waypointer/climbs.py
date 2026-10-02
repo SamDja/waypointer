@@ -31,6 +31,10 @@ MAX_FLAT_M = 1000.0
 TRIM_WINDOW_M = 300.0
 # The maximum gradient is the steepest average over this distance.
 MAX_GRADE_WINDOW_M = 100.0
+# Route difficulty reads steepness over a whole km: a sustained gradient is
+# what makes a route hard, while over 100m one ramp would rate a valley ride
+# like Monte Grappa.
+DIFFICULTY_GRADE_WINDOW_M = 1000.0
 
 ClimbCategory = Literal["HC", "1", "2", "3", "4"]
 # Strava's categories by score (length in m x average gradient in %).
@@ -60,7 +64,8 @@ class DifficultyThresholds:
 
     distance_km: tuple[float, float, float]
     ascent_m: tuple[float, float, float]
-    max_grade_pct: tuple[float, float, float]
+    # Steepest over DIFFICULTY_GRADE_WINDOW_M.
+    sustained_grade_pct: tuple[float, float, float]
     climb_category: tuple[ClimbCategory, ClimbCategory, ClimbCategory] | None = None
 
 
@@ -69,7 +74,7 @@ ROAD_CYCLING_CLIMBS = ClimbRules(min_avg_grade_pct=3, min_score=8000, categorize
 ROAD_CYCLING_DIFFICULTY = DifficultyThresholds(
     distance_km=(40, 80, 140),
     ascent_m=(500, 1200, 2200),
-    max_grade_pct=(8, 12, 16),
+    sustained_grade_pct=(6, 9, 12),
     climb_category=("3", "1", "HC"),
 )
 
@@ -275,12 +280,8 @@ def detect_climbs(
 def route_max_grade_pct(
     coords: list[LatLon], elevations: list[float | None], window_m: float = MAX_GRADE_WINDOW_M
 ) -> float:
-    """The steepest climbing gradient anywhere on the route, over window_m.
-
-    window_m is a Python-only addition (climbs.ts always uses
-    MAX_GRADE_WINDOW_M): the route generator's road-sanity check reads a
-    longer window, since over 100m the DEM's noise at mountain hairpins
-    already reads as 30%."""
+    """The steepest climbing gradient anywhere on the route, over window_m
+    (MAX_GRADE_WINDOW_M by default, DIFFICULTY_GRADE_WINDOW_M for difficulty)."""
     cumulative = cumulative_distances_m(coords)
     return max(
         (_steepest(p, 0, len(p.distance_m) - 1, window_m) for p in _profiles(cumulative, elevations)), default=0.0
@@ -327,11 +328,12 @@ def hardest_category(climbs: list[Climb]) -> ClimbCategory | None:
 def route_difficulty(
     distance_m: float,
     gain_m: float,
-    max_grade_pct: float,
+    sustained_grade_pct: float,
     climbs: list[Climb],
     thresholds: DifficultyThresholds = ROAD_CYCLING_DIFFICULTY,
 ) -> Difficulty:
-    """As hard as the hardest criterion - mirrors climbs.ts' routeDifficulty."""
+    """As hard as the hardest criterion - mirrors climbs.ts' routeDifficulty.
+    sustained_grade_pct is route_max_grade_pct over DIFFICULTY_GRADE_WINDOW_M."""
     criteria: list[tuple[str, str, int, str]] = [
         ("Climbing", f"{round(gain_m):,} m", _level_for(gain_m, thresholds.ascent_m), f"{round(gain_m):,} m of climbing"),
         (
@@ -341,10 +343,10 @@ def route_difficulty(
             f"{distance_m / 1000:.0f} km long",
         ),
         (
-            f"Steepest {MAX_GRADE_WINDOW_M:.0f} m",
-            f"{round(max_grade_pct)}%",
-            _level_for(max_grade_pct, thresholds.max_grade_pct),
-            f"up to {round(max_grade_pct)}% steep",
+            "Steepest 1 km",
+            f"{round(sustained_grade_pct)}%",
+            _level_for(sustained_grade_pct, thresholds.sustained_grade_pct),
+            f"{round(sustained_grade_pct)}% for a whole km",
         ),
     ]
     hardest = hardest_category(climbs)

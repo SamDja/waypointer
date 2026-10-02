@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import {
+  DIFFICULTY_GRADE_WINDOW_M,
   climbCategory,
   detectClimbs,
   fietsIndex,
@@ -173,7 +174,7 @@ describe("routeMaxGradePct", () => {
 const CYCLING_DIFFICULTY: DifficultyThresholds = {
   distanceKm: [40, 80, 140],
   ascentM: [500, 1200, 2200],
-  maxGradePct: [8, 12, 16],
+  sustainedGradePct: [6, 9, 12],
   climbCategory: [3, 1, "HC"],
 }
 
@@ -185,8 +186,18 @@ function climbOf(category: Climb["category"]): Climb {
 }
 
 describe("routeDifficulty", () => {
+  it("reads steepness over a whole km, so one ramp doesn't make a ride hard", () => {
+    // Flat but for a 100m ramp at 16%.
+    const { coords, elevations } = singleClimb(100, 16)
+    expect(routeMaxGradePct(coords, elevations)).toBeGreaterThan(12)
+    const sustained = routeMaxGradePct(coords, elevations, DIFFICULTY_GRADE_WINDOW_M)
+    expect(sustained).toBeLessThan(2)
+    const difficulty = routeDifficulty({ distanceM: 30_000, gainM: 16, sustainedGradePct: sustained, climbs: [] }, CYCLING_DIFFICULTY)
+    expect(difficulty.label).toBe("Easy")
+  })
+
   it("is easy when nothing reaches a threshold", () => {
-    const difficulty = routeDifficulty({ distanceM: 30_000, gainM: 200, maxGradePct: 5, climbs: [] }, CYCLING_DIFFICULTY)
+    const difficulty = routeDifficulty({ distanceM: 30_000, gainM: 200, sustainedGradePct: 5, climbs: [] }, CYCLING_DIFFICULTY)
     expect(difficulty.label).toBe("Easy")
     expect(difficulty.reason).toBeNull()
     expect(difficulty.criteria.every((c) => c.level === 0)).toBe(true)
@@ -194,7 +205,7 @@ describe("routeDifficulty", () => {
 
   it("takes the hardest criterion and names it", () => {
     const difficulty = routeDifficulty(
-      { distanceM: 60_000, gainM: 1800, maxGradePct: 9, climbs: [] },
+      { distanceM: 60_000, gainM: 1800, sustainedGradePct: 7, climbs: [] },
       CYCLING_DIFFICULTY
     )
     expect(difficulty.label).toBe("Hard")
@@ -203,13 +214,13 @@ describe("routeDifficulty", () => {
     expect(difficulty.criteria.map((c) => [c.name, c.label])).toEqual([
       ["Climbing", "Hard"],
       ["Distance", "Moderate"],
-      ["Steepest 100 m", "Moderate"],
+      ["Steepest 1 km", "Moderate"],
     ])
   })
 
   it("counts the hardest climb's category", () => {
     const difficulty = routeDifficulty(
-      { distanceM: 30_000, gainM: 300, maxGradePct: 5, climbs: [climbOf(4), climbOf("HC")] },
+      { distanceM: 30_000, gainM: 300, sustainedGradePct: 5, climbs: [climbOf(4), climbOf("HC")] },
       CYCLING_DIFFICULTY
     )
     expect(difficulty.label).toBe("Very hard")
@@ -218,7 +229,7 @@ describe("routeDifficulty", () => {
 
   it("ignores categories on an activity without them", () => {
     const { climbCategory: _, ...hiking } = CYCLING_DIFFICULTY
-    const difficulty = routeDifficulty({ distanceM: 1000, gainM: 0, maxGradePct: 0, climbs: [climbOf("HC")] }, hiking)
+    const difficulty = routeDifficulty({ distanceM: 1000, gainM: 0, sustainedGradePct: 0, climbs: [climbOf("HC")] }, hiking)
     expect(difficulty.level).toBe(0)
   })
 })
@@ -242,6 +253,7 @@ describe("parity with the backend's climbs.py", () => {
         category: string | null
       }[]
       expected_max_grade_pct: number
+      expected_sustained_grade_pct: number
     }
     const coords = fixture.distances_m.map((d): [number, number] => [46 + d / M_PER_DEG_LAT, 11])
     const round = (value: number, places: number) => Math.round(value * 10 ** places) / 10 ** places
@@ -255,5 +267,8 @@ describe("parity with the backend's climbs.py", () => {
     }))
     expect(climbs).toEqual(fixture.expected_climbs)
     expect(round(routeMaxGradePct(coords, fixture.elevations), 2)).toBe(fixture.expected_max_grade_pct)
+    expect(round(routeMaxGradePct(coords, fixture.elevations, DIFFICULTY_GRADE_WINDOW_M), 2)).toBe(
+      fixture.expected_sustained_grade_pct
+    )
   })
 })

@@ -313,7 +313,10 @@ export const MAP_STYLES: MapStyleConfig[] = [
     difficulty: {
       distanceKm: [40, 80, 140],
       ascentM: [500, 1200, 2200],
-      maxGradePct: [8, 12, 16],
+      // Over a whole km (DIFFICULTY_GRADE_WINDOW_M): Passo Manghen from
+      // Borgo reads 11% (Hard), Monte Grappa 13% (Very hard), a valley ride
+      // with one steep ramp under 6%.
+      sustainedGradePct: [6, 9, 12],
       climbCategory: [3, 1, "HC"],
     },
     durationModel: "flat",
@@ -356,7 +359,9 @@ export const MAP_STYLES: MapStyleConfig[] = [
     difficulty: {
       distanceKm: [8, 15, 25],
       ascentM: [400, 900, 1500],
-      maxGradePct: [20, 30, 40],
+      // Over a whole km, as for cycling - a mountain path's steep pitches
+      // average out lower than its steepest 100m.
+      sustainedGradePct: [12, 20, 30],
     },
     // On foot ascent sets the time more than distance does.
     durationModel: "naismith",

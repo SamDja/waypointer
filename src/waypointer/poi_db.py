@@ -13,6 +13,7 @@ shared_buffers/OS page cache), which is fast enough that an extra
 application-level cache isn't worth the complexity.
 """
 
+import math
 import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -108,7 +109,11 @@ _NEAR_POINT_SQL = """
            ST_Y(ST_ClosestPoint(p.geom, c.pt)) AS lat,
            ST_X(ST_ClosestPoint(p.geom, c.pt)) AS lon
     FROM pois p, (SELECT ST_SetSRID(ST_MakePoint(%(lon)s, %(lat)s), 4326) AS pt) c
-    WHERE p.poi_type = %(poi_type)s
+    WHERE p.poi_type = ANY(%(poi_types)s)
+      -- A box in degrees around the point first: the geography casts below
+      -- can't use the GIST index on geom, so without this every row of the
+      -- type in the whole extract is measured.
+      AND p.geom && ST_Expand(c.pt, %(radius_deg)s)
       AND ST_DWithin(p.geom::geography, c.pt::geography, %(radius_m)s)
     ORDER BY p.geom::geography <-> c.pt::geography
     LIMIT %(limit)s
@@ -242,17 +247,33 @@ def query_pois_near_route(
     return nodes
 
 
+def _radius_deg(lat: float, radius_m: float) -> float:
+    """radius_m in degrees of longitude at lat - the wider of the two axes,
+    so a box this size always contains the circle."""
+    metres_per_deg = 111_320 * max(math.cos(math.radians(lat)), 0.01)
+    return radius_m / metres_per_deg
+
+
 def query_pois_near_point(
-    poi_type: str, lat: float, lon: float, radius_m: float, limit: int
+    poi_type: str | list[str], lat: float, lon: float, radius_m: float, limit: int
 ) -> list[OsmNode]:
-    """The imported POIs of poi_type within radius_m of (lat, lon), nearest
-    first, at most `limit` - e.g. the mountain passes in reach of a generated
-    route's start (route_candidates.py)."""
+    """The imported POIs of poi_type (or of any of several types) within
+    radius_m of (lat, lon), nearest first, at most `limit` - e.g. the
+    mountain passes in reach of a generated route's start, or the nearest
+    village café to put a via point on a road (route_candidates.py)."""
+    poi_types = [poi_type] if isinstance(poi_type, str) else list(poi_type)
     try:
         with _get_pool().connection() as conn:
             rows = conn.execute(
                 _NEAR_POINT_SQL,
-                {"poi_type": poi_type, "lat": lat, "lon": lon, "radius_m": radius_m, "limit": limit},
+                {
+                    "poi_types": poi_types,
+                    "lat": lat,
+                    "lon": lon,
+                    "radius_m": radius_m,
+                    "radius_deg": _radius_deg(lat, radius_m),
+                    "limit": limit,
+                },
             ).fetchall()
     except psycopg.Error as exc:
         raise PoiDbError(f"PostGIS query failed: {exc}") from exc

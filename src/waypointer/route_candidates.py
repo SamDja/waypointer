@@ -34,6 +34,7 @@ import requests
 from waypointer import llm, poi_db, routing
 from waypointer.climbs import (
     CATEGORY_RANK,
+    DIFFICULTY_GRADE_WINDOW_M,
     ROAD_CYCLING_CLIMBS,
     Climb,
     ClimbCategory,
@@ -77,6 +78,19 @@ ROUTING_WORKERS = 3
 SHORTLIST = 3
 # A generated via point closer than this to a place to avoid is dropped.
 AVOID_RADIUS_M = 5_000
+# Generated via points are moved to the nearest of these within
+# SNAP_RADIUS_M before routing: a point on a circle can land on a bare
+# mountainside, which BRouter then reaches by the nearest way - often a track.
+# A café or a shop is almost always in a village, on a road. Not water or
+# huts, which are as often on a trail.
+#
+# Future: snap to the closest *paved road* instead, which would also work far
+# from any village. Our PostGIS import has no roads today (only POIs), so that
+# needs road ways (highway=* with surface/tracktype) imported first - then a
+# nearest-paved-road query replaces snap_to_village, with villages as the
+# fallback.
+SNAP_POI_TYPES = ("coffee", "bar", "food", "groceries", "gas_station", "pharmacy")
+SNAP_RADIUS_M = 4_000
 # A named climb counts as ridden when the route passes within this of it.
 NAMED_CLIMB_HIT_M = 200
 # Two candidates sharing this much of their route are the same option.
@@ -340,6 +354,9 @@ class Plan:
     mirrored: bool = False
     # The known passes this plan was seeded with, for the explanation.
     seeded_with: tuple[str, ...] = ()
+    # Indices into points of the generated ones (not the start, the end, a
+    # required place or a seeded pass) - the ones snap_plan may move.
+    generated: tuple[int, ...] = ()
 
 
 def _required_points(constraints: RouteConstraints) -> list[LatLon]:
@@ -493,7 +510,8 @@ def plan_candidates(
         if key in seen:
             continue
         seen.add(key)
-        kept.append(plan)
+        indices = tuple(i for i, p in enumerate(plan.points) if p not in protected)
+        kept.append(dataclasses.replace(plan, generated=indices))
     if abs(road_factor - ROAD_FACTOR) > 0.05:
         # Re-sized plans are new candidates, not the first round's again.
         kept = [dataclasses.replace(p, id=f"{p.id}@{road_factor:.2f}") for p in kept]
@@ -524,6 +542,41 @@ def _climb_seeds(
         rated.sort(key=lambda p: abs((p.ele_m - start_ele_m) - goal))  # type: ignore[operator]
         in_reach = rated or in_reach
     return in_reach[:3]
+
+
+# ---- snapping to villages --------------------------------------------------------
+
+SnapFn = Callable[[LatLon], LatLon | None]
+
+
+def snap_to_village(point: LatLon) -> LatLon | None:
+    """The nearest village-type POI (SNAP_POI_TYPES) within SNAP_RADIUS_M, or
+    None when there's none or the database can't be asked."""
+    try:
+        nodes = poi_db.query_pois_near_point(list(SNAP_POI_TYPES), point[0], point[1], SNAP_RADIUS_M, 1)
+    except poi_db.PoiDbError as exc:
+        logger.info("via point snap failed: %s", exc)
+        return None
+    return (nodes[0].lat, nodes[0].lon) if nodes else None
+
+
+def snap_plans(plans: list[Plan], snap: SnapFn, avoid: list[LatLon] = ()) -> list[Plan]:  # type: ignore[assignment]
+    """Each plan with its generated points moved onto a village, where one is
+    near (and not near a place to avoid). Cached per point, since plans of
+    one request share many of them."""
+    cache: dict[LatLon, LatLon | None] = {}
+    out = []
+    for plan in plans:
+        points = list(plan.points)
+        for i in plan.generated:
+            original = points[i]
+            if original not in cache:
+                cache[original] = snap(original)
+            moved = cache[original]
+            if moved is not None and not any(_dist(moved, a) < AVOID_RADIUS_M for a in avoid):
+                points[i] = moved
+        out.append(dataclasses.replace(plan, points=tuple(points)))
+    return out
 
 
 # ---- routing ------------------------------------------------------------------
@@ -745,7 +798,9 @@ def measure(
     gain, loss = elevation_gain_loss_m(elevations)
     max_grade = route_max_grade_pct(coords, elevations)
     climbs: list[Climb] = detect_climbs(coords, elevations, ROAD_CYCLING_CLIMBS)
-    difficulty = route_difficulty(distance_m, gain, max_grade, climbs)
+    difficulty = route_difficulty(
+        distance_m, gain, route_max_grade_pct(coords, elevations, DIFFICULTY_GRADE_WINDOW_M), climbs
+    )
 
     surface_total = sum(run.distance_m for run in candidate.surface)
     share: dict[str, float] = {"paved": 0.0, "cobbles": 0.0, "unpaved": 0.0, "unknown": 0.0}
@@ -1054,6 +1109,7 @@ def generate_routes(
     vam_m_per_h: float = DEFAULT_VAM_M_PER_H,
     route: RouteFn = _default_route,
     passes_fn: Callable[[LatLon, float], list[KnownClimb]] = find_passes,
+    snap: SnapFn | None = snap_to_village,
     water: WaterFn = _default_water,
     explain_fn: Callable[[list[ScoredCandidate], str], dict[str, str]] = explain,
 ) -> Outcome:
@@ -1079,7 +1135,12 @@ def generate_routes(
     if constraints.parsed.climbs.categories:
         passes = passes_fn(start, (target_km or 60) * 1000 / (2 * ROAD_FACTOR_RANGE[0]))
 
-    first = plan_candidates(constraints, target_km)[:FIRST_ROUND]
+    avoid = _avoid_points(constraints)
+
+    def ready(plans: list[Plan]) -> list[Plan]:
+        return snap_plans(plans, snap, avoid) if snap is not None else plans
+
+    first = ready(plan_candidates(constraints, target_km)[:FIRST_ROUND])
     routed = generate(first, options, route)
     calls = len(first)
     start_ele = next((e for c in routed for e in c.elevations[:1] if e is not None), None)
@@ -1092,6 +1153,7 @@ def generate_routes(
     done = {c.plan.id for c in routed}
     rest = [p for p in plan_candidates(constraints, target_km, passes, start_ele, factor) if p.id not in done]
     budget = MAX_CANDIDATES - calls
+    rest = ready(rest[:budget])
     more = generate(rest, options, route, limit=budget)
     calls += min(len(rest), budget)
     for candidate in more:

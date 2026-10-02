@@ -169,6 +169,24 @@ def test_query_pois_near_point_lists_nearest_first_within_radius(postgis_url):
     assert query_pois_near_point("mountain_pass", lat=46.0, lon=11.4, radius_m=30_000, limit=1)[0].id == 2
 
 
+def test_query_pois_near_point_takes_several_types(postgis_url):
+    # The nearest village POI of any kind, to put a via point on a road.
+    with _connect(postgis_url) as conn:
+        _insert_point(conn, "node", 1, "coffee", 46.03, 11.40)
+        _insert_point(conn, "node", 2, "groceries", 46.01, 11.40)
+        _insert_point(conn, "node", 3, "water", 46.001, 11.40)
+    nodes = query_pois_near_point(["coffee", "groceries"], lat=46.0, lon=11.4, radius_m=5000, limit=5)
+    assert [n.id for n in nodes] == [2, 1]
+
+
+def test_query_pois_near_point_box_holds_the_whole_circle(postgis_url):
+    # Due east at 4.9km - the box prefilter must not cut off the circle's
+    # widest axis, which is longitude.
+    with _connect(postgis_url) as conn:
+        _insert_point(conn, "node", 1, "coffee", 46.0, 11.4 + 4900 / (111_320 * 0.6947))
+    assert [n.id for n in query_pois_near_point("coffee", lat=46.0, lon=11.4, radius_m=5000, limit=1)] == [1]
+
+
 def test_query_pois_near_route_raises_poi_db_error_when_unconfigured(monkeypatch):
     monkeypatch.delenv(poi_db.POSTGIS_URL_ENV, raising=False)
     poi_db._pool = None

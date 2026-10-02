@@ -408,7 +408,9 @@ def route_via(
     except requests.RequestException as exc:
         raise RoutingError(f"Routing request failed: {exc}") from exc
 
-    if response.status_code == 429:
+    # The public instance throttles with a 403 "Please, retry later!" rather
+    # than a 429 - the same "back off" either way, not a broken service.
+    if response.status_code == 429 or (response.status_code == 403 and "retry later" in response.text.lower()):
         raise RoutingRateLimitedError("Routing API rate limit reached.")
     if response.status_code != 200:
         raise RoutingError(

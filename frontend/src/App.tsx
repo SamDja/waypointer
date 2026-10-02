@@ -25,7 +25,7 @@ import { confirmEmailChange, fetchAccountStatus, greeting, signOut, verifyEmail 
 import { parseEmailLink, withoutEmailLinkParams } from "@/lib/emailLinks"
 import type { Account } from "@/types/account"
 import { POI_TYPES, mostSpecificPerElement } from "@/lib/poiTypes"
-import { detectClimbs, routeDifficulty, routeMaxGradePct } from "@/lib/climbs"
+import { DIFFICULTY_GRADE_WINDOW_M, detectClimbs, routeDifficulty, routeMaxGradePct } from "@/lib/climbs"
 import { encodePolyline } from "@/lib/polyline"
 import { elevationGainLossM, projectOntoPolylineM, totalDistanceM } from "@/lib/geometry"
 import {
@@ -1722,12 +1722,12 @@ export default function App() {
     () => detectClimbs(previewRouteCoords, previewElevations, climbRules),
     [previewRouteCoords, previewElevations, climbRules]
   )
-  const maxGradePct = useMemo(
-    () => routeMaxGradePct(previewRouteCoords, previewElevations),
+  const sustainedGradePct = useMemo(
+    () => routeMaxGradePct(previewRouteCoords, previewElevations, DIFFICULTY_GRADE_WINDOW_M),
     [previewRouteCoords, previewElevations]
   )
   const difficulty = routeDifficulty(
-    { distanceM, gainM: elevationGainM, maxGradePct, climbs },
+    { distanceM, gainM: elevationGainM, sustainedGradePct, climbs },
     difficultyForStyle(mapStyleKey)
   )
   // Same preview-then-authoritative pattern as routeCoords: client-parsed

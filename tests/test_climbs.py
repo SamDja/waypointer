@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from waypointer.climbs import (
+    DIFFICULTY_GRADE_WINDOW_M,
     Climb,
     ClimbRules,
     DifficultyThresholds,
@@ -172,12 +173,21 @@ def test_route_max_grade_is_the_steepest_stretch():
 
 
 CYCLING_DIFFICULTY = DifficultyThresholds(
-    distance_km=(40, 80, 140), ascent_m=(500, 1200, 2200), max_grade_pct=(8, 12, 16), climb_category=("3", "1", "HC")
+    distance_km=(40, 80, 140), ascent_m=(500, 1200, 2200), sustained_grade_pct=(6, 9, 12), climb_category=("3", "1", "HC")
 )
 
 
 def climb_of(category) -> Climb:
     return Climb(0, 1, 0, 1, 1, 1, 1, 1, 1, 1, 0, category)
+
+
+def test_difficulty_reads_steepness_over_a_whole_km():
+    # Flat but for a 100m ramp at 16%: one ramp doesn't make a ride hard.
+    coords, elevations = single_climb(100, 16)
+    assert route_max_grade_pct(coords, elevations) > 12
+    sustained = route_max_grade_pct(coords, elevations, DIFFICULTY_GRADE_WINDOW_M)
+    assert sustained < 2
+    assert route_difficulty(30_000, 16, sustained, [], CYCLING_DIFFICULTY).label == "Easy"
 
 
 def test_difficulty_easy():
@@ -188,13 +198,13 @@ def test_difficulty_easy():
 
 
 def test_difficulty_takes_the_hardest_criterion():
-    difficulty = route_difficulty(60_000, 1800, 9, [], CYCLING_DIFFICULTY)
+    difficulty = route_difficulty(60_000, 1800, 7, [], CYCLING_DIFFICULTY)
     assert difficulty.label == "Hard"
     assert difficulty.reason == "1,800 m of climbing"
     assert [(c.name, c.label) for c in difficulty.criteria] == [
         ("Climbing", "Hard"),
         ("Distance", "Moderate"),
-        ("Steepest 100 m", "Moderate"),
+        ("Steepest 1 km", "Moderate"),
     ]
 
 
@@ -205,7 +215,7 @@ def test_difficulty_counts_the_hardest_climb():
 
 
 def test_difficulty_ignores_categories_without_them():
-    hiking = DifficultyThresholds(distance_km=(40, 80, 140), ascent_m=(500, 1200, 2200), max_grade_pct=(8, 12, 16))
+    hiking = DifficultyThresholds(distance_km=(40, 80, 140), ascent_m=(500, 1200, 2200), sustained_grade_pct=(6, 9, 12))
     assert route_difficulty(1000, 0, 0, [climb_of("HC")], hiking).level == 0
 
 
@@ -230,3 +240,5 @@ def test_matches_the_shared_parity_fixture():
     ]
     assert got == fixture["expected_climbs"]
     assert round(route_max_grade_pct(coords, fixture["elevations"]), 2) == fixture["expected_max_grade_pct"]
+    sustained = route_max_grade_pct(coords, fixture["elevations"], DIFFICULTY_GRADE_WINDOW_M)
+    assert round(sustained, 2) == fixture["expected_sustained_grade_pct"]
