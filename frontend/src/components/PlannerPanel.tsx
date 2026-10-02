@@ -1,12 +1,10 @@
 import { Button } from "@/components/ui/button"
-import type { DurationModel } from "@/lib/geometry"
 import { Card, CardAction, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { PlannerPointList, type PlannerPoint, type PlannerReturnLeg } from "@/components/PlannerPointList"
 import { RemoveRouteButton } from "@/components/RemoveRouteButton"
 import { RoutingOptionsSection } from "@/components/RoutingOptionsSection"
-import { RouteStats } from "@/components/RouteStats"
 import { ArrowLeftRight, ArrowRight, Check, Redo2, RefreshCw, Undo2, type LucideIcon } from "lucide-react"
 import type { RoutingOptionSpec, RoutingOptions } from "@/lib/mapStyles"
 import type { RouteShape } from "@/lib/routePlanner"
@@ -40,12 +38,6 @@ export interface PlannerPanelProps {
   onDeletePoint: (index: number) => void
   hoveredPoint: number | null
   onHoverPoint: (index: number | null) => void
-  distanceM: number
-  elevationGainM: number
-  elevationLossM: number
-  avgSpeedKmh: number
-  durationModel: DurationModel
-  onAvgSpeedChange: (speedKmh: number) => void
 }
 
 const ROUTE_SHAPES: { value: RouteShape; label: string; icon: LucideIcon }[] = [
@@ -79,12 +71,6 @@ export function PlannerPanel({
   onDeletePoint,
   hoveredPoint,
   onHoverPoint,
-  distanceM,
-  elevationGainM,
-  elevationLossM,
-  avgSpeedKmh,
-  durationModel,
-  onAvgSpeedChange,
 }: PlannerPanelProps) {
   return (
     <Card>
@@ -141,17 +127,6 @@ export function PlannerPanel({
           hoveredIndex={hoveredPoint}
           onHover={onHoverPoint}
         />
-
-        {hasRoute && (
-          <RouteStats
-            distanceM={distanceM}
-            elevationGainM={elevationGainM}
-            elevationLossM={elevationLossM}
-            avgSpeedKmh={avgSpeedKmh}
-            durationModel={durationModel}
-            onAvgSpeedChange={onAvgSpeedChange}
-          />
-        )}
 
         {draftTooBig && (
           <p className="text-xs text-muted-foreground">

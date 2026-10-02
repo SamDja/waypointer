@@ -1,35 +1,94 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react"
-import { ChevronDown, TrendingDown, TrendingUp } from "lucide-react"
+import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type PointerEvent } from "react"
+import {
+  ChevronDown,
+  Clock,
+  Gauge,
+  Info,
+  Mountain,
+  Pencil,
+  RulerDimensionLine,
+  TrendingDown,
+  TrendingUp,
+  type LucideIcon,
+} from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
-import { cumulativeDistancesM } from "@/lib/geometry"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
+import { climbCategoryLabel, type Climb, type Difficulty } from "@/lib/climbs"
+import {
+  NAISMITH_ASCENT_M_PER_HOUR,
+  cumulativeDistancesM,
+  estimateDurationHours,
+  formatDurationHours,
+  type DurationModel,
+} from "@/lib/geometry"
 import type { GradeScale } from "@/lib/mapStyles"
 import { setHoveredDistanceM, useHoveredDistanceM } from "@/lib/hoverDistance"
 import type { SurfaceCategory, SurfaceRun } from "@/lib/routePlanner"
 import colors from "tailwindcss/colors"
 import { floatingSurfaceClass } from "@/components/ui/surface"
 
+/** A selected POI, drawn as a dot on the profile where it sits along the route. */
+export interface ProfilePoiMark {
+  id: string
+  distanceM: number
+  label: string
+  color: string
+}
+
 export interface ElevationProfileProps {
   coords: [number, number][]
   elevations: (number | null)[]
-  // Where each planner point sits along the route, for the ticks under the plot.
+  // Where each planner point sits along the route, for the ticks under the
+  // plot; empty outside the planner.
   pointDistancesM: number[]
   // The route's surface in ride order, on the same distance axis (see
-  // routePlanner.plannerSurface), and how much of it is on cycleways.
+  // routePlanner.plannerSurface), and how much of it is on cycleways. Empty
+  // when nothing is known about it (an imported file), which hides the band.
   surfaceRuns: SurfaceRun[]
   cyclewayM: number
+  distanceM: number
   gainM: number
   lossM: number
+  // The climbs along the route and how hard the whole route is (lib/climbs.ts).
+  climbs: Climb[]
+  difficulty: Difficulty
+  poiMarks: ProfilePoiMark[]
   // Where the gradient bands start, which depends on the activity - see
   // mapStyles.ts's GradeScale.
   gradeScale: GradeScale
+  // The duration estimate: the visitor's pace and how the activity adds
+  // climbing to it (see geometry.ts).
+  avgSpeedKmh: number
+  durationModel: DurationModel
+  onAvgSpeedChange: (speedKmh: number) => void
+  // While planning, elevation arrives leg by leg; a loaded file either has
+  // it or doesn't. Only changes the empty-state wording.
+  planning: boolean
   defaultOpen: boolean
 }
 
 // Plot geometry, in px. The surface band and x-axis band are part of the
-// fixed height, so nothing overflows the card.
+// fixed height, so nothing overflows the card. The top margin holds the
+// climbs' labels and brackets. No point on the plot is marked until the
+// visitor hovers it (here or on the map's route).
 const PLOT_HEIGHT = 96
 const SURFACE_BAND_HEIGHT = 8
-const MARGIN = { top: 16, right: 12, bottom: 38, left: 44 }
+const MARGIN = { top: 30, right: 12, bottom: 38, left: 44 }
+const CLIMB_LABEL_Y = 10
+const CLIMB_BRACKET_Y = 16
+// The hover tooltip's gap to the point it describes.
+const TOOLTIP_GAP_PX = 12
+// A climb's label may run past its own bracket, as long as it ends before the
+// next climb's label starts; this is a generous width per character of the
+// labels' text-3xs (10px) so the estimate never undercounts.
+const CLIMB_LABEL_CHAR_PX = 6.5
+const CLIMB_LABEL_GAP_PX = 6
+// The pointer names a POI when it's within this many px of its dot.
+const POI_HOVER_PX = 6
 // Enough resolution for the widest strip without drawing tens of thousands
 // of vertices for a long imported track.
 const MAX_SAMPLES = 800
@@ -82,48 +141,209 @@ function gradientColor(gradePct: number, scale: GradeScale): string {
   return color
 }
 
-// The route's elevation against distance, shown under the map while planning.
-// Coloured by gradient, with the surface in a band underneath. Hovering (or
-// arrowing through) it moves a marker along the route on the map, and
-// hovering the route on the map moves the crosshair here - both through
-// lib/hoverDistance.
+// The route's figures and its elevation against distance, floating over the
+// bottom of the map whenever there's a route. The header is the route's
+// summary (distance, estimated duration, climbing, difficulty), readable even
+// collapsed. The plot is coloured by gradient, with the climbs bracketed above
+// it, selected POIs as dots on it and the surface in a band underneath.
+// Hovering (or arrowing through) it moves a marker along the route on the
+// map, and hovering the route on the map moves the crosshair here - both
+// through lib/hoverDistance.
 export function ElevationProfile({
   coords,
   elevations,
   pointDistancesM,
   surfaceRuns,
   cyclewayM,
+  distanceM,
   gainM,
   lossM,
+  climbs,
+  difficulty,
+  poiMarks,
   gradeScale,
+  avgSpeedKmh,
+  durationModel,
+  onAvgSpeedChange,
+  planning,
   defaultOpen,
 }: ElevationProfileProps) {
   const [open, setOpen] = useState(defaultOpen)
+  const durationHours = estimateDurationHours(distanceM, gainM, avgSpeedKmh, durationModel)
   return (
     <Collapsible open={open} onOpenChange={setOpen} className={floatingSurfaceClass}>
-      <CollapsibleTrigger className="group flex w-full cursor-pointer items-center gap-3 px-4 py-2 text-left text-sm">
-        <span className="font-medium">Elevation</span>
-        <span className="flex items-center gap-1 text-muted-foreground">
-          <TrendingUp className="size-4" />
-          {Math.round(gainM).toLocaleString()} m
+      {/* The whole row toggles, but it can't be the trigger <button> itself:
+          the speed and difficulty buttons sit inside it, and a button can't
+          hold another. The chevron is the real, focusable toggle. */}
+      <div
+        className="group flex w-full cursor-pointer items-center gap-3 px-4 py-2 text-left text-sm"
+        data-state={open ? "open" : "closed"}
+        onClick={() => setOpen(!open)}
+      >
+        <span className="flex flex-wrap items-center gap-x-4 gap-y-1">
+          <HeaderStat icon={RulerDimensionLine} label="Distance" value={`${(distanceM / 1000).toFixed(1)} km`} />
+          <HeaderStat icon={Clock} label="Estimated duration" value={formatDurationHours(durationHours)} />
+          <SpeedControl avgSpeedKmh={avgSpeedKmh} durationModel={durationModel} onAvgSpeedChange={onAvgSpeedChange} />
+          <HeaderStat icon={TrendingUp} label="Elevation gain" value={`${Math.round(gainM).toLocaleString()} m`} />
+          <HeaderStat icon={TrendingDown} label="Elevation loss" value={`${Math.round(lossM).toLocaleString()} m`} />
+          <span className="flex items-center gap-0.5">
+            <HeaderStat icon={Mountain} label="Difficulty" value={difficulty.label} />
+            <DifficultyInfo difficulty={difficulty} />
+          </span>
         </span>
-        <span className="flex items-center gap-1 text-muted-foreground">
-          <TrendingDown className="size-4" />
-          {Math.round(lossM).toLocaleString()} m
-        </span>
-        <ChevronDown className="ml-auto size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
-      </CollapsibleTrigger>
+        <CollapsibleTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            className="ml-auto shrink-0"
+            aria-label={open ? "Hide elevation profile" : "Show elevation profile"}
+            // The row's own click already toggles.
+            onClick={(e) => e.stopPropagation()}
+          >
+            <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-[state=open]:rotate-180" />
+          </Button>
+        </CollapsibleTrigger>
+      </div>
       <CollapsibleContent className="overflow-hidden data-[state=closed]:animate-collapsible-up data-[state=open]:animate-collapsible-down">
         <ProfilePlot
           coords={coords}
           elevations={elevations}
           pointDistancesM={pointDistancesM}
           surfaceRuns={surfaceRuns}
+          climbs={climbs}
+          poiMarks={poiMarks}
           gradeScale={gradeScale}
+          planning={planning}
         />
-        <Legends surfaceRuns={surfaceRuns} cyclewayM={cyclewayM} gradeScale={gradeScale} />
+        <Legends surfaceRuns={surfaceRuns} cyclewayM={cyclewayM} gradeScale={gradeScale} climbs={climbs} />
       </CollapsibleContent>
     </Collapsible>
+  )
+}
+
+function HeaderStat({ icon: Icon, label, value }: { icon: LucideIcon; label: string; value: string }) {
+  return (
+    <span className="flex items-center gap-1" title={label}>
+      <Icon className="size-4 text-muted-foreground" aria-hidden />
+      <span className="sr-only">{label}:</span>
+      <span className="font-medium tabular-nums">{value}</span>
+    </span>
+  )
+}
+
+/**
+ * Why the route got its rating: a route is as hard as its hardest criterion,
+ * so this names the deciding one and lists every criterion's own level.
+ */
+function DifficultyInfo({ difficulty }: { difficulty: Difficulty }) {
+  return (
+    <TooltipProvider>
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-xs"
+            aria-label={`Why ${difficulty.label.toLowerCase()}?`}
+            // Opening the explanation shouldn't also fold the profile.
+            onClick={(e) => e.stopPropagation()}
+          >
+            <Info className="size-3.5 text-muted-foreground" />
+          </Button>
+        </TooltipTrigger>
+        {/* Portalled, but React still bubbles its clicks to the header row. */}
+        <TooltipContent className="flex-col items-start gap-1" onClick={(e) => e.stopPropagation()}>
+          <p>
+            {difficulty.reason ? (
+              <>
+                <span className="font-semibold">{difficulty.label}</span>: {difficulty.reason}. A route is as hard
+                as its hardest criterion:
+              </>
+            ) : (
+              <>
+                <span className="font-semibold">Easy</span>: nothing reaches Moderate. A route is as hard as its
+                hardest criterion:
+              </>
+            )}
+          </p>
+          <ul className="w-full">
+            {difficulty.criteria.map((c) => (
+              <li key={c.name} className="flex justify-between gap-4 tabular-nums">
+                <span>
+                  {c.name}: {c.value}
+                </span>
+                <span className={c.level === difficulty.level && c.level > 0 ? "font-semibold" : undefined}>
+                  {c.label}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </TooltipContent>
+      </Tooltip>
+    </TooltipProvider>
+  )
+}
+
+/**
+ * The pace the duration is estimated at, shown beside it in the header and
+ * changed from a popover - in the header, so it's visible next to the figure
+ * it drives even with the profile folded.
+ */
+function SpeedControl({
+  avgSpeedKmh,
+  durationModel,
+  onAvgSpeedChange,
+}: Pick<ElevationProfileProps, "avgSpeedKmh" | "durationModel" | "onAvgSpeedChange">) {
+  const speedInputId = useId()
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="xs"
+          className="-mx-2 text-sm"
+          aria-label={`Average speed ${avgSpeedKmh} km/h - change`}
+          title="Average speed - change"
+          // Changing the speed shouldn't also fold the profile.
+          onClick={(e) => e.stopPropagation()}
+        >
+          <Gauge className="size-4 text-muted-foreground" aria-hidden />
+          <span className="font-medium tabular-nums">{avgSpeedKmh} km/h</span>
+          <Pencil className="size-3 text-muted-foreground" aria-hidden data-icon="inline-end" />
+        </Button>
+      </PopoverTrigger>
+      {/* Portalled, but React still bubbles its clicks to the header row. */}
+      <PopoverContent className="w-64" align="start" onClick={(e) => e.stopPropagation()}>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor={speedInputId}>Average speed</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              id={speedInputId}
+              type="number"
+              min={1}
+              // Half-steps because walking paces live in them: 4.5 km/h is the
+              // hiking default, and a whole-number step would both reject it as
+              // a step mismatch and make the arrow keys jump past it.
+              step={0.5}
+              value={avgSpeedKmh}
+              onChange={(e) => {
+                const next = Number(e.target.value)
+                if (Number.isFinite(next) && next > 0) onAvgSpeedChange(next)
+              }}
+              className="h-7 w-20"
+            />
+            <span className="text-xs text-muted-foreground">km/h</span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            The estimated duration is the distance at this speed
+            {/* Says so, since otherwise the estimate looks wrong for the pace shown. */}
+            {durationModel === "naismith" ? `, plus an hour per ${NAISMITH_ASCENT_M_PER_HOUR} m climbed.` : "."}
+          </p>
+        </div>
+      </PopoverContent>
+    </Popover>
   )
 }
 
@@ -137,8 +357,14 @@ function ProfilePlot({
   elevations,
   pointDistancesM,
   surfaceRuns,
+  climbs,
+  poiMarks,
   gradeScale,
-}: Pick<ElevationProfileProps, "coords" | "elevations" | "pointDistancesM" | "surfaceRuns" | "gradeScale">) {
+  planning,
+}: Pick<
+  ElevationProfileProps,
+  "coords" | "elevations" | "pointDistancesM" | "surfaceRuns" | "climbs" | "poiMarks" | "gradeScale" | "planning"
+>) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
   const hoveredM = useHoveredDistanceM()
@@ -169,7 +395,7 @@ function ProfilePlot({
   if (known.length < 2 || totalM <= 0) {
     return (
       <div ref={containerRef} className="px-4 pb-3 text-xs text-muted-foreground">
-        No elevation data yet - it arrives as each stretch is routed.
+        {planning ? "No elevation data yet - it arrives as each stretch is routed." : "This route has no elevation data."}
       </div>
     )
   }
@@ -187,9 +413,26 @@ function ProfilePlot({
   const chunks = gradeChunks(samples, Math.max(MIN_CHUNK_M, (totalM * MIN_CHUNK_PX) / (plotWidth || 1)))
   const gradientRuns = coloredRuns(samples, chunks, x, y, baseline, gradeScale)
 
-  const peak = samples.reduce((best, s) => (s.elevation !== null && s.elevation > (best.elevation ?? -Infinity) ? s : best))
   const hovered = hoveredM !== null && hoveredM >= 0 && hoveredM <= totalM ? readout(samples, chunks, hoveredM) : null
   const hoveredSurface = hovered ? surfaceAt(surfaceRuns, hovered.distanceM) : null
+  // Where the hovered point is drawn (the baseline where there's no data), for placing the tooltip.
+  const hoveredY = hovered?.elevation != null ? y(hovered.elevation) : baseline
+  const hoveredClimb = hovered ? climbs.find((c) => hovered.distanceM >= c.startM && hovered.distanceM <= c.endM) : undefined
+  const hoveredPoi = hovered
+    ? poiMarks.find((poi) => Math.abs(x(poi.distanceM) - x(hovered.distanceM)) <= POI_HOVER_PX)
+    : undefined
+  // Climbs are named by category where the activity has them, else numbered.
+  const climbName = (climb: Climb, i: number) =>
+    climb.category !== null ? climbCategoryLabel(climb.category) : climbs.length > 1 ? `Climb ${i + 1}` : "Climb"
+  // Above the plot, the full name where it fits before the next climb, else
+  // just its category or number ("4", "HC", "5") - a short climb on a long
+  // route still gets a label. Left out only when even that doesn't fit; the
+  // tooltip always names it in full.
+  const climbLabel = (climb: Climb, i: number): string | null => {
+    const roomPx = (i + 1 < climbs.length ? x(climbs[i + 1].startM) : width) - x(climb.startM) - CLIMB_LABEL_GAP_PX
+    const short = climb.category !== null ? String(climb.category) : climbs.length > 1 ? String(i + 1) : "Climb"
+    return [climbName(climb, i), short].find((label) => label.length * CLIMB_LABEL_CHAR_PX <= roomPx) ?? null
+  }
 
   function distanceAtPointer(e: PointerEvent<SVGSVGElement>): number {
     const rect = e.currentTarget.getBoundingClientRect()
@@ -211,7 +454,9 @@ function ProfilePlot({
     setHoveredDistanceM(Math.min(Math.max(next, 0), totalM))
   }
 
-  const height = MARGIN.top + PLOT_HEIGHT + MARGIN.bottom
+  // Without surface data the band is left out rather than drawn all "unknown".
+  const surfaceHeight = surfaceRuns.length > 0 ? SURFACE_BAND_HEIGHT : 0
+  const height = MARGIN.top + PLOT_HEIGHT + MARGIN.bottom - (SURFACE_BAND_HEIGHT - surfaceHeight)
   const surfaceY = baseline + 3
   // Each run's start along the route, so the band's rects can be placed.
   const surfaceStartsM = surfaceRuns.reduce<number[]>(
@@ -228,7 +473,7 @@ function ProfilePlot({
           className="block touch-none select-none focus-visible:outline-2 focus-visible:outline-ring"
           tabIndex={0}
           role="img"
-          aria-label={`Elevation profile: ${Math.round(minE)} to ${Math.round(maxE)} m over ${(totalM / 1000).toFixed(1)} km, coloured by gradient, with the surface underneath. Use the arrow keys to read it point by point.`}
+          aria-label={`Elevation profile: ${Math.round(minE)} to ${Math.round(maxE)} m over ${(totalM / 1000).toFixed(1)} km, coloured by gradient${climbs.length > 0 ? `, with ${climbs.length} climb${climbs.length === 1 ? "" : "s"} marked` : ""}${surfaceRuns.length > 0 ? ", with the surface underneath" : ""}. Use the arrow keys to read it point by point.`}
           onPointerMove={(e) => setHoveredDistanceM(distanceAtPointer(e))}
           onPointerLeave={() => setHoveredDistanceM(null)}
           onKeyDown={handleKeyDown}
@@ -250,6 +495,30 @@ function ProfilePlot({
             </g>
           ))}
 
+          {/* Climbs: a faint band behind the plot, bracketed and labelled above it */}
+          {climbs.map((climb, i) => {
+            const x1 = x(climb.startM)
+            const x2 = x(climb.endM)
+            const label = climbLabel(climb, i)
+            return (
+              <g key={`climb-${i}`}>
+                <rect x={x1} y={MARGIN.top} width={Math.max(x2 - x1, 1)} height={PLOT_HEIGHT} fill="var(--foreground)" fillOpacity={0.05} />
+                <path
+                  d={`M${x1},${CLIMB_BRACKET_Y + 4}V${CLIMB_BRACKET_Y}H${x2}V${CLIMB_BRACKET_Y + 4}`}
+                  fill="none"
+                  stroke="var(--foreground)"
+                  strokeOpacity={0.5}
+                  strokeWidth={1}
+                />
+                {label && (
+                  <text x={x1 + 2} y={CLIMB_LABEL_Y} className="fill-foreground text-3xs font-medium">
+                    {label}
+                  </text>
+                )}
+              </g>
+            )
+          })}
+
           {/* Gradient-coloured area and line, one piece per run of the same band */}
           {gradientRuns.map((run, i) => (
             <g key={i}>
@@ -263,6 +532,22 @@ function ProfilePlot({
           {pointDistancesM.map((d, i) => (
             <line key={i} x1={x(d)} x2={x(d)} y1={baseline - 5} y2={baseline} stroke="var(--foreground)" strokeOpacity={0.5} strokeWidth={1} />
           ))}
+
+          {/* Selected POIs, sitting on the profile where they are along the route */}
+          {poiMarks.map((poi) => {
+            const elevation = elevationAt(samples, poi.distanceM)
+            return (
+              <circle
+                key={poi.id}
+                cx={x(Math.min(Math.max(poi.distanceM, 0), totalM))}
+                cy={elevation !== null ? y(elevation) : baseline}
+                r={3.5}
+                fill={poi.color}
+                stroke="var(--card)"
+                strokeWidth={1.5}
+              />
+            )
+          })}
 
           {/* Surface band, on the same distance axis */}
           {surfaceRuns.map((run, i) => {
@@ -285,28 +570,13 @@ function ProfilePlot({
             <text
               key={km}
               x={x(km * 1000)}
-              y={surfaceY + SURFACE_BAND_HEIGHT + 14}
+              y={surfaceY + surfaceHeight + 14}
               textAnchor="middle"
               className="fill-muted-foreground text-3xs tabular-nums"
             >
               {km} km
             </text>
           ))}
-
-          {/* The one direct label: the highest point */}
-          {peak.elevation !== null && !hovered && (
-            <g>
-              <circle cx={x(peak.distanceM)} cy={y(peak.elevation)} r={4} fill="var(--foreground)" stroke="var(--card)" strokeWidth={2} />
-              <text
-                x={Math.min(Math.max(x(peak.distanceM), MARGIN.left + 24), MARGIN.left + plotWidth - 24)}
-                y={y(peak.elevation) - 8}
-                textAnchor="middle"
-                className="fill-foreground text-2xs font-medium tabular-nums"
-              >
-                {Math.round(peak.elevation).toLocaleString()} m
-              </text>
-            </g>
-          )}
 
           {/* Crosshair */}
           {hovered && (
@@ -315,7 +585,7 @@ function ProfilePlot({
                 x1={x(hovered.distanceM)}
                 x2={x(hovered.distanceM)}
                 y1={MARGIN.top}
-                y2={surfaceY + SURFACE_BAND_HEIGHT}
+                y2={surfaceY + surfaceHeight}
                 stroke="var(--foreground)"
                 strokeOpacity={0.4}
                 strokeWidth={1}
@@ -337,8 +607,19 @@ function ProfilePlot({
 
       {hovered && (
         <div
-          className="pointer-events-none absolute top-0 rounded-item bg-popover px-2 py-1 text-xs whitespace-nowrap shadow-raised ring-1 ring-foreground/10"
-          style={{ left: Math.min(Math.max(x(hovered.distanceM) - 70, 0), Math.max(width - 190, 0)) }}
+          className="pointer-events-none absolute rounded-item bg-popover px-2 py-1 text-xs whitespace-nowrap shadow-raised ring-1 ring-foreground/10"
+          style={{
+            // Wider when it carries a second line, so keep more room on the right.
+            left: Math.min(
+              Math.max(x(hovered.distanceM) - 70, 0),
+              Math.max(width - (hoveredClimb || hoveredPoi ? 300 : 190), 0)
+            ),
+            // Never over the point it describes: above it when the point is
+            // in the lower half of the plot, below it when in the upper half.
+            ...(hoveredY > MARGIN.top + PLOT_HEIGHT / 2
+              ? { top: hoveredY - TOOLTIP_GAP_PX, transform: "translateY(-100%)" }
+              : { top: hoveredY + TOOLTIP_GAP_PX }),
+          }}
         >
           <span className="font-semibold tabular-nums">
             {hovered.elevation !== null ? `${Math.round(hovered.elevation).toLocaleString()} m` : "No data"}
@@ -349,6 +630,18 @@ function ProfilePlot({
             {hovered.gradePct !== null && ` · ${hovered.gradePct > 0 ? "+" : ""}${hovered.gradePct.toFixed(1)}%`}
             {hoveredSurface && ` · ${SURFACE_BY_CATEGORY[hoveredSurface].label}`}
           </span>
+          {hoveredClimb && (
+            <div className="text-muted-foreground tabular-nums">
+              <span className="font-medium text-foreground">{climbName(hoveredClimb, climbs.indexOf(hoveredClimb))}</span>
+              {` · ${(hoveredClimb.lengthM / 1000).toFixed(1)} km at ${hoveredClimb.avgGradePct.toFixed(1)}% · ${Math.round(hoveredClimb.ascentM).toLocaleString()} m · max ${Math.round(hoveredClimb.maxGradePct)}% · Fiets ${hoveredClimb.fiets.toFixed(1)}`}
+            </div>
+          )}
+          {hoveredPoi && (
+            <div className="flex items-center gap-1">
+              <span className="size-2 rounded-full" style={{ backgroundColor: hoveredPoi.color }} />
+              {hoveredPoi.label}
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -360,10 +653,12 @@ function Legends({
   surfaceRuns,
   cyclewayM,
   gradeScale,
+  climbs,
 }: {
   surfaceRuns: SurfaceRun[]
   cyclewayM: number
   gradeScale: GradeScale
+  climbs: Climb[]
 }) {
   const totalM = surfaceRuns.reduce((sum, run) => sum + run.distanceM, 0)
   const shares = SURFACES.map((surface) => ({
@@ -375,39 +670,72 @@ function Legends({
   return (
     <div className="flex flex-col gap-1.5 px-4 pb-3 text-2xs text-muted-foreground">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-medium text-foreground">Surface</span>
-        {shares.map((surface) => (
-          <span key={surface.category} className="flex items-center gap-1">
-            <span className="h-2 w-3 rounded-swatch" style={{ backgroundColor: surface.color }} />
-            {surface.label} {Math.round(surface.pct)}%
-          </span>
-        ))}
-        {cyclewayPct >= 0.5 && <span>· on cycleways {Math.round(cyclewayPct)}%</span>}
+        <span className="font-medium text-foreground">Climbs</span>
+        {climbs.length === 0 ? <span>None</span> : <span className="tabular-nums">{climbSummary(climbs)}</span>}
       </div>
+      {totalM > 0 && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="font-medium text-foreground">Surface</span>
+          {shares.map((surface) => (
+            <span key={surface.category} className="flex items-center gap-1">
+              <span className="h-2 w-3 rounded-swatch" style={{ backgroundColor: surface.color }} />
+              {surface.label} {Math.round(surface.pct)}%
+            </span>
+          ))}
+          {cyclewayPct >= 0.5 && <span>· on cycleways {Math.round(cyclewayPct)}%</span>}
+        </div>
+      )}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="font-medium text-foreground">Gradient</span>
+        <span className="font-medium text-foreground">Gradient (%)</span>
         <GradientScale scale={gradeScale} />
-        <span className="flex items-center gap-1">
-          <span className="h-2 w-3 rounded-swatch" style={{ backgroundColor: FLAT_COLOR }} />
-          Flat (within ±{gradeScale.flatPct}%)
-        </span>
       </div>
     </div>
   )
 }
 
+/**
+ * "Cat 2, Cat 4 ×2 · 1,240 m climbed" - categories hardest first, or
+ * "3 climbs · ..." where the activity has none.
+ */
+function climbSummary(climbs: Climb[]): string {
+  const ascent = `${Math.round(climbs.reduce((sum, c) => sum + c.ascentM, 0)).toLocaleString()} m climbed`
+  const categorized = climbs.filter((c) => c.category !== null)
+  if (categorized.length === 0) return `${climbs.length} climb${climbs.length === 1 ? "" : "s"} · ${ascent}`
+  const order = ["HC", "Cat 1", "Cat 2", "Cat 3", "Cat 4"]
+  const counts = new Map<string, number>()
+  for (const c of categorized) {
+    const label = climbCategoryLabel(c.category!)
+    counts.set(label, (counts.get(label) ?? 0) + 1)
+  }
+  const parts = order.filter((label) => counts.has(label)).map((label) => (counts.get(label)! > 1 ? `${label} ×${counts.get(label)}` : label))
+  return `${parts.join(", ")} · ${ascent}`
+}
+
 // Steep descent -> steep climb, each band a swatch, labelled at the band edges.
+// The flat band sits in the middle, where the plot draws it: everything
+// within +-flatPct is grey, so the gentlest climb and descent bands start at
+// the flat band's edges rather than at 0.
 function GradientScale({ scale }: { scale: GradeScale }) {
-  const swatches = [...DESCENT_COLORS].reverse().concat(CLIMB_COLORS)
+  const swatches = [...[...DESCENT_COLORS].reverse(), FLAT_COLOR, ...CLIMB_COLORS]
   // One label at each boundary between two swatches: the descent band
-  // starts mirrored, then 0, then the climb band starts.
+  // starts mirrored, the flat band's edges, then the climb band starts.
   const inner = scale.bandStartsPct.slice(1)
-  const edges = [...[...inner].reverse().map((pct) => `-${pct}`), "0", ...inner.map(String)]
+  const edges = [
+    ...[...inner].reverse().map((pct) => `-${pct}`),
+    `-${scale.flatPct}`,
+    String(scale.flatPct),
+    ...inner.map(String),
+  ]
   return (
     <span className="flex flex-col">
       <span className="flex">
         {swatches.map((color, i) => (
-          <span key={i} className="h-2 w-6" style={{ backgroundColor: color }} />
+          <span
+            key={i}
+            className="h-2 w-6"
+            style={{ backgroundColor: color }}
+            title={color === FLAT_COLOR ? `Flat (within ±${scale.flatPct}%)` : undefined}
+          />
         ))}
       </span>
       <span className="relative h-3 tabular-nums" style={{ width: swatches.length * 24 }}>
@@ -416,9 +744,6 @@ function GradientScale({ scale }: { scale: GradeScale }) {
             {edge}
           </span>
         ))}
-        <span className="absolute text-3xs" style={{ left: swatches.length * 24 + 4 }}>
-          %
-        </span>
       </span>
     </span>
   )

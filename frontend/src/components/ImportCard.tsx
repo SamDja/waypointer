@@ -1,13 +1,10 @@
 import { useRef, useState, type DragEvent } from "react"
-import type { DurationModel } from "@/lib/geometry"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { PoiListItem } from "@/components/PoiListItem"
 import { PoiTypeCombobox } from "@/components/PoiTypeCombobox"
 import { RemoveRouteButton } from "@/components/RemoveRouteButton"
-import { RouteStats } from "@/components/RouteStats"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FitnessAppRoutesDialog, type RouteSource } from "@/components/FitnessAppRoutesDialog"
 import { FitnessAppsDialog } from "@/components/FitnessAppsDialog"
 import type { Connection } from "@/lib/connections"
@@ -27,12 +24,6 @@ export interface ImportCardProps {
   keptWaypointIndices: Set<number>
   onToggleExistingWaypoint: (index: number) => void
   onToggleAllExistingWaypoints: (checked: boolean) => void
-  distanceM: number
-  elevationGainM: number
-  elevationLossM: number
-  avgSpeedKmh: number
-  durationModel: DurationModel
-  onAvgSpeedChange: (speedKmh: number) => void
   account: Account | null
   onSignIn: () => void
   connections: Connection[]
@@ -55,12 +46,6 @@ export function ImportCard({
   keptWaypointIndices,
   onToggleExistingWaypoint,
   onToggleAllExistingWaypoints,
-  distanceM,
-  elevationGainM,
-  elevationLossM,
-  avgSpeedKmh,
-  durationModel,
-  onAvgSpeedChange,
   account,
   onSignIn,
   connections,
@@ -73,19 +58,6 @@ export function ImportCard({
   const [showAppsDialog, setShowAppsDialog] = useState(false)
   const [showRoutesImport, setShowRoutesImport] = useState(false)
   const anyAppConnected = connections.length > 0
-  const [activeTab, setActiveTab] = useState("info")
-
-  // The first "Next" click routes through the Waypoints tab (if the file
-  // has any pre-existing waypoints) instead of advancing to step 2, so the
-  // visitor sees it at least once - a second click from there advances as
-  // usual.
-  function handleNext() {
-    if (existingWaypoints.length > 0 && activeTab === "info") {
-      setActiveTab("waypoints")
-    } else {
-      onNext()
-    }
-  }
 
   function handleDrop(e: DragEvent<HTMLDivElement>) {
     e.preventDefault()
@@ -113,73 +85,54 @@ export function ImportCard({
           </div>
         </div>
 
-        <Tabs value={activeTab} onValueChange={setActiveTab}>
-          <TabsList>
-            <TabsTrigger value="info">Info</TabsTrigger>
-            {existingWaypoints.length > 0 && <TabsTrigger value="waypoints">Waypoints</TabsTrigger>}
-          </TabsList>
-
-          <TabsContent value="info">
-            <RouteStats
-              distanceM={distanceM}
-              elevationGainM={elevationGainM}
-              elevationLossM={elevationLossM}
-              avgSpeedKmh={avgSpeedKmh}
-              durationModel={durationModel}
-              onAvgSpeedChange={onAvgSpeedChange}
-            />
-          </TabsContent>
-
-          {existingWaypoints.length > 0 && (
-            <TabsContent value="waypoints">
-              <div className="rounded-control border p-4 text-sm">
-                <p className="mb-3 text-xs text-muted-foreground">
-                  This file already has {existingWaypoints.length} waypoint
-                  {existingWaypoints.length === 1 ? "" : "s"}. We guessed a type for each - adjust any that
-                  aren't right, and uncheck any you'd rather not keep.
-                </p>
-                <div className="mb-2 flex items-center gap-3 border-b pb-2">
-                  <Checkbox
-                    id="select-all-waypoints"
-                    checked={
-                      keptWaypointIndices.size === 0
-                        ? false
-                        : keptWaypointIndices.size === existingWaypoints.length
-                          ? true
-                          : "indeterminate"
-                    }
-                    onCheckedChange={(checked) => onToggleAllExistingWaypoints(checked === true)}
-                  />
-                  <Label htmlFor="select-all-waypoints" className="text-xs font-normal text-muted-foreground">
-                    Select all
-                  </Label>
-                </div>
-                <ul className="flex max-h-96 flex-col gap-3 overflow-y-auto">
-                  {existingWaypoints.sort((a, b) => a.distance_from_start_m - b.distance_from_start_m).map((waypoint) => (
-                    <PoiListItem
-                      key={waypoint.index}
-                      id={`waypoint-kept-${waypoint.index}`}
-                      title={waypoint.name || "(unnamed)"}
-                      checked={keptWaypointIndices.has(waypoint.index)}
-                      onCheckedChange={() => onToggleExistingWaypoint(waypoint.index)}
-                      distanceFromStartM={waypoint.distance_from_start_m}
-                      distanceFromRouteM={waypoint.distance_from_route_m}
-                      trailing={
-                        <PoiTypeCombobox
-                          value={waypoint.poi_type}
-                          onChange={(poiType) => onChangeWaypointType(waypoint.index, poiType)}
-                          className="shrink-0"
-                        />
-                      }
-                      onMouseEnter={() => onHoverWaypoint?.(waypoint.index)}
-                      onMouseLeave={() => onHoverWaypoint?.(null)}
+        {/* The route's own figures live in the elevation profile under the map. */}
+        {existingWaypoints.length > 0 && (
+          <div className="rounded-control border p-4 text-sm">
+            <p className="mb-3 text-xs text-muted-foreground">
+              This file already has {existingWaypoints.length} waypoint
+              {existingWaypoints.length === 1 ? "" : "s"}. We guessed a type for each - adjust any that
+              aren't right, and uncheck any you'd rather not keep.
+            </p>
+            <div className="mb-2 flex items-center gap-3 border-b pb-2">
+              <Checkbox
+                id="select-all-waypoints"
+                checked={
+                  keptWaypointIndices.size === 0
+                    ? false
+                    : keptWaypointIndices.size === existingWaypoints.length
+                      ? true
+                      : "indeterminate"
+                }
+                onCheckedChange={(checked) => onToggleAllExistingWaypoints(checked === true)}
+              />
+              <Label htmlFor="select-all-waypoints" className="text-xs font-normal text-muted-foreground">
+                Select all
+              </Label>
+            </div>
+            <ul className="flex max-h-96 flex-col gap-3 overflow-y-auto">
+              {existingWaypoints.sort((a, b) => a.distance_from_start_m - b.distance_from_start_m).map((waypoint) => (
+                <PoiListItem
+                  key={waypoint.index}
+                  id={`waypoint-kept-${waypoint.index}`}
+                  title={waypoint.name || "(unnamed)"}
+                  checked={keptWaypointIndices.has(waypoint.index)}
+                  onCheckedChange={() => onToggleExistingWaypoint(waypoint.index)}
+                  distanceFromStartM={waypoint.distance_from_start_m}
+                  distanceFromRouteM={waypoint.distance_from_route_m}
+                  trailing={
+                    <PoiTypeCombobox
+                      value={waypoint.poi_type}
+                      onChange={(poiType) => onChangeWaypointType(waypoint.index, poiType)}
+                      className="shrink-0"
                     />
-                  ))}
-                </ul>
-              </div>
-            </TabsContent>
-          )}
-        </Tabs>
+                  }
+                  onMouseEnter={() => onHoverWaypoint?.(waypoint.index)}
+                  onMouseLeave={() => onHoverWaypoint?.(null)}
+                />
+              ))}
+            </ul>
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           <RemoveRouteButton onRemove={onRemove} />
@@ -187,7 +140,7 @@ export function ImportCard({
             <PencilLine className="size-4" />
             Edit route
           </Button>
-          <Button className="w-fit grow" onClick={handleNext}>
+          <Button className="w-fit grow" onClick={onNext}>
             Next
             <ArrowRightIcon className="size-4" />
           </Button>

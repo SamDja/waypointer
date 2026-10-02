@@ -1737,15 +1737,16 @@ export function RouteMap({
           {hasRoute && (
             <Source id={ROUTE_SOURCE_ID} type="geojson" data={toRouteLineGeoJson(routeCoords)}>
               <Layer id="route-line" type="line" paint={{ "line-color": ROUTE_LINE_COLORS[theme], "line-width": 3 }} />
-              {planning && (
-                <Layer
-                  id={ROUTE_HIT_LAYER_ID}
-                  type="line"
-                  paint={{ "line-color": ROUTE_LINE_COLORS[theme], "line-width": 16, "line-opacity": 0 }}
-                />
-              )}
+              {/* Invisible and wider, as a pointer target: the line-drag
+                  while planning, and the elevation profile's hover always. */}
+              <Layer
+                id={ROUTE_HIT_LAYER_ID}
+                type="line"
+                paint={{ "line-color": ROUTE_LINE_COLORS[theme], "line-width": 16, "line-opacity": 0 }}
+              />
             </Source>
           )}
+          {hasRoute && <RouteHoverReporter routeCoords={routeCoords} />}
           <RouteDirectionArrows routeCoords={routeCoords} />
 
           {candidates.map((candidate) => {
@@ -2002,7 +2003,6 @@ export function RouteMap({
                 )
               })}
               <RouteLineInsertHandle routeCoords={routeCoords} onInsertAnchor={planning.onInsertAnchor} />
-              <RouteHoverReporter routeCoords={routeCoords} />
               {planning.selectedAnchor !== null && planning.anchors[planning.selectedAnchor] && (
                 <SelectedPointPopup
                   // Remounted per point, so switching selection re-anchors it.

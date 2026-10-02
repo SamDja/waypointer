@@ -24,7 +24,8 @@ import { track } from "@/lib/analytics"
 import { confirmEmailChange, fetchAccountStatus, greeting, signOut, verifyEmail } from "@/lib/accountApi"
 import { parseEmailLink, withoutEmailLinkParams } from "@/lib/emailLinks"
 import type { Account } from "@/types/account"
-import { mostSpecificPerElement } from "@/lib/poiTypes"
+import { POI_TYPES, mostSpecificPerElement } from "@/lib/poiTypes"
+import { detectClimbs, routeDifficulty, routeMaxGradePct } from "@/lib/climbs"
 import { encodePolyline } from "@/lib/polyline"
 import { elevationGainLossM, projectOntoPolylineM, totalDistanceM } from "@/lib/geometry"
 import {
@@ -36,6 +37,8 @@ import {
 } from "@/lib/gpx"
 import {
   MAP_STYLES,
+  climbRulesForStyle,
+  difficultyForStyle,
   durationModelForStyle,
   gradeScaleForStyle,
   routingOptionSpecsForStyle,
@@ -349,7 +352,7 @@ export default function App() {
   const headerRef = useRef<HTMLElement>(null)
   const asideRef = useRef<HTMLElement>(null)
   const overlayInsets = useMapInsets(headerRef, asideRef)
-  // The elevation profile floats over the bottom of the map while planning;
+  // The elevation profile floats over the bottom of the map whenever there's a route;
   // its height (plus its gap to the edge) is the map's bottom inset.
   const [profileEl, setProfileEl] = useState<HTMLDivElement | null>(null)
   const profileHeight = useElementHeight(profileEl)
@@ -1712,6 +1715,21 @@ export default function App() {
   // client-side from the same preview data.
   const distanceM = totalDistanceM(previewRouteCoords)
   const { gainM: elevationGainM, lossM: elevationLossM } = elevationGainLossM(previewElevations)
+  // The route's climbs and difficulty, from the same preview elevations as
+  // the figures above, so everything shown agrees.
+  const climbRules = climbRulesForStyle(mapStyleKey)
+  const climbs = useMemo(
+    () => detectClimbs(previewRouteCoords, previewElevations, climbRules),
+    [previewRouteCoords, previewElevations, climbRules]
+  )
+  const maxGradePct = useMemo(
+    () => routeMaxGradePct(previewRouteCoords, previewElevations),
+    [previewRouteCoords, previewElevations]
+  )
+  const difficulty = routeDifficulty(
+    { distanceM, gainM: elevationGainM, maxGradePct, climbs },
+    difficultyForStyle(mapStyleKey)
+  )
   // Same preview-then-authoritative pattern as routeCoords: client-parsed
   // until /api/find-pois/route responds, then the backend's own parse wins - with
   // any visitor override from ImportCard's "Waypoints" tab applied on top,
@@ -1761,11 +1779,13 @@ export default function App() {
       }
     })
   }, [plannerState])
-  // The route's surface along the same axis, for the elevation profile's surface band.
-  const plannerSurfaceData = useMemo(
-    () => (plannerState ? plannerSurface(plannerState) : { runs: [], cyclewayM: 0 }),
-    [plannerState]
-  )
+  // The route's surface along the same axis, for the elevation profile's
+  // surface band - from the plan, or from the plan a finished route was left
+  // as (see parkedPlan). A loaded file carries none.
+  const plannerSurfaceData = useMemo(() => {
+    const plan = plannerState ?? parkedPlan?.state
+    return plan ? plannerSurface(plan) : { runs: [], cyclewayM: 0 }
+  }, [plannerState, parkedPlan])
   // Where each planner point sits along the route, for the elevation profile's ticks.
   const plannerPointDistancesM = useMemo(() => {
     if (!plannerState) return []
@@ -1795,6 +1815,22 @@ export default function App() {
     // different concern - the same element arriving by two routes.
     return mostSpecificPerElement([...found, ...clickAddedCandidates.filter((c) => !foundIds.has(c.osm_id))])
   }, [findResult, clickAddedCandidates])
+  // Selected POIs, as dots on the elevation profile.
+  const profilePoiMarks = useMemo(
+    () =>
+      allCandidates
+        .filter((c) => selectedIds.has(c.osm_id))
+        .map((c) => {
+          const poiType = POI_TYPES.find((p) => p.key === c.poi_type) ?? POI_TYPES[0]
+          return {
+            id: `${c.osm_id}-${c.poi_type}`,
+            distanceM: c.distance_from_start_m,
+            label: c.name ?? poiType.label,
+            color: poiType.color,
+          }
+        }),
+    [allCandidates, selectedIds]
+  )
   // osm_ids added via a basemap click - used only to exclude those markers
   // from RouteMap's FitBounds input (see RouteMapProps.clickAddedCandidateIds),
   // not to decide what tag/edit info a popup shows (candidateDetails below).
@@ -1930,7 +1966,7 @@ export default function App() {
                 : undefined
             }
           />
-          {plannerState && previewRouteCoords.length >= 2 && (
+          {previewRouteCoords.length >= 2 && (
             <div
               ref={setProfileEl}
               className="absolute z-20"
@@ -1942,9 +1978,17 @@ export default function App() {
                 pointDistancesM={plannerPointDistancesM}
                 surfaceRuns={plannerSurfaceData.runs}
                 cyclewayM={plannerSurfaceData.cyclewayM}
+                distanceM={distanceM}
                 gainM={elevationGainM}
                 lossM={elevationLossM}
+                climbs={climbs}
+                difficulty={difficulty}
+                poiMarks={profilePoiMarks}
                 gradeScale={gradeScaleForStyle(mapStyleKey)}
+                avgSpeedKmh={avgSpeedKmh}
+                durationModel={durationModelForStyle(mapStyleKey)}
+                onAvgSpeedChange={handleAvgSpeedChange}
+                planning={plannerState !== null}
                 // Open on desktop; collapsed on a phone, where the map is only half the screen.
                 defaultOpen={window.matchMedia("(min-width: 48rem)").matches}
               />
@@ -1992,12 +2036,6 @@ export default function App() {
                 hoveredPoint={hoveredAnchorIndex}
                 onHoverPoint={setHoveredAnchorIndex}
                 onRemove={handleRemoveRoute}
-                distanceM={distanceM}
-                elevationGainM={elevationGainM}
-                elevationLossM={elevationLossM}
-                avgSpeedKmh={avgSpeedKmh}
-                durationModel={durationModelForStyle(mapStyleKey)}
-                onAvgSpeedChange={handleAvgSpeedChange}
               />
             ) : (
               <>
@@ -2018,12 +2056,6 @@ export default function App() {
                     onToggleExistingWaypoint={handleToggleExistingWaypoint}
                     onToggleAllExistingWaypoints={handleToggleAllExistingWaypoints}
                     onHoverWaypoint={handleHoverWaypoint}
-                    distanceM={distanceM}
-                    elevationGainM={elevationGainM}
-                    elevationLossM={elevationLossM}
-                    avgSpeedKmh={avgSpeedKmh}
-                    durationModel={durationModelForStyle(mapStyleKey)}
-                    onAvgSpeedChange={handleAvgSpeedChange}
                     account={account}
                     onSignIn={openSignIn}
                     connections={connections}

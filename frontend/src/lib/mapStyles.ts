@@ -2,6 +2,7 @@ import type { StyleSpecification } from "@maplibre/maplibre-gl-style-spec"
 import { Bike, Footprints, type LucideIcon } from "lucide-react"
 
 import type { DurationModel } from "./geometry"
+import type { ClimbRules, DifficultyThresholds } from "./climbs"
 import { composeStyle } from "./mapStyle/compose"
 import { hikingStyle } from "./mapStyle/hiking"
 import { houseStyle } from "./mapStyle/houseStyle"
@@ -114,7 +115,13 @@ export interface MapStyleConfig {
   roadLegend?: RoadLegendCategory[]
   defaults: ActivityDefaults
   gradeScale: GradeScale
-  // How RouteStats turns distance and climbing into an estimated duration.
+  // What counts as a climb on this activity, and whether it gets a Cat
+  // label (see lib/climbs.ts).
+  climbRules: ClimbRules
+  // Where Moderate, Hard and Very hard start on each criterion; a route is
+  // as hard as its hardest one (lib/climbs.ts's routeDifficulty).
+  difficulty: DifficultyThresholds
+  // How the elevation profile turns distance and climbing into an estimated duration.
   durationModel: DurationModel
   // POI types to draw from our *own* PostGIS import, on top of the basemap
   // (see main.py's /api/map-pois). Only worth listing a type the basemap
@@ -300,6 +307,15 @@ export const MAP_STYLES: MapStyleConfig[] = [
     // Wahoo's climb bands (green 0-4%, yellow 4-8%, orange 8-12%, red
     // 12-20%, brown 20%+), so the profile reads like the head unit's.
     gradeScale: { bandStartsPct: [0, 4, 8, 12, 20], flatPct: 2 },
+    // Strava's definition: at least 3% on average, and big enough to be a
+    // Cat 4 (score 8,000) - anything smaller is a ramp, not a climb.
+    climbRules: { minAvgGradePct: 3, minScore: 8000, categorize: true },
+    difficulty: {
+      distanceKm: [40, 80, 140],
+      ascentM: [500, 1200, 2200],
+      maxGradePct: [8, 12, 16],
+      climbCategory: [3, 1, "HC"],
+    },
     durationModel: "flat",
   },
   {
@@ -334,6 +350,14 @@ export const MAP_STYLES: MapStyleConfig[] = [
     // past 40% it's hands as much as feet. Anything under 5% is walked as
     // if flat.
     gradeScale: { bandStartsPct: [0, 10, 20, 30, 40], flatPct: 5 },
+    // Climbs, but no Cat labels: those are a cycling convention. On foot a
+    // climb is anything that gains 100m.
+    climbRules: { minAvgGradePct: 3, minAscentM: 100, categorize: false },
+    difficulty: {
+      distanceKm: [8, 15, 25],
+      ascentM: [400, 900, 1500],
+      maxGradePct: [20, 30, 40],
+    },
     // On foot ascent sets the time more than distance does.
     durationModel: "naismith",
     // Unstaffed bivouacs, which the basemap cannot draw. Staffed alpine
@@ -373,6 +397,14 @@ export function gradeScaleForStyle(key: string): GradeScale {
 /** Whether this activity offers the Wahoo push in SaveCard. */
 export function wahooSyncForStyle(key: string): boolean {
   return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).wahooSync
+}
+
+export function climbRulesForStyle(key: string): ClimbRules {
+  return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).climbRules
+}
+
+export function difficultyForStyle(key: string): DifficultyThresholds {
+  return (MAP_STYLES.find((s) => s.key === key) ?? MAP_STYLES[0]).difficulty
 }
 
 export function durationModelForStyle(key: string): DurationModel {
