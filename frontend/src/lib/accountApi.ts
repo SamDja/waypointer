@@ -29,9 +29,16 @@ export async function signUp(
   name: string,
   email: string,
   password: string,
+  acceptedPrivacy: boolean,
   turnstileToken: string | null,
 ): Promise<void> {
-  await post("/api/auth/signup", { name, email, password, turnstile_token: turnstileToken })
+  await post("/api/auth/signup", {
+    name,
+    email,
+    password,
+    accept_privacy: acceptedPrivacy ? "true" : "false",
+    turnstile_token: turnstileToken,
+  })
 }
 
 export async function changeName(name: string): Promise<Account> {
@@ -107,6 +114,13 @@ export async function saveProfileSettings(settings: ProfileSettings): Promise<vo
     { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) },
     { failed: "Couldn't save your settings to your account - please try again in a moment." },
   )
+}
+
+// "9 October": the day an unverified account will be deleted, in the
+// visitor's own date format.
+export function unverifiedDeadline(account: { delete_unverified_at: string | null }): string | null {
+  if (!account.delete_unverified_at) return null
+  return new Date(account.delete_unverified_at).toLocaleDateString(undefined, { day: "numeric", month: "long" })
 }
 
 // How to greet someone in a message: by name, or without one for an account

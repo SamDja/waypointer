@@ -39,7 +39,7 @@ def test_me_without_database(client, monkeypatch):
 
 
 def test_signup_verify_login_logout(client, outbox):
-    response = client.post("/api/auth/signup", data={"name": "Ada", "email": "Rider@Example.com", "password": PASSWORD})
+    response = client.post("/api/auth/signup", data={"accept_privacy": "true", "name": "Ada", "email": "Rider@Example.com", "password": PASSWORD})
     assert response.status_code == 202
     # Sign-up alone doesn't sign in - the verification link does.
     assert client.get("/api/auth/me").json()["account"] is None
@@ -68,15 +68,15 @@ def test_logout_invalidates_the_session_server_side(client, outbox):
 
 
 def test_verify_link_is_single_use(client, outbox):
-    client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD})
+    client.post("/api/auth/signup", data={"accept_privacy": "true", "name": "Ada", "email": "rider@example.com", "password": PASSWORD})
     token = _link_token(outbox[-1], "verify")
     assert client.post("/api/auth/verify", data={"token": token}).status_code == 200
     assert client.post("/api/auth/verify", data={"token": token}).status_code == 400
 
 
 def test_duplicate_signup_looks_the_same(client, outbox):
-    first = client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD})
-    second = client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": "another long one"})
+    first = client.post("/api/auth/signup", data={"accept_privacy": "true", "name": "Ada", "email": "rider@example.com", "password": PASSWORD})
+    second = client.post("/api/auth/signup", data={"accept_privacy": "true", "name": "Ada", "email": "rider@example.com", "password": "another long one"})
     assert first.status_code == second.status_code == 202
     assert first.json() == second.json()
     # The owner is told by email instead.
@@ -85,7 +85,7 @@ def test_duplicate_signup_looks_the_same(client, outbox):
 
 
 def test_unverified_account_can_log_in(client, outbox):
-    client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD})
+    client.post("/api/auth/signup", data={"accept_privacy": "true", "name": "Ada", "email": "rider@example.com", "password": PASSWORD})
     response = client.post("/api/auth/login", data={"email": "rider@example.com", "password": PASSWORD})
     assert response.status_code == 200
     assert response.json()["email_verified"] is False
@@ -104,20 +104,20 @@ def test_login_errors_are_generic(client, outbox):
 
 @pytest.mark.parametrize("password", ["short", "x" * 257])
 def test_signup_refuses_bad_passwords(client, outbox, password):
-    response = client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": password})
+    response = client.post("/api/auth/signup", data={"accept_privacy": "true", "name": "Ada", "email": "rider@example.com", "password": password})
     assert response.status_code == 400
     assert outbox == []
 
 
 def test_signup_refuses_bad_email(client, outbox):
-    response = client.post("/api/auth/signup", data={"name": "Ada", "email": "not-an-email", "password": PASSWORD})
+    response = client.post("/api/auth/signup", data={"accept_privacy": "true", "name": "Ada", "email": "not-an-email", "password": PASSWORD})
     assert response.status_code == 400
 
 
 def test_state_changing_requests_need_our_origin(client, outbox):
     for headers in ({"Origin": "https://evil.example"}, {"Origin": ""}):
         response = client.post(
-            "/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD}, headers=headers
+            "/api/auth/signup", data={"accept_privacy": "true", "name": "Ada", "email": "rider@example.com", "password": PASSWORD}, headers=headers
         )
         assert response.status_code == 403
     assert outbox == []
@@ -125,11 +125,11 @@ def test_state_changing_requests_need_our_origin(client, outbox):
 
 def test_origin_checked_against_public_base_url(client, outbox, monkeypatch):
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://sullavia.example")
-    response = client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD})
+    response = client.post("/api/auth/signup", data={"accept_privacy": "true", "name": "Ada", "email": "rider@example.com", "password": PASSWORD})
     assert response.status_code == 403
     response = client.post(
         "/api/auth/signup",
-        data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD},
+        data={"accept_privacy": "true", "name": "Ada", "email": "rider@example.com", "password": PASSWORD},
         headers={"Origin": "https://sullavia.example"},
     )
     assert response.status_code == 202
@@ -286,11 +286,11 @@ def test_emails_to_one_address_are_rate_limited(client, outbox):
 def test_captcha_required_when_configured(client, outbox, monkeypatch):
     monkeypatch.setenv("TURNSTILE_SECRET_KEY", "secret")
     responses.post(turnstile.SITEVERIFY_URL, json={"success": False})
-    response = client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD})
+    response = client.post("/api/auth/signup", data={"accept_privacy": "true", "name": "Ada", "email": "rider@example.com", "password": PASSWORD})
     assert response.status_code == 400
     responses.replace(responses.POST, turnstile.SITEVERIFY_URL, json={"success": True})
     response = client.post(
-        "/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD, "turnstile_token": "tok"}
+        "/api/auth/signup", data={"accept_privacy": "true", "name": "Ada", "email": "rider@example.com", "password": PASSWORD, "turnstile_token": "tok"}
     )
     assert response.status_code == 202
     assert client.get("/api/auth/me").json()["captcha_required"] is True
@@ -340,16 +340,16 @@ def test_require_feature(outbox, account_db):
 
 
 def test_signup_asks_for_a_name(client, outbox):
-    response = client.post("/api/auth/signup", data={"name": "  ", "email": "rider@example.com", "password": PASSWORD})
+    response = client.post("/api/auth/signup", data={"accept_privacy": "true", "name": "  ", "email": "rider@example.com", "password": PASSWORD})
     assert response.status_code == 400
-    response = client.post("/api/auth/signup", data={"name": "x" * 61, "email": "rider@example.com", "password": PASSWORD})
+    response = client.post("/api/auth/signup", data={"accept_privacy": "true", "name": "x" * 61, "email": "rider@example.com", "password": PASSWORD})
     assert response.status_code == 400
     assert outbox == []
 
 
 def test_name_is_tidied_and_greets_by_name(client, outbox):
     response = client.post(
-        "/api/auth/signup", data={"name": " Ada \n  Lovelace\t", "email": "rider@example.com", "password": PASSWORD}
+        "/api/auth/signup", data={"accept_privacy": "true", "name": " Ada \n  Lovelace\t", "email": "rider@example.com", "password": PASSWORD}
     )
     assert response.status_code == 202
     assert outbox[-1]["body"].startswith("Hi Ada Lovelace,\n\n")
@@ -359,8 +359,8 @@ def test_name_is_tidied_and_greets_by_name(client, outbox):
 
 
 def test_duplicate_signup_greets_the_existing_owner(client, outbox):
-    client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD})
-    client.post("/api/auth/signup", data={"name": "Mallory", "email": "rider@example.com", "password": PASSWORD})
+    client.post("/api/auth/signup", data={"accept_privacy": "true", "name": "Ada", "email": "rider@example.com", "password": PASSWORD})
+    client.post("/api/auth/signup", data={"accept_privacy": "true", "name": "Mallory", "email": "rider@example.com", "password": PASSWORD})
     # The name typed the second time may not be the owner's - it's not used.
     assert outbox[-1]["body"].startswith("Hi Ada,")
     assert "Mallory" not in outbox[-1]["body"]
@@ -385,3 +385,23 @@ def test_account_without_a_name(client, outbox, account_db):
     client.post("/api/auth/logout")
     client.post("/api/auth/forgot-password", data={"email": "rider@example.com"})
     assert outbox[-1]["body"].startswith("Hi,\n\n")
+
+
+def test_signup_needs_the_privacy_notice_accepted(client, outbox):
+    for accept in (None, "false"):
+        data = {"name": "Ada", "email": "rider@example.com", "password": PASSWORD}
+        if accept is not None:
+            data["accept_privacy"] = accept
+        response = client.post("/api/auth/signup", data=data)
+        assert response.status_code == 400
+        assert "privacy notice" in response.json()["detail"]
+    assert outbox == []
+
+
+def test_acceptance_is_recorded_with_its_version(client, outbox):
+    from waypointer import auth
+
+    _signup_and_verify(client, outbox)
+    account = client.get("/api/account/export").json()["account"]
+    assert account["privacy_notice_version"] == auth.PRIVACY_VERSION
+    assert account["privacy_notice_accepted_at"] is not None

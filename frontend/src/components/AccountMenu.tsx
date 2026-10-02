@@ -12,6 +12,7 @@ import {
 import type { AccountView } from "@/components/AccountDialog"
 import { StravaWordmark, WahooLogo } from "@/components/FitnessAppLogos"
 import { FitnessAppRoutesDialog } from "@/components/FitnessAppRoutesDialog"
+import { unverifiedDeadline } from "@/lib/accountApi"
 import { findConnection, type Connection } from "@/lib/connections"
 import type { Account } from "@/types/account"
 
@@ -65,7 +66,8 @@ export function AccountMenu({ account, connections, onOpen, onSignOut }: Account
             </span>
             {!account.email_verified && (
               <span className="text-xs font-normal text-warning-foreground">
-                Email not verified yet - check your inbox
+                Confirm your email by {unverifiedDeadline(account)}, or the account will be deleted - check your
+                inbox.
               </span>
             )}
           </DropdownMenuLabel>

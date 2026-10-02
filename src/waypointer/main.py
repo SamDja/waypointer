@@ -69,7 +69,7 @@ from waypointer.rate_limit import (
 from waypointer.geocode import GeocodeError, GeocodeRateLimitedError, search_places
 from waypointer.photos import resolve_photos
 from waypointer.routing import USER_AGENT, RoutingError, RoutingRateLimitedError, route_leg
-from waypointer import auth, connections, db, strava, token_crypto, wahoo
+from waypointer import auth, cleanup, connections, db, strava, token_crypto, wahoo
 from waypointer.sessions import User, require_same_origin, require_verified_user
 from waypointer.schemas import (
     Candidate,
@@ -118,7 +118,11 @@ async def lifespan(_app: FastAPI):
     # Creates and migrates the account database (db.py). Never fatal: without
     # one, the account endpoints answer 503 and everything else still works.
     await asyncio.to_thread(db.init_database)
+    # Removes expired sessions, links and never-verified accounts, and the
+    # rate limiter's idle entries - see cleanup.py.
+    cleaner = asyncio.create_task(cleanup.run_forever())
     yield
+    cleaner.cancel()
     db.close_pool()
 
 

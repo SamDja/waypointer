@@ -21,6 +21,16 @@ export default defineConfig({
   worker: {
     format: "es",
   },
+  // The app, plus the privacy notice as its own page (/privacy.html), so it
+  // has a real URL. styleguide.html is deliberately not listed: dev only.
+  build: {
+    rolldownOptions: {
+      input: {
+        main: path.resolve(import.meta.dirname, "index.html"),
+        privacy: path.resolve(import.meta.dirname, "privacy.html"),
+      },
+    },
+  },
   server: {
     proxy: {
       // Not the "/api": "http://..." shorthand: that sets changeOrigin, which

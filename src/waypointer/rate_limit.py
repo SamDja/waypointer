@@ -110,6 +110,24 @@ def check_rate(bucket: str, key: str, requests_per_window: int, window_s: float 
         _requests_by_ip[(bucket, key)] = timestamps
 
 
+# The longest window any bucket uses - a key with nothing newer than this
+# can't be over any budget, so it's safe to forget.
+LONGEST_WINDOW_S = HOUR_S
+
+
+def prune(now: float | None = None) -> int:
+    """Forgets every key whose requests have all aged out of the longest
+    window. Without this, an address that never comes back would stay in
+    memory until the server restarts - check_rate only tidies a key when that
+    key is used again. Returns how many keys were dropped."""
+    cutoff = (time.monotonic() if now is None else now) - LONGEST_WINDOW_S
+    with _lock:
+        idle = [key for key, stamps in _requests_by_ip.items() if not stamps or stamps[-1] <= cutoff]
+        for key in idle:
+            del _requests_by_ip[key]
+    return len(idle)
+
+
 def make_rate_limit(bucket: str, requests_per_window: int, window_s: float = WINDOW_S):
     """Builds a FastAPI dependency that raises 429 once an IP exceeds the
     request budget for this bucket - separate buckets so one endpoint's

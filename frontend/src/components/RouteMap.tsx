@@ -291,10 +291,15 @@ function DetachedAttribution({ hostRef }: { hostRef: RefObject<HTMLDivElement | 
     const host = hostRef.current
     if (!map || !host) return
     // Passing options replaces MapLibre's defaults wholesale, so its own
-    // "MapLibre" credit has to be restated.
+    // "MapLibre" credit has to be restated. The privacy notice rides along:
+    // it's the one place on the page every visitor, signed in or not, can
+    // always reach.
     const control = new AttributionControl({
       compact: true,
-      customAttribution: '<a href="https://maplibre.org/" target="_blank">MapLibre</a>',
+      customAttribution: [
+        '<a href="/privacy.html" target="_blank">Privacy</a>',
+        '<a href="https://maplibre.org/" target="_blank">MapLibre</a>',
+      ],
     })
     host.appendChild(control.onAdd(map))
     return () => control.onRemove()

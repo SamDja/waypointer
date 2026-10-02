@@ -26,7 +26,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Request, Response, 
 
 from psycopg.types.json import Jsonb
 
-from waypointer import connections, db, mailer, passwords, turnstile
+from waypointer import cleanup, connections, db, mailer, passwords, turnstile
 from waypointer.rate_limit import (
     EMAILS_PER_ADDRESS_PER_HOUR,
     HOUR_S,
@@ -63,6 +63,10 @@ CHANGE_EMAIL_TOKEN_TTL = timedelta(hours=24)
 # valid addresses.
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 MAX_EMAIL_LENGTH = 254
+# The privacy notice a new account accepts - its "Last updated" date. Bump
+# it together with frontend/src/privacy/privacyConfig.ts's LAST_UPDATED, so
+# each account records which version it agreed to.
+PRIVACY_VERSION = "2026-10-02"
 # What to call someone: a first name, a nickname, a full name - their call.
 MAX_NAME_LENGTH = 60
 
@@ -83,6 +87,9 @@ def _account(user: User) -> AccountResponse:
         email=user.email,
         name=user.name,
         email_verified=user.email_verified,
+        delete_unverified_at=(
+            None if user.email_verified else (user.created_at + cleanup.UNVERIFIED_ACCOUNT_TTL).isoformat()
+        ),
         features=list(user.features),
         created_at=user.created_at.isoformat(),
     )
@@ -211,7 +218,11 @@ def _send_verification(
         _hello(name) + "Welcome to Sulla Via!\n\n"
         "Confirm your email address to finish creating your account:\n\n"
         f"{_link_base(request)}/?verify={token}\n\n"
-        "The link works for 24 hours. If you didn't sign up, you can ignore this email.\n",
+        "The link works for 24 hours; you can ask for a new one from your account. If the address isn't"
+        f" confirmed within {cleanup.UNVERIFIED_ACCOUNT_TTL.days} days, the account is deleted automatically"
+        " - you can always sign up again.\n\n"
+        "If you didn't sign up, you can ignore this email.\n\n"
+        f"How Sulla Via handles your data: {_link_base(request)}/privacy.html\n",
     )
 
 
@@ -242,8 +253,13 @@ def signup(
     name: str = Form(...),
     email: str = Form(...),
     password: str = Form(...),
+    accept_privacy: bool = Form(False),
     turnstile_token: str | None = Form(None),
 ) -> dict:
+    # Checked first: nothing about the visitor is processed (not even the
+    # captcha) until they've accepted how it's handled.
+    if not accept_privacy:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Please accept the privacy notice to create an account.")
     name = _normalize_name(name)
     email = _normalize_email(email)
     _check_password_rules(password)
@@ -253,9 +269,10 @@ def signup(
     password_hash = passwords.hash_password(password)
     with connection() as conn:
         row = conn.execute(
-            "INSERT INTO users (email, password_hash, name) VALUES (%s, %s, %s)"
+            "INSERT INTO users (email, password_hash, name, privacy_accepted_at, privacy_version)"
+            " VALUES (%s, %s, %s, now(), %s)"
             " ON CONFLICT (email) DO NOTHING RETURNING id::text",
-            (email, password_hash, name),
+            (email, password_hash, name, PRIVACY_VERSION),
         ).fetchone()
         if row is not None:
             _send_verification(conn, request, row[0], email, name)
@@ -517,7 +534,9 @@ def confirm_email(token: str = Form(...)) -> AccountResponse:
 def export_account(user: User = Depends(require_user)) -> Response:
     with connection() as conn:
         row = conn.execute(
-            "SELECT created_at, last_login_at, email_verified_at FROM users WHERE id = %s", (user.id,)
+            "SELECT created_at, last_login_at, email_verified_at, privacy_accepted_at, privacy_version"
+            " FROM users WHERE id = %s",
+            (user.id,),
         ).fetchone()
         sessions = conn.execute(
             "SELECT created_at, last_seen_at, expires_at, user_agent FROM sessions"
@@ -543,6 +562,8 @@ def export_account(user: User = Depends(require_user)) -> Response:
             "features": list(user.features),
             "created_at": iso(row[0]),
             "last_login_at": iso(row[1]),
+            "privacy_notice_accepted_at": iso(row[3]),
+            "privacy_notice_version": row[4],
         },
         "sessions": [
             {"created_at": iso(s[0]), "last_seen_at": iso(s[1]), "expires_at": iso(s[2]), "user_agent": s[3]}

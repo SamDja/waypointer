@@ -6,6 +6,9 @@ export interface Account {
   // What to call them - asked at sign-up; null for an account made before.
   name: string | null
   email_verified: boolean
+  // While the email isn't confirmed: when the account will be deleted (ISO
+  // date-time). Null once verified.
+  delete_unverified_at: string | null
   // Opt-in features switched on by hand for a test phase (e.g. "llm").
   features: string[]
   created_at: string

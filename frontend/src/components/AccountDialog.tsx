@@ -12,6 +12,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Callout } from "@/components/ui/callout"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -23,6 +24,7 @@ import {
   deleteAccount,
   downloadAccountData,
   greeting,
+  unverifiedDeadline,
   requestPasswordReset,
   resendVerification,
   resetPassword,
@@ -32,6 +34,7 @@ import {
 import { track } from "@/lib/analytics"
 import { toast } from "@/lib/toast"
 import { FitnessAppsList } from "@/components/FitnessAppsList"
+import { UNVERIFIED_ACCOUNT_DAYS } from "@/privacy/privacyConfig"
 import type { Connection } from "@/lib/connections"
 import type { Account } from "@/types/account"
 
@@ -158,6 +161,7 @@ function SignUpForm({
   onViewChange: (view: AccountView) => void
 }) {
   const [name, setName] = useState("")
+  const [acceptedPrivacy, setAcceptedPrivacy] = useState(false)
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [captcha, setCaptcha] = useState<string | null>(null)
@@ -170,7 +174,7 @@ function SignUpForm({
     event.preventDefault()
     void run(async () => {
       try {
-        await signUp(name, email, password, captcha)
+        await signUp(name, email, password, acceptedPrivacy, captcha)
       } finally {
         setCaptcha(null)
         setCaptchaKey((key) => key + 1)
@@ -202,15 +206,38 @@ function SignUpForm({
         value={password}
         onChange={(e) => setPassword(e.target.value)}
       />
-      <Turnstile key={captchaKey} onToken={setCaptcha} />
-      <FormError error={error} />
-      <Button type="submit" loading={busy}>
-        Create account
-      </Button>
       <p className="text-xs text-muted-foreground">
         Your routes stay in your browser. An account stores your email address, a securely hashed password, the
         fitness apps you connect and your speed settings. You can download or delete your data at any time.
       </p>
+      {/* Required: the server refuses a sign-up without it, and records
+          which version of the notice was accepted (auth.PRIVACY_VERSION). */}
+      <div className="flex items-start gap-2">
+        <Checkbox
+          id="signup-accept-privacy"
+          className="mt-0.5"
+          checked={acceptedPrivacy}
+          onCheckedChange={(next) => setAcceptedPrivacy(next === true)}
+        />
+        <Label htmlFor="signup-accept-privacy" className="text-sm leading-snug font-normal">
+          <span>
+            I've read and accept the{" "}
+            <a
+              href="/privacy.html"
+              target="_blank"
+              className="text-primary underline underline-offset-2"
+              onClick={(e) => e.stopPropagation()}
+            >
+              privacy notice
+            </a>
+          </span>
+        </Label>
+      </div>
+      <Turnstile key={captchaKey} onToken={setCaptcha} />
+      <FormError error={error} />
+      <Button type="submit" loading={busy} disabled={!acceptedPrivacy}>
+        Create account
+      </Button>
       <SwitchLink onClick={() => onViewChange("signin")}>Already have an account? Sign in</SwitchLink>
     </form>
   )
@@ -358,6 +385,11 @@ function EmailSection({ account }: { account: Account }) {
       </p>
       {!account.email_verified && (
         <div className="flex flex-col gap-2">
+          <Callout variant="warning">
+            <MailWarning className="mt-0.5 size-4 shrink-0" />
+            Confirm your email address by {unverifiedDeadline(account)} using the link we sent you, or this account
+            will be deleted automatically.
+          </Callout>
           {resent ? (
             <Callout variant="success">We sent a new link to {account.email}.</Callout>
           ) : (
@@ -473,7 +505,11 @@ function DataSection({ onDeleted }: { onDeleted: () => void }) {
         Your account holds your email address, a hashed password (never the password itself), the list of browsers
         you're signed in on, the fitness apps you've connected (their access is stored encrypted) and your speed
         settings. Routes stay in your browser. Nothing is shared with anyone, and deleting your account disconnects
-        your fitness apps and removes all of it straight away.
+        your fitness apps and removes all of it straight away.{" "}
+        <a href="/privacy.html" target="_blank" className="text-primary underline underline-offset-2">
+          Read the privacy notice
+        </a>
+        .
       </p>
       <Button
         variant="outline"
@@ -591,6 +627,12 @@ export function AccountDialog({
                 ? `If there's an account for ${sent.email}, we've sent it a link to reset your password.`
                 : `${sent?.name ? `Thanks, ${sent.name}! ` : ""}We've sent an email to ${sent?.email ?? "you"}. Follow the link in it to finish signing up.`}
             </p>
+            {sent?.kind === "signup" && (
+              <p className="text-sm">
+                Please confirm within {UNVERIFIED_ACCOUNT_DAYS} days - accounts that aren't confirmed are deleted
+                automatically.
+              </p>
+            )}
             <p className="text-xs text-muted-foreground">It can take a minute to arrive - check your spam folder too.</p>
             <Button variant="outline" className="w-fit" onClick={() => onViewChange(null)}>
               Close

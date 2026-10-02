@@ -254,6 +254,10 @@ class AccountResponse(BaseModel):
     # What to call them - asked at sign-up; None for an account made before.
     name: str | None
     email_verified: bool
+    # While the email isn't confirmed: when the account will be deleted
+    # (cleanup.UNVERIFIED_ACCOUNT_TTL after sign-up), so the visitor can be
+    # told. None once verified.
+    delete_unverified_at: str | None
     # Opt-in features switched on by hand for a test phase (e.g. "llm").
     features: list[str]
     created_at: str

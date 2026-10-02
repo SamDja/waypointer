@@ -118,13 +118,19 @@ def account_db(_account_database_url, monkeypatch):
     import psycopg
     from cryptography.fernet import Fernet
 
-    from waypointer import db, passwords, token_crypto
+    from waypointer import cleanup, db, passwords, token_crypto
 
     monkeypatch.setenv(db.DATABASE_URL_ENV, _account_database_url)
     monkeypatch.setenv("COOKIE_SECURE", "0")
     monkeypatch.setenv(token_crypto.TOKEN_ENCRYPTION_KEY_ENV, Fernet.generate_key().decode())
     for name in ("PUBLIC_BASE_URL", "SMTP_HOST", "TURNSTILE_SECRET_KEY", passwords.HIBP_CHECK_ENV):
         monkeypatch.delenv(name, raising=False)
+    # The app's own hourly cleanup would run a pass as each TestClient starts,
+    # concurrently with the test - tests call cleanup themselves instead.
+    async def no_cleanup():
+        return None
+
+    monkeypatch.setattr(cleanup, "run_forever", no_cleanup)
     db.close_pool()
     with psycopg.connect(_account_database_url, autocommit=True) as conn:
         conn.execute("TRUNCATE users CASCADE")

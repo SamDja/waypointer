@@ -17,7 +17,7 @@ cd frontend
 npm run dev    # then open https://localhost:5173/styleguide.html (?dark opens it in dark mode)
 ```
 
-`styleguide.html` is a second Vite entry. Vite serves any root HTML file in dev, but `vite build` only builds `index.html`, so the guide never ships. It renders every primitive and every shared piece in its states, next to a note on what it is for and what not to do with it. It has a light/dark switch in its header.
+`styleguide.html` is a second Vite entry. Vite serves any root HTML file in dev, but `vite build` only builds the pages listed in `vite.config.ts`'s `build.rolldownOptions.input` (`index.html` and `privacy.html`), so the guide never ships. It renders every primitive and every shared piece in its states, next to a note on what it is for and what not to do with it. It has a light/dark switch in its header.
 
 ## Tokens
 

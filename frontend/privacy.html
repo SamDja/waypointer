@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Privacy - Sulla Via</title>
+    <!-- Same pre-paint theme rule as index.html - mirrors lib/theme.ts's applyTheme. -->
+    <script>
+      try {
+        var theme = localStorage.getItem("waypointer.theme")
+        if (theme === "dark" || (theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches))
+          document.documentElement.classList.add("dark")
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <!-- A second page of the production build (vite.config.ts's
+         build.rollupOptions.input), served at /privacy.html - a real URL,
+         for emails, app registrations and anyone not signed in. -->
+    <div id="root"></div>
+    <script type="module" src="/src/privacy/main.tsx"></script>
+  </body>
+</html>
