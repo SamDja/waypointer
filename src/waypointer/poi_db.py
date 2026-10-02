@@ -111,7 +111,7 @@ _NEAR_POINT_SQL = """
     WHERE p.poi_type = %(poi_type)s
       AND ST_DWithin(p.geom::geography, c.pt::geography, %(radius_m)s)
     ORDER BY p.geom::geography <-> c.pt::geography
-    LIMIT 1
+    LIMIT %(limit)s
 """
 
 
@@ -242,27 +242,37 @@ def query_pois_near_route(
     return nodes
 
 
+def query_pois_near_point(
+    poi_type: str, lat: float, lon: float, radius_m: float, limit: int
+) -> list[OsmNode]:
+    """The imported POIs of poi_type within radius_m of (lat, lon), nearest
+    first, at most `limit` - e.g. the mountain passes in reach of a generated
+    route's start (route_candidates.py)."""
+    try:
+        with _get_pool().connection() as conn:
+            rows = conn.execute(
+                _NEAR_POINT_SQL,
+                {"poi_type": poi_type, "lat": lat, "lon": lon, "radius_m": radius_m, "limit": limit},
+            ).fetchall()
+    except psycopg.Error as exc:
+        raise PoiDbError(f"PostGIS query failed: {exc}") from exc
+
+    return [
+        OsmNode(
+            id=osm_id,
+            lat=r_lat,
+            lon=r_lon,
+            tags=tags or {},
+            osm_type=osm_type,
+            timestamp=_iso(osm_timestamp),
+        )
+        for osm_type, osm_id, tags, osm_timestamp, r_lat, r_lon in rows
+    ]
+
+
 def query_poi_near_point(poi_type: str, lat: float, lon: float, radius_m: float) -> OsmNode | None:
     """The single imported POI of poi_type closest to (lat, lon), within
     radius_m - used to resolve a click on the basemap's own POI icon to the
     real OSM element behind it (see main.py's find_poi_at_location)."""
-    try:
-        with _get_pool().connection() as conn:
-            row = conn.execute(
-                _NEAR_POINT_SQL,
-                {"poi_type": poi_type, "lat": lat, "lon": lon, "radius_m": radius_m},
-            ).fetchone()
-    except psycopg.Error as exc:
-        raise PoiDbError(f"PostGIS query failed: {exc}") from exc
-
-    if row is None:
-        return None
-    osm_type, osm_id, tags, osm_timestamp, r_lat, r_lon = row
-    return OsmNode(
-        id=osm_id,
-        lat=r_lat,
-        lon=r_lon,
-        tags=tags or {},
-        osm_type=osm_type,
-        timestamp=_iso(osm_timestamp),
-    )
+    nearest = query_pois_near_point(poi_type, lat, lon, radius_m, limit=1)
+    return nearest[0] if nearest else None

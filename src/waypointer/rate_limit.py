@@ -54,6 +54,10 @@ STRAVA_REQUESTS_PER_WINDOW = 20
 # connecting, listing, pushing, renaming, deleting. Wahoo's own per-app
 # limits are generous, but they're still one quota shared by every visitor.
 WAHOO_REQUESTS_PER_WINDOW = 30
+# /api/nl-routes/generate: each request is an LLM parse, about 10 BRouter
+# calls on the shared public instance and an LLM explanation - so a handful a
+# minute, not a typeahead.
+NL_ROUTE_REQUESTS_PER_WINDOW = 5
 # Account endpoints (auth.py). Login is limited per IP and, separately, per
 # email address, so neither guessing many passwords for one account from many
 # IPs nor one IP spraying many accounts gets far. Anything that sends an email
@@ -147,6 +151,7 @@ map_poi_rate_limit = make_rate_limit("map_poi", MAP_POI_REQUESTS_PER_WINDOW)
 photo_rate_limit = make_rate_limit("photos", PHOTO_REQUESTS_PER_WINDOW)
 strava_rate_limit = make_rate_limit("strava", STRAVA_REQUESTS_PER_WINDOW)
 wahoo_rate_limit = make_rate_limit("wahoo", WAHOO_REQUESTS_PER_WINDOW)
+nl_route_rate_limit = make_rate_limit("nl_routes", NL_ROUTE_REQUESTS_PER_WINDOW)
 login_rate_limit = make_rate_limit("login", LOGIN_REQUESTS_PER_WINDOW)
 signup_rate_limit = make_rate_limit("signup", SIGNUP_REQUESTS_PER_HOUR, HOUR_S)
 account_rate_limit = make_rate_limit("account", ACCOUNT_REQUESTS_PER_WINDOW)

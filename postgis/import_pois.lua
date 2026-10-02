@@ -83,6 +83,9 @@ local FILTERS = {
     attraction      = { scope = 'any',  match = { { key = 'tourism', value = 'attraction' } } },
     monument        = { scope = 'any',  match = { { key = 'historic', value = 'monument' } } },
     viewpoint       = { scope = 'any',  match = { { key = 'tourism', value = 'viewpoint' } } },
+    -- Not a POI type: poi_types.py's INTERNAL_IMPORT_FILTERS, imported for
+    -- the route generator's known climbs.
+    mountain_pass   = { scope = 'node', match = { { key = 'mountain_pass', value = 'yes' } } },
 }
 
 local function tag_matches(tags, cond)

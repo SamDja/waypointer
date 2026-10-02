@@ -547,7 +547,7 @@ def export_account(user: User = Depends(require_user)) -> Response:
         # meaningful to this server, and would let anyone holding the export
         # act on the visitor's Strava/Wahoo account.
         apps = connections.list_connections(conn, user.id)
-        settings = _load_settings(conn, user.id)
+        settings = load_settings(conn, user.id)
 
     def iso(value: datetime | None) -> str | None:
         return value.isoformat() if value else None
@@ -606,7 +606,7 @@ def delete_account(password: str = Form(...), user: User = Depends(require_user)
 # --- profile settings -----------------------------------------------------
 
 
-def _load_settings(conn, user_id: str) -> ProfileSettings:
+def load_settings(conn, user_id: str) -> ProfileSettings:
     row = conn.execute("SELECT settings FROM user_settings WHERE user_id = %s", (user_id,)).fetchone()
     if row is None:
         return ProfileSettings()
@@ -621,7 +621,7 @@ def _load_settings(conn, user_id: str) -> ProfileSettings:
 @router.get("/api/account/settings", response_model=ProfileSettings, dependencies=[Depends(account_rate_limit)])
 def get_settings(user: User = Depends(require_user)) -> ProfileSettings:
     with connection() as conn:
-        return _load_settings(conn, user.id)
+        return load_settings(conn, user.id)
 
 
 @router.put(

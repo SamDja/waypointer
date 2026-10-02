@@ -13,6 +13,7 @@ from waypointer.poi_db import (
     PoiDbError,
     query_poi_near_point,
     query_pois_in_bounds,
+    query_pois_near_point,
     query_pois_near_route,
 )
 
@@ -154,6 +155,18 @@ def test_query_poi_near_point_returns_none_when_out_of_radius(postgis_url):
         _insert_point(conn, "node", 1, "water", 49.5, 3.5)
     node = query_poi_near_point("water", lat=48.8567, lon=2.3524, radius_m=40)
     assert node is None
+
+
+def test_query_pois_near_point_lists_nearest_first_within_radius(postgis_url):
+    # The passes in reach of a generated route's start.
+    with _connect(postgis_url) as conn:
+        _insert_point(conn, "node", 1, "mountain_pass", 46.10, 11.40, tags={"name": "Far"})
+        _insert_point(conn, "node", 2, "mountain_pass", 46.02, 11.40, tags={"name": "Near"})
+        _insert_point(conn, "node", 3, "mountain_pass", 47.50, 11.40, tags={"name": "Out of reach"})
+        _insert_point(conn, "node", 4, "summit", 46.01, 11.40)
+    nodes = query_pois_near_point("mountain_pass", lat=46.0, lon=11.4, radius_m=30_000, limit=10)
+    assert [n.id for n in nodes] == [2, 1]
+    assert query_pois_near_point("mountain_pass", lat=46.0, lon=11.4, radius_m=30_000, limit=1)[0].id == 2
 
 
 def test_query_pois_near_route_raises_poi_db_error_when_unconfigured(monkeypatch):

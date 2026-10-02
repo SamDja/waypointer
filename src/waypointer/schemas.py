@@ -272,20 +272,105 @@ class AccountStatus(BaseModel):
     captcha_required: bool
 
 
+def _check_per_activity(value: dict[str, float], low: float, high: float, what: str) -> dict[str, float]:
+    if len(value) > 20:
+        raise ValueError("too many activities")
+    for key, number in value.items():
+        if not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", key):
+            raise ValueError(f"not an activity key: {key!r}")
+        if not low <= number <= high:
+            raise ValueError(f"{what} out of range for {key}")
+    return value
+
+
 class ProfileSettings(BaseModel):
     # Settings kept with the account rather than in the browser
     # (/api/account/settings). Keyed by activity (the frontend's map style
     # key), like the browser's own per-activity preferences.
     avg_speed_kmh: dict[str, float] = {}
+    # Climbing speed (vertical metres an hour), for the route generator's
+    # duration estimate: distance / flat speed + ascent / VAM. No input for
+    # it in the app yet.
+    vam_m_per_h: dict[str, float] = {}
 
     @field_validator("avg_speed_kmh")
     @classmethod
     def _check_speeds(cls, value: dict[str, float]) -> dict[str, float]:
-        if len(value) > 20:
-            raise ValueError("too many activities")
-        for key, speed in value.items():
-            if not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", key):
-                raise ValueError(f"not an activity key: {key!r}")
-            if not 0.5 <= speed <= 100:
-                raise ValueError(f"speed out of range for {key}")
-        return value
+        return _check_per_activity(value, 0.5, 100, "speed")
+
+    @field_validator("vam_m_per_h")
+    @classmethod
+    def _check_vam(cls, value: dict[str, float]) -> dict[str, float]:
+        return _check_per_activity(value, 100, 2000, "climbing speed")
+
+
+# ---- natural-language routes (/api/nl-routes/generate, nl_routes.py) --------
+
+
+class NlRouteClimb(BaseModel):
+    start_km: float
+    length_km: float
+    ascent_m: float
+    avg_grade_pct: float
+    max_grade_pct: float
+    summit_m: float
+    # Strava's category ("4".."1", "HC"), or null below Cat 4.
+    category: str | None
+
+
+class NlRouteMetrics(BaseModel):
+    # Every figure computed by us from the routed geometry (route_candidates.py).
+    distance_km: float
+    ascent_m: float
+    descent_m: float
+    max_grade_pct: float
+    climbs: list[NlRouteClimb]
+    difficulty: str
+    difficulty_reason: str | None
+    duration_h: float
+    surface_share: dict[str, float]
+    cycleway_share: float
+    water_count: int | None
+    repeated_share: float
+    named_climbs_passed: list[str]
+
+
+class NlRouteMiss(BaseModel):
+    # A constraint this option doesn't meet: what was asked and what it gives.
+    constraint: str
+    wanted: str
+    got: str
+
+
+class NlRouteOption(BaseModel):
+    id: str
+    shape: Literal["loop", "a_to_b", "out_and_back"]
+    # The points BRouter routed through, in order - what the route planner
+    # needs to reopen the option as an editable plan.
+    points: list[tuple[float, float]]
+    # Simplified for drawing; elevations index-parallel, null where unknown.
+    coords: list[tuple[float, float]]
+    elevations: list[float | None]
+    metrics: NlRouteMetrics
+    misses: list[NlRouteMiss]
+    explanation: str
+
+
+class NlRouteInfeasible(BaseModel):
+    reason: Literal["distance", "ascent_per_km", "climb_relief"]
+    detail: str
+    suggested_distance_km: dict[str, float | None] | None
+    suggested_ascent_m: dict[str, float | None] | None
+    suggested_climb_categories: list[str] | None
+
+
+class NlRoutesResponse(BaseModel):
+    # Exactly one of these is the answer: questions to ask first, a request
+    # no route can meet (with what to ask for instead), or the options.
+    status: Literal["questions", "infeasible", "options"]
+    language: str
+    # route_request.Question as JSON: kind, field, detail, place options.
+    questions: list[dict]
+    infeasible: NlRouteInfeasible | None
+    # Best first.
+    options: list[NlRouteOption]

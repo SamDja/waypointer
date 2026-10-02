@@ -296,8 +296,8 @@ def test_deleting_the_account_revokes_connections(signed_in, account_db):
 
 
 def test_profile_settings_round_trip(signed_in):
-    assert signed_in.get("/api/account/settings").json() == {"avg_speed_kmh": {}}
-    body = {"avg_speed_kmh": {"road_cycling": 24.5, "hiking": 4.2}}
+    assert signed_in.get("/api/account/settings").json() == {"avg_speed_kmh": {}, "vam_m_per_h": {}}
+    body = {"avg_speed_kmh": {"road_cycling": 24.5, "hiking": 4.2}, "vam_m_per_h": {"road_cycling": 800}}
     assert signed_in.put("/api/account/settings", json=body).json() == body
     assert signed_in.get("/api/account/settings").json() == body
 
@@ -305,6 +305,11 @@ def test_profile_settings_round_trip(signed_in):
 @pytest.mark.parametrize("bad", [{"road_cycling": 0}, {"road_cycling": 500}, {"Not A Key": 10}])
 def test_profile_settings_validated(signed_in, bad):
     assert signed_in.put("/api/account/settings", json={"avg_speed_kmh": bad}).status_code == 422
+
+
+@pytest.mark.parametrize("bad", [{"road_cycling": 50}, {"road_cycling": 5000}, {"Not A Key": 700}])
+def test_profile_settings_validates_vam(signed_in, bad):
+    assert signed_in.put("/api/account/settings", json={"vam_m_per_h": bad}).status_code == 422
 
 
 def test_settings_need_a_session(client):
@@ -317,6 +322,6 @@ def test_export_lists_connections_without_tokens(signed_in):
     signed_in.put("/api/account/settings", json={"avg_speed_kmh": {"hiking": 4.0}})
     data = signed_in.get("/api/account/export").json()
     assert data["connections"][0]["provider"] == "strava"
-    assert data["settings"] == {"avg_speed_kmh": {"hiking": 4.0}}
+    assert data["settings"] == {"avg_speed_kmh": {"hiking": 4.0}, "vam_m_per_h": {}}
     text = signed_in.get("/api/account/export").text
     assert "s-access" not in text and "s-refresh" not in text

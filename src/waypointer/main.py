@@ -69,7 +69,7 @@ from waypointer.rate_limit import (
 from waypointer.geocode import GeocodeError, GeocodeRateLimitedError, search_places
 from waypointer.photos import resolve_photos
 from waypointer.routing import USER_AGENT, RoutingError, RoutingRateLimitedError, route_leg
-from waypointer import auth, cleanup, connections, db, strava, token_crypto, wahoo
+from waypointer import auth, cleanup, connections, db, nl_routes, strava, token_crypto, wahoo
 from waypointer.sessions import User, require_same_origin, require_verified_user
 from waypointer.schemas import (
     Candidate,
@@ -1070,6 +1070,7 @@ async def poi_photos_endpoint(tags: str = Form(...)) -> PoiPhotosResponse:
 
 app.include_router(auth.router)
 app.include_router(connections.router)
+app.include_router(nl_routes.router)
 
 # Catch-all mount for the built SPA - MUST be registered last. StaticFiles
 # matches any path not already claimed by a route above it, so mounting

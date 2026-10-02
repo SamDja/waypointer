@@ -371,6 +371,19 @@ DEFAULT_VISIBLE_POI_TYPES: tuple[str, ...] = ("water",)
 
 # Reverse of POI_TYPES' course_point_type - lets fit_read.py recover the
 # exact POI type of a FIT course point instead of guessing from <sym> text.
+# Rows imported into the PostGIS `pois` table for the backend's own use, not
+# POI types a visitor can search for or put on a device - so they have no
+# registry entry, no course_point_type (POI_TYPES must match Wahoo's icon
+# mapping one-for-one) and no frontend mirror. postgis/import_pois.lua imports
+# them under these keys like any searchable type, and
+# tests/test_import_pois_lua.py checks the two agree.
+INTERNAL_IMPORT_FILTERS: dict[str, str] = {
+    # Road passes: known climbs to seed generated routes with
+    # (route_candidates.py), from the climbs card's "known climbs" item.
+    "mountain_pass": 'node["mountain_pass"="yes"]',
+}
+
+
 # Safe to build as a plain dict comprehension: course_point_type values are
 # unique per entry, asserted by test_poi_types.py's exhaustive comparison
 # against dev_tools/wahoo_poi_mapping.json.

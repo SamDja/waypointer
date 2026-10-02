@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from waypointer.poi_types import POI_TYPES
+from waypointer.poi_types import INTERNAL_IMPORT_FILTERS, POI_TYPES
 
 LUA_PATH = Path(__file__).parent.parent / "postgis" / "import_pois.lua"
 PREFILTER_PATH = LUA_PATH.parent / "prefilter.txt"
@@ -87,11 +87,17 @@ def _parse_lua() -> dict[str, Filter]:
 
 
 def _searchable() -> dict[str, Filter]:
-    return {
+    """Everything the import must bring in: the searchable POI types plus the
+    rows imported for the backend's own use (INTERNAL_IMPORT_FILTERS)."""
+    filters = {
         key: _parse_python(config.tag_filter)
         for key, config in POI_TYPES.items()
         if config.tag_filter is not None
     }
+    for key, tag_filter in INTERNAL_IMPORT_FILTERS.items():
+        assert key not in filters, f"{key} is both a POI type and an internal import"
+        filters[key] = _parse_python(tag_filter)
+    return filters
 
 
 def test_lua_covers_exactly_the_searchable_types():

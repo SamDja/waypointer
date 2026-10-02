@@ -64,6 +64,49 @@ def total_distance_m(coords: list[LatLon]) -> float:
     )
 
 
+def cumulative_distances_m(coords: list[LatLon]) -> list[float]:
+    """Distance from the start to each coordinate, index-aligned with coords.
+    Mirrors frontend/src/lib/geometry.ts' cumulativeDistancesM."""
+    distances = [0.0] if coords else []
+    for i in range(1, len(coords)):
+        a, b = coords[i - 1], coords[i]
+        distances.append(distances[-1] + haversine_m(a[0], a[1], b[0], b[1]))
+    return distances
+
+
+# A change in elevation smaller than this is noise, not climbing - mirrors the
+# frontend's ELEVATION_NOISE_M, so the route generator reads a route's ascent
+# the way the app shows it.
+ELEVATION_NOISE_M = 5.0
+
+
+def elevation_gain_loss_m(
+    elevations: list[float | None], noise_m: float = ELEVATION_NOISE_M
+) -> tuple[float, float]:
+    """(gain, loss) with hysteresis: a change only counts once the elevation
+    has moved at least noise_m from the last counted level, and a missing
+    elevation breaks the run rather than being bridged. Mirrors
+    frontend/src/lib/geometry.ts' elevationGainLossM - and, like it, reads a
+    little lower than gpx_io.total_ascent_m, which sums every delta."""
+    gain = loss = 0.0
+    reference: float | None = None
+    for elevation in elevations:
+        if elevation is None:
+            reference = None
+            continue
+        if reference is None:
+            reference = elevation
+            continue
+        delta = elevation - reference
+        if delta >= noise_m:
+            gain += delta
+            reference = elevation
+        elif delta <= -noise_m:
+            loss -= delta
+            reference = elevation
+    return gain, loss
+
+
 def point_to_polyline_distance_m(p: LatLon, polyline: list[LatLon]) -> float:
     """Minimum distance from p to any segment of polyline, in meters."""
     if not polyline:

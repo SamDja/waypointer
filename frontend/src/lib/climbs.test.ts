@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs"
+import { join } from "node:path"
 import { describe, expect, it } from "vitest"
 import {
   climbCategory,
@@ -218,5 +220,40 @@ describe("routeDifficulty", () => {
     const { climbCategory: _, ...hiking } = CYCLING_DIFFICULTY
     const difficulty = routeDifficulty({ distanceM: 1000, gainM: 0, maxGradePct: 0, climbs: [climbOf("HC")] }, hiking)
     expect(difficulty.level).toBe(0)
+  })
+})
+
+// The same profile and expected climbs tests/test_climbs.py checks against the
+// Python port (src/waypointer/climbs.py), so a change to either implementation
+// alone fails one of the two suites.
+describe("parity with the backend's climbs.py", () => {
+  it("finds the climbs the shared fixture expects", () => {
+    const fixture = JSON.parse(
+      readFileSync(join(import.meta.dirname, "../../../tests/fixtures/climb_profile.json"), "utf8")
+    ) as {
+      distances_m: number[]
+      elevations: (number | null)[]
+      expected_climbs: {
+        start_index: number
+        end_index: number
+        length_m: number
+        ascent_m: number
+        max_grade_pct: number
+        category: string | null
+      }[]
+      expected_max_grade_pct: number
+    }
+    const coords = fixture.distances_m.map((d): [number, number] => [46 + d / M_PER_DEG_LAT, 11])
+    const round = (value: number, places: number) => Math.round(value * 10 ** places) / 10 ** places
+    const climbs = detectClimbs(coords, fixture.elevations, CYCLING).map((c) => ({
+      start_index: c.startIndex,
+      end_index: c.endIndex,
+      length_m: round(c.lengthM, 1),
+      ascent_m: round(c.ascentM, 1),
+      max_grade_pct: round(c.maxGradePct, 2),
+      category: c.category === null ? null : String(c.category),
+    }))
+    expect(climbs).toEqual(fixture.expected_climbs)
+    expect(round(routeMaxGradePct(coords, fixture.elevations), 2)).toBe(fixture.expected_max_grade_pct)
   })
 })

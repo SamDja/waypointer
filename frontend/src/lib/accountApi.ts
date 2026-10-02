@@ -101,6 +101,9 @@ export async function downloadAccountData(): Promise<void> {
 export interface ProfileSettings {
   // Keyed by activity (map style key).
   avg_speed_kmh: Record<string, number>
+  // Climbing speed in vertical m/h, for the route generator; no input for it
+  // yet, but kept here so saving the speeds doesn't drop it.
+  vam_m_per_h?: Record<string, number>
 }
 
 export async function fetchProfileSettings(): Promise<ProfileSettings> {

@@ -155,8 +155,8 @@ export function PrivacyPage() {
               browser's own description of itself (its "user agent"), so a session can be recognised and ended.
             </li>
             <li>
-              <strong>The fitness apps you connect</strong> (see below), and your <strong>speed settings</strong> for
-              each activity.
+              <strong>The fitness apps you connect</strong> (see below), and your <strong>speed settings</strong> (riding
+              and climbing speed) for each activity.
             </li>
             <li>
               When the account was created and last signed in to, and when you accepted this notice (and which

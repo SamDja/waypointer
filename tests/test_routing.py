@@ -13,6 +13,7 @@ from waypointer.routing import (
     build_routing_params,
     resolve_options,
     route_leg,
+    route_via,
     surface_category,
 )
 
@@ -26,6 +27,28 @@ def test_build_routing_params_flips_to_lon_lat():
     assert params["lonlats"] == "8.541699,47.376899|8.55,47.38"
     assert params["profile"] == "fastbike"
     assert params["format"] == "geojson"
+
+
+@responses.activate
+def test_route_via_routes_every_point_in_one_request(brouter_response_json):
+    # The route generator's whole candidate is one call, alternative and all.
+    responses.add(responses.GET, ROUTING_URL, json=brouter_response_json, status=200)
+    via = (47.378, 8.545)
+    leg = route_via([START, via, END], alternative=2, use_cache=False)
+    assert len(responses.calls) == 1
+    query = parse_qs(urlparse(responses.calls[0].request.url).query)
+    assert query["lonlats"] == ["8.541699,47.376899|8.545,47.378|8.55,47.38"]
+    assert query["alternativeidx"] == ["2"]
+    assert leg.distance_m == pytest.approx(1840.0)
+
+
+@pytest.mark.parametrize(
+    ("points", "alternative"),
+    [([START], 0), ([START, END], -1), ([START, END], 4)],
+)
+def test_route_via_rejects_bad_requests(points, alternative):
+    with pytest.raises(ValueError):
+        route_via(points, alternative=alternative, use_cache=False)
 
 
 def test_route_leg_rejects_unknown_profile():

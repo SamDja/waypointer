@@ -240,32 +240,38 @@ class RoutedLeg:
 _cache: TTLCache[RoutedLeg] = TTLCache(CACHE_TTL_S)
 
 
-def _cache_key(
-    start: LatLon, end: LatLon, profile: str, options: dict[str, str], url: str
-) -> str:
+# BRouter computes up to this many alternatives to its primary route
+# (alternativeidx 0..3).
+MAX_ALTERNATIVE = 3
+
+
+def _cache_key(points: list[LatLon], profile: str, options: dict[str, str], url: str, alternative: int) -> str:
     encoded = ",".join(f"{name}={value}" for name, value in sorted(options.items()))
-    return f"{url}\n{profile}\n{encoded}\n{start[0]},{start[1]}\n{end[0]},{end[1]}"
+    path = "|".join(f"{lat},{lon}" for lat, lon in points)
+    return f"{url}\n{profile}\n{encoded}\n{alternative}\n{path}"
+
+
+def _routing_params(points: list[LatLon], profile: str, options: dict[str, str], alternative: int) -> dict[str, str]:
+    # Note the coordinate order flip: BRouter's `lonlats` is lon,lat pairs,
+    # while every coordinate elsewhere in this codebase is (lat, lon).
+    params = {
+        "lonlats": "|".join(f"{lon},{lat}" for lat, lon in points),
+        "profile": profile,
+        # BRouter can return several alternatives; 0 is the primary one.
+        "alternativeidx": str(alternative),
+        "format": "geojson",
+    }
+    for name, value in options.items():
+        params[f"profile:{name}"] = value
+    return params
 
 
 def build_routing_params(
     start: LatLon, end: LatLon, profile: str, options: dict[str, str] | None = None
 ) -> dict[str, str]:
-    """Builds BRouter's query parameters for a two-point leg.
-
-    Note the coordinate order flip: BRouter's `lonlats` is lon,lat pairs,
-    while every coordinate elsewhere in this codebase is (lat, lon).
-    `options` are already-encoded values from resolve_options().
-    """
-    params = {
-        "lonlats": f"{start[1]},{start[0]}|{end[1]},{end[0]}",
-        "profile": profile,
-        # BRouter can return several alternatives; 0 is the primary one.
-        "alternativeidx": "0",
-        "format": "geojson",
-    }
-    for name, value in (options or {}).items():
-        params[f"profile:{name}"] = value
-    return params
+    """Builds BRouter's query parameters for a two-point leg. `options` are
+    already-encoded values from resolve_options()."""
+    return _routing_params([start, end], profile, options or {}, 0)
 
 
 def _parse_leg(payload: dict) -> RoutedLeg:
@@ -356,11 +362,36 @@ def route_leg(
     ValueError for an unknown profile or invalid options (see
     resolve_options).
     """
+    return route_via([start, end], profile, options, session=session, url=url, use_cache=use_cache)
+
+
+def route_via(
+    points: list[LatLon],
+    profile: str = DEFAULT_PROFILE,
+    options: dict[str, object] | None = None,
+    alternative: int = 0,
+    session: requests.Session | None = None,
+    url: str = ROUTING_URL,
+    use_cache: bool = True,
+) -> RoutedLeg:
+    """Routes through every point in order, in one BRouter request.
+
+    The route generator's way of keeping its call count down: a loop through
+    four via points is one request, not five. `alternative` (0 to
+    MAX_ALTERNATIVE) asks for one of BRouter's alternatives to its primary
+    route. The result is one RoutedLeg covering the whole route. Raises
+    ValueError for an unknown profile, invalid options, fewer than two
+    points or an alternative out of range.
+    """
     if profile not in ALLOWED_PROFILES:
         raise ValueError(f"Unknown routing profile: {profile}")
+    if len(points) < 2:
+        raise ValueError("A route needs at least two points.")
+    if not 0 <= alternative <= MAX_ALTERNATIVE:
+        raise ValueError(f"alternative must be 0 to {MAX_ALTERNATIVE}.")
     encoded = resolve_options(profile, options)
 
-    key = _cache_key(start, end, profile, encoded, url)
+    key = _cache_key(points, profile, encoded, url, alternative)
     if use_cache:
         cached = _cache.get(key)
         if cached is not None:
@@ -370,7 +401,7 @@ def route_leg(
     try:
         response = http.get(
             url,
-            params=build_routing_params(start, end, profile, encoded),
+            params=_routing_params(points, profile, encoded, alternative),
             headers={"User-Agent": USER_AGENT},
             timeout=30,
         )
