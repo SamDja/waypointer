@@ -21,7 +21,7 @@ import { ActivitySwitchDialog, type ActivitySwitchConsequences } from "@/compone
 import { OffRouteDialog, type OffRouteItem } from "@/components/OffRouteDialog"
 import { ApiError, NETWORK_ERROR_MESSAGE, cooldownRemainingMs, findPois, lookupPoi, routeLeg } from "@/lib/api"
 import { track } from "@/lib/analytics"
-import { confirmEmailChange, fetchAccountStatus, signOut, verifyEmail } from "@/lib/accountApi"
+import { confirmEmailChange, fetchAccountStatus, greeting, signOut, verifyEmail } from "@/lib/accountApi"
 import { parseEmailLink, withoutEmailLinkParams } from "@/lib/emailLinks"
 import type { Account } from "@/types/account"
 import { mostSpecificPerElement } from "@/lib/poiTypes"
@@ -254,7 +254,7 @@ export default function App() {
           setAccountsEnabled(true)
           setAccount(verified)
           track("email_verified")
-          toast("Email verified - welcome to Sulla Via!")
+          toast(greeting("Email verified - welcome to Sulla Via", verified))
         })
         .catch((err) => toast(err instanceof Error ? err.message : "That link didn't work.", "error"))
     } else if (link.kind === "confirm-email") {

@@ -25,8 +25,17 @@ export async function fetchAccountStatus(): Promise<AccountStatus> {
   return (await response.json()) as AccountStatus
 }
 
-export async function signUp(email: string, password: string, turnstileToken: string | null): Promise<void> {
-  await post("/api/auth/signup", { email, password, turnstile_token: turnstileToken })
+export async function signUp(
+  name: string,
+  email: string,
+  password: string,
+  turnstileToken: string | null,
+): Promise<void> {
+  await post("/api/auth/signup", { name, email, password, turnstile_token: turnstileToken })
+}
+
+export async function changeName(name: string): Promise<Account> {
+  return (await (await post("/api/account/name", { name })).json()) as Account
 }
 
 export async function signIn(email: string, password: string): Promise<Account> {
@@ -98,4 +107,10 @@ export async function saveProfileSettings(settings: ProfileSettings): Promise<vo
     { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(settings) },
     { failed: "Couldn't save your settings to your account - please try again in a moment." },
   )
+}
+
+// How to greet someone in a message: by name, or without one for an account
+// made before names were asked ("Welcome back!", not "Welcome back, !").
+export function greeting(text: string, account: { name: string | null }, end = "!"): string {
+  return account.name ? `${text}, ${account.name}${end}` : `${text}${end}`
 }

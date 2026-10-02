@@ -251,6 +251,8 @@ class AccountResponse(BaseModel):
     # signs someone in. Never carries the password hash.
     id: str
     email: str
+    # What to call them - asked at sign-up; None for an account made before.
+    name: str | None
     email_verified: bool
     # Opt-in features switched on by hand for a test phase (e.g. "llm").
     features: list[str]

@@ -74,7 +74,7 @@ def _stored_tokens(database_url, provider):
 
 def test_connecting_needs_a_verified_account(client, outbox):
     assert client.post("/api/strava/connect", data={"code": "x"}).status_code == 401
-    client.post("/api/auth/signup", data={"email": "rider@example.com", "password": ACCOUNT_PASSWORD})
+    client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": ACCOUNT_PASSWORD})
     client.post("/api/auth/login", data={"email": "rider@example.com", "password": ACCOUNT_PASSWORD})
     response = client.get(
         "/api/strava/authorize-url", params={"redirect_uri": "http://testserver/strava-callback.html", "state": "s"}

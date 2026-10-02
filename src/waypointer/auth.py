@@ -40,6 +40,7 @@ from waypointer.rate_limit import (
 )
 from waypointer.schemas import AccountResponse, AccountStatus, ProfileSettings
 from waypointer.sessions import (
+    USER_COLUMN_COUNT,
     USER_COLUMNS,
     User,
     clear_session_cookie,
@@ -62,6 +63,8 @@ CHANGE_EMAIL_TOKEN_TTL = timedelta(hours=24)
 # valid addresses.
 EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 MAX_EMAIL_LENGTH = 254
+# What to call someone: a first name, a nickname, a full name - their call.
+MAX_NAME_LENGTH = 60
 
 LOGIN_FAILED = "Email or password is incorrect."
 BAD_LINK = "This link has expired or has already been used. Please ask for a new one."
@@ -78,6 +81,7 @@ def _account(user: User) -> AccountResponse:
     return AccountResponse(
         id=user.id,
         email=user.email,
+        name=user.name,
         email_verified=user.email_verified,
         features=list(user.features),
         created_at=user.created_at.isoformat(),
@@ -89,6 +93,23 @@ def _normalize_email(raw: str) -> str:
     if len(email) > MAX_EMAIL_LENGTH or not EMAIL_PATTERN.match(email):
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Please enter a valid email address.")
     return email
+
+
+def _normalize_name(raw: str) -> str:
+    # Control characters (newlines included) are dropped and runs of spaces
+    # collapsed: the name goes into emails and the header as plain text.
+    name = " ".join("".join(ch for ch in raw if ch.isprintable()).split())
+    if not name:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "Please tell us what to call you.")
+    if len(name) > MAX_NAME_LENGTH:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, f"Please keep your name under {MAX_NAME_LENGTH} characters.")
+    return name
+
+
+def _hello(name: str | None) -> str:
+    """An email's opening line. Only ever the account's stored name - never
+    one typed into a form, which could be anyone's."""
+    return f"Hi {name},\n\n" if name else "Hi,\n\n"
 
 
 def _check_password_rules(password: str) -> None:
@@ -180,12 +201,14 @@ def _check_current_password(conn: psycopg.Connection, user: User, password: str)
         raise HTTPException(status.HTTP_400_BAD_REQUEST, "Your current password is incorrect.")
 
 
-def _send_verification(conn: psycopg.Connection, request: Request, user_id: str, email: str) -> None:
+def _send_verification(
+    conn: psycopg.Connection, request: Request, user_id: str, email: str, name: str | None
+) -> None:
     token = _issue_token(conn, user_id, "verify", VERIFY_TOKEN_TTL)
     _send(
         email,
         "Confirm your Sulla Via account",
-        "Welcome to Sulla Via!\n\n"
+        _hello(name) + "Welcome to Sulla Via!\n\n"
         "Confirm your email address to finish creating your account:\n\n"
         f"{_link_base(request)}/?verify={token}\n\n"
         "The link works for 24 hours. If you didn't sign up, you can ignore this email.\n",
@@ -216,10 +239,12 @@ def me(request: Request, response: Response) -> AccountStatus:
 )
 def signup(
     request: Request,
+    name: str = Form(...),
     email: str = Form(...),
     password: str = Form(...),
     turnstile_token: str | None = Form(None),
 ) -> dict:
+    name = _normalize_name(name)
     email = _normalize_email(email)
     _check_password_rules(password)
     _check_captcha(request, turnstile_token)
@@ -228,17 +253,20 @@ def signup(
     password_hash = passwords.hash_password(password)
     with connection() as conn:
         row = conn.execute(
-            "INSERT INTO users (email, password_hash) VALUES (%s, %s)"
+            "INSERT INTO users (email, password_hash, name) VALUES (%s, %s, %s)"
             " ON CONFLICT (email) DO NOTHING RETURNING id::text",
-            (email, password_hash),
+            (email, password_hash, name),
         ).fetchone()
         if row is not None:
-            _send_verification(conn, request, row[0], email)
+            _send_verification(conn, request, row[0], email, name)
         else:
+            # The account that already exists keeps its own name - the one
+            # just typed may not be its owner's.
+            existing = conn.execute("SELECT name FROM users WHERE email = %s", (email,)).fetchone()
             _send(
                 email,
                 "Your Sulla Via account",
-                "Someone (hopefully you) tried to create a Sulla Via account with this email address,"
+                _hello(existing[0] if existing else None) + "Someone (hopefully you) tried to create a Sulla Via account with this email address,"
                 " but there already is one.\n\n"
                 "If you've forgotten your password, you can reset it from the sign-in form:\n\n"
                 f"{_link_base(request)}/?signin=forgot\n\n"
@@ -274,7 +302,7 @@ def resend_verification(request: Request, user: User = Depends(require_user)) ->
         return CHECK_EMAIL
     _limit_emails_to(user.email)
     with connection() as conn:
-        _send_verification(conn, request, user.id, user.email)
+        _send_verification(conn, request, user.id, user.email, user.name)
     return CHECK_EMAIL
 
 
@@ -295,10 +323,11 @@ def login(request: Request, response: Response, email: str = Form(...), password
         ).fetchone()
         # verify_password spends a hash check even with no account, so an
         # unknown email isn't answered measurably faster.
-        if not passwords.verify_password(row[5] if row else None, password):
+        password_hash = row[USER_COLUMN_COUNT] if row else None
+        if not passwords.verify_password(password_hash, password):
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, LOGIN_FAILED)
         user = user_from_row(row)
-        if passwords.needs_rehash(row[5]):
+        if passwords.needs_rehash(password_hash):
             conn.execute(
                 "UPDATE users SET password_hash = %s WHERE id = %s", (passwords.hash_password(password), user.id)
             )
@@ -334,14 +363,14 @@ def forgot_password(request: Request, email: str = Form(...), turnstile_token: s
     _check_captcha(request, turnstile_token)
     _limit_emails_to(email)
     with connection() as conn:
-        row = conn.execute("SELECT id::text, email::text FROM users WHERE email = %s", (email,)).fetchone()
+        row = conn.execute("SELECT id::text, email::text, name FROM users WHERE email = %s", (email,)).fetchone()
         # Unknown address: the same answer, and no email - there's no one to tell.
         if row is not None:
             token = _issue_token(conn, row[0], "reset", RESET_TOKEN_TTL)
             _send(
                 row[1],
                 "Reset your Sulla Via password",
-                "Someone (hopefully you) asked to reset the password of your Sulla Via account.\n\n"
+                _hello(row[2]) + "Someone (hopefully you) asked to reset the password of your Sulla Via account.\n\n"
                 "Choose a new password here:\n\n"
                 f"{_link_base(request)}/?reset={token}\n\n"
                 "The link works once, for 30 minutes. If you didn't ask for this,"
@@ -376,6 +405,18 @@ def reset_password(
 
 
 # --- account settings ------------------------------------------------------
+
+
+@router.post(
+    "/api/account/name",
+    response_model=AccountResponse,
+    dependencies=[Depends(require_same_origin), Depends(account_rate_limit)],
+)
+def change_name(name: str = Form(...), user: User = Depends(require_user)) -> AccountResponse:
+    name = _normalize_name(name)
+    with connection() as conn:
+        conn.execute("UPDATE users SET name = %s WHERE id = %s", (name, user.id))
+        return _account(_load_user(conn, user.id))
 
 
 @router.post(
@@ -426,7 +467,7 @@ def change_email(
             _send(
                 new_email,
                 "Your Sulla Via account",
-                "Someone asked to move a Sulla Via account to this email address, but this address"
+                _hello(None) + "Someone asked to move a Sulla Via account to this email address, but this address"
                 " already has an account of its own, so nothing has changed.\n",
             )
             return CHECK_EMAIL
@@ -434,7 +475,7 @@ def change_email(
         _send(
             new_email,
             "Confirm your new Sulla Via email address",
-            "Confirm that you want to use this address for your Sulla Via account:\n\n"
+            _hello(user.name) + "Confirm that you want to use this address for your Sulla Via account:\n\n"
             f"{_link_base(request)}/?confirm-email={token}\n\n"
             "The link works for 24 hours. Until then, your account keeps its current address.\n",
         )
@@ -465,7 +506,7 @@ def confirm_email(token: str = Form(...)) -> AccountResponse:
         mailer.send_email(
             old_email,
             "Your Sulla Via email address was changed",
-            f"Your Sulla Via account now uses {new_email}. If you didn't do this, reply to this email.\n",
+            _hello(user.name) + f"Your Sulla Via account now uses {new_email}. If you didn't do this, reply to this email.\n",
         )
     except mailer.MailError as exc:
         logger.warning("Couldn't notify the old address: %s", exc)
@@ -497,6 +538,7 @@ def export_account(user: User = Depends(require_user)) -> Response:
         "account": {
             "id": user.id,
             "email": user.email,
+            "name": user.name,
             "email_verified_at": iso(row[2]),
             "features": list(user.features),
             "created_at": iso(row[0]),

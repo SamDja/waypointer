@@ -14,7 +14,7 @@ def link_token(mail: dict, param: str) -> str:
 
 def signup_and_verify(client, outbox, email="rider@example.com", password=ACCOUNT_PASSWORD) -> dict:
     """Creates a verified account and leaves `client` signed in to it."""
-    assert client.post("/api/auth/signup", data={"email": email, "password": password}).status_code == 202
+    assert client.post("/api/auth/signup", data={"name": "Ada", "email": email, "password": password}).status_code == 202
     response = client.post("/api/auth/verify", data={"token": link_token(outbox[-1], "verify")})
     assert response.status_code == 200
     return response.json()

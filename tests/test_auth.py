@@ -39,7 +39,7 @@ def test_me_without_database(client, monkeypatch):
 
 
 def test_signup_verify_login_logout(client, outbox):
-    response = client.post("/api/auth/signup", data={"email": "Rider@Example.com", "password": PASSWORD})
+    response = client.post("/api/auth/signup", data={"name": "Ada", "email": "Rider@Example.com", "password": PASSWORD})
     assert response.status_code == 202
     # Sign-up alone doesn't sign in - the verification link does.
     assert client.get("/api/auth/me").json()["account"] is None
@@ -68,15 +68,15 @@ def test_logout_invalidates_the_session_server_side(client, outbox):
 
 
 def test_verify_link_is_single_use(client, outbox):
-    client.post("/api/auth/signup", data={"email": "rider@example.com", "password": PASSWORD})
+    client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD})
     token = _link_token(outbox[-1], "verify")
     assert client.post("/api/auth/verify", data={"token": token}).status_code == 200
     assert client.post("/api/auth/verify", data={"token": token}).status_code == 400
 
 
 def test_duplicate_signup_looks_the_same(client, outbox):
-    first = client.post("/api/auth/signup", data={"email": "rider@example.com", "password": PASSWORD})
-    second = client.post("/api/auth/signup", data={"email": "rider@example.com", "password": "another long one"})
+    first = client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD})
+    second = client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": "another long one"})
     assert first.status_code == second.status_code == 202
     assert first.json() == second.json()
     # The owner is told by email instead.
@@ -85,7 +85,7 @@ def test_duplicate_signup_looks_the_same(client, outbox):
 
 
 def test_unverified_account_can_log_in(client, outbox):
-    client.post("/api/auth/signup", data={"email": "rider@example.com", "password": PASSWORD})
+    client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD})
     response = client.post("/api/auth/login", data={"email": "rider@example.com", "password": PASSWORD})
     assert response.status_code == 200
     assert response.json()["email_verified"] is False
@@ -104,20 +104,20 @@ def test_login_errors_are_generic(client, outbox):
 
 @pytest.mark.parametrize("password", ["short", "x" * 257])
 def test_signup_refuses_bad_passwords(client, outbox, password):
-    response = client.post("/api/auth/signup", data={"email": "rider@example.com", "password": password})
+    response = client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": password})
     assert response.status_code == 400
     assert outbox == []
 
 
 def test_signup_refuses_bad_email(client, outbox):
-    response = client.post("/api/auth/signup", data={"email": "not-an-email", "password": PASSWORD})
+    response = client.post("/api/auth/signup", data={"name": "Ada", "email": "not-an-email", "password": PASSWORD})
     assert response.status_code == 400
 
 
 def test_state_changing_requests_need_our_origin(client, outbox):
     for headers in ({"Origin": "https://evil.example"}, {"Origin": ""}):
         response = client.post(
-            "/api/auth/signup", data={"email": "rider@example.com", "password": PASSWORD}, headers=headers
+            "/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD}, headers=headers
         )
         assert response.status_code == 403
     assert outbox == []
@@ -125,11 +125,11 @@ def test_state_changing_requests_need_our_origin(client, outbox):
 
 def test_origin_checked_against_public_base_url(client, outbox, monkeypatch):
     monkeypatch.setenv("PUBLIC_BASE_URL", "https://sullavia.example")
-    response = client.post("/api/auth/signup", data={"email": "rider@example.com", "password": PASSWORD})
+    response = client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD})
     assert response.status_code == 403
     response = client.post(
         "/api/auth/signup",
-        data={"email": "rider@example.com", "password": PASSWORD},
+        data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD},
         headers={"Origin": "https://sullavia.example"},
     )
     assert response.status_code == 202
@@ -286,11 +286,11 @@ def test_emails_to_one_address_are_rate_limited(client, outbox):
 def test_captcha_required_when_configured(client, outbox, monkeypatch):
     monkeypatch.setenv("TURNSTILE_SECRET_KEY", "secret")
     responses.post(turnstile.SITEVERIFY_URL, json={"success": False})
-    response = client.post("/api/auth/signup", data={"email": "rider@example.com", "password": PASSWORD})
+    response = client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD})
     assert response.status_code == 400
     responses.replace(responses.POST, turnstile.SITEVERIFY_URL, json={"success": True})
     response = client.post(
-        "/api/auth/signup", data={"email": "rider@example.com", "password": PASSWORD, "turnstile_token": "tok"}
+        "/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD, "turnstile_token": "tok"}
     )
     assert response.status_code == 202
     assert client.get("/api/auth/me").json()["captcha_required"] is True
@@ -337,3 +337,51 @@ def test_require_feature(outbox, account_db):
     with psycopg.connect(account_db, autocommit=True) as conn:
         conn.execute("UPDATE users SET features = array_append(features, 'llm')")
     assert probe_client.get("/probe").status_code == 200
+
+
+def test_signup_asks_for_a_name(client, outbox):
+    response = client.post("/api/auth/signup", data={"name": "  ", "email": "rider@example.com", "password": PASSWORD})
+    assert response.status_code == 400
+    response = client.post("/api/auth/signup", data={"name": "x" * 61, "email": "rider@example.com", "password": PASSWORD})
+    assert response.status_code == 400
+    assert outbox == []
+
+
+def test_name_is_tidied_and_greets_by_name(client, outbox):
+    response = client.post(
+        "/api/auth/signup", data={"name": " Ada \n  Lovelace\t", "email": "rider@example.com", "password": PASSWORD}
+    )
+    assert response.status_code == 202
+    assert outbox[-1]["body"].startswith("Hi Ada Lovelace,\n\n")
+    account = client.post("/api/auth/verify", data={"token": _link_token(outbox[-1], "verify")}).json()
+    assert account["name"] == "Ada Lovelace"
+    assert client.get("/api/auth/me").json()["account"]["name"] == "Ada Lovelace"
+
+
+def test_duplicate_signup_greets_the_existing_owner(client, outbox):
+    client.post("/api/auth/signup", data={"name": "Ada", "email": "rider@example.com", "password": PASSWORD})
+    client.post("/api/auth/signup", data={"name": "Mallory", "email": "rider@example.com", "password": PASSWORD})
+    # The name typed the second time may not be the owner's - it's not used.
+    assert outbox[-1]["body"].startswith("Hi Ada,")
+    assert "Mallory" not in outbox[-1]["body"]
+
+
+def test_change_name(client, outbox):
+    _signup_and_verify(client, outbox)
+    response = client.post("/api/account/name", data={"name": "Countess Ada"})
+    assert response.status_code == 200
+    assert response.json()["name"] == "Countess Ada"
+    assert client.get("/api/account/export").json()["account"]["name"] == "Countess Ada"
+    assert client.post("/api/account/name", data={"name": ""}).status_code in (400, 422)
+
+
+def test_account_without_a_name(client, outbox, account_db):
+    """Accounts made before names were asked have none - nothing breaks."""
+    _signup_and_verify(client, outbox)
+    with psycopg.connect(account_db, autocommit=True) as conn:
+        conn.execute("UPDATE users SET name = NULL")
+    assert client.get("/api/auth/me").json()["account"]["name"] is None
+    client.post("/api/auth/resend-verification")
+    client.post("/api/auth/logout")
+    client.post("/api/auth/forgot-password", data={"email": "rider@example.com"})
+    assert outbox[-1]["body"].startswith("Hi,\n\n")

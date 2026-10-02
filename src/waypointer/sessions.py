@@ -41,13 +41,20 @@ class User:
     email_verified: bool
     features: tuple[str, ...]
     created_at: datetime
+    # What to call them; None for an account made before names were asked.
+    name: str | None = None
 
 
-USER_COLUMNS = "u.id::text, u.email::text, u.email_verified_at IS NOT NULL, u.features, u.created_at"
+USER_COLUMNS = "u.id::text, u.email::text, u.email_verified_at IS NOT NULL, u.features, u.created_at, u.name"
+# Where a query's own extra columns start, after USER_COLUMNS - index past
+# this rather than by number, so adding a user column can't shift them.
+USER_COLUMN_COUNT = 6
 
 
 def user_from_row(row) -> User:
-    return User(id=row[0], email=row[1], email_verified=row[2], features=tuple(row[3]), created_at=row[4])
+    return User(
+        id=row[0], email=row[1], email_verified=row[2], features=tuple(row[3]), created_at=row[4], name=row[5]
+    )
 
 
 def hash_token(token: str) -> bytes:
@@ -128,7 +135,7 @@ def current_user_optional(request: Request, response: Response) -> User | None:
         if row is None:
             clear_session_cookie(response)
             return None
-        if row[5]:
+        if row[USER_COLUMN_COUNT]:
             conn.execute(
                 "UPDATE sessions SET last_seen_at = now(), expires_at = now() + %s WHERE token_hash = %s",
                 (SESSION_TTL, hash_token(token)),

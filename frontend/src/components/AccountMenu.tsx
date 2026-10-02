@@ -48,15 +48,21 @@ export function AccountMenu({ account, connections, onOpen, onSignOut }: Account
     <>
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button variant="ghost" className="w-fit" aria-label="Your account">
+          <Button variant="ghost" className="w-fit max-w-48" aria-label="Your account">
             <UserRound className="size-4" />
+            {/* Their name, as they gave it - a phone's header row is shared
+                with the logo pill, so a long one is cut short there. */}
+            {account.name && <span className="max-w-24 truncate sm:max-w-36">{account.name}</span>}
             {!account.email_verified && <MailWarning className="size-4 text-warning-foreground" />}
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="max-w-72">
           <DropdownMenuLabel className="flex flex-col gap-1">
             <span className="text-xs font-normal text-muted-foreground">Signed in as</span>
-            <span className="truncate font-normal text-foreground">{account.email}</span>
+            {account.name && <span className="truncate text-foreground">{account.name}</span>}
+            <span className={account.name ? "truncate text-xs font-normal text-muted-foreground" : "truncate font-normal text-foreground"}>
+              {account.email}
+            </span>
             {!account.email_verified && (
               <span className="text-xs font-normal text-warning-foreground">
                 Email not verified yet - check your inbox

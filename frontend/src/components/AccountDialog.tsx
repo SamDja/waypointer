@@ -18,9 +18,11 @@ import { Label } from "@/components/ui/label"
 import { Turnstile } from "@/components/Turnstile"
 import {
   changeEmail,
+  changeName,
   changePassword,
   deleteAccount,
   downloadAccountData,
+  greeting,
   requestPasswordReset,
   resendVerification,
   resetPassword,
@@ -35,8 +37,10 @@ import type { Account } from "@/types/account"
 
 export type AccountView = "signin" | "signup" | "forgot" | "check-email" | "reset" | "settings"
 
-// Mirrors passwords.py's MIN_PASSWORD_LENGTH - the backend has the final say.
+// Mirror passwords.py's MIN_PASSWORD_LENGTH and auth.py's MAX_NAME_LENGTH -
+// the backend has the final say.
 const MIN_PASSWORD_LENGTH = 10
+const MAX_NAME_LENGTH = 60
 
 export interface AccountDialogProps {
   // null = closed.
@@ -150,9 +154,10 @@ function SignUpForm({
   onSent,
   onViewChange,
 }: {
-  onSent: (email: string) => void
+  onSent: (email: string, name: string) => void
   onViewChange: (view: AccountView) => void
 }) {
+  const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
   const [captcha, setCaptcha] = useState<string | null>(null)
@@ -165,18 +170,27 @@ function SignUpForm({
     event.preventDefault()
     void run(async () => {
       try {
-        await signUp(email, password, captcha)
+        await signUp(name, email, password, captcha)
       } finally {
         setCaptcha(null)
         setCaptchaKey((key) => key + 1)
       }
       track("signed_up")
-      onSent(email)
+      onSent(email, name.trim())
     })
   }
 
   return (
     <form className="flex flex-col gap-4" onSubmit={handleSubmit}>
+      <Field
+        id="signup-name"
+        label="Your name"
+        autoComplete="given-name"
+        maxLength={MAX_NAME_LENGTH}
+        hint="What should we call you? Your first name is plenty."
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+      />
       <Field id="signup-email" label="Email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
       <Field
         id="signup-password"
@@ -269,6 +283,44 @@ function SettingsSection({ title, children }: { title: string; children: ReactNo
       <h3 className="text-sm font-semibold">{title}</h3>
       {children}
     </section>
+  )
+}
+
+function NameSection({ account, onAccountChange }: { account: Account; onAccountChange: (a: Account) => void }) {
+  const [name, setName] = useState(account.name ?? "")
+  const [saved, setSaved] = useState(false)
+  const { busy, error, run } = useSubmit()
+  const unchanged = name.trim() === (account.name ?? "")
+
+  function handleSubmit(event: FormEvent) {
+    event.preventDefault()
+    void run(async () => {
+      onAccountChange(await changeName(name))
+      setSaved(true)
+    })
+  }
+
+  return (
+    <SettingsSection title="Your name">
+      <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
+        <Field
+          id="account-name"
+          label="What should we call you?"
+          autoComplete="given-name"
+          maxLength={MAX_NAME_LENGTH}
+          value={name}
+          onChange={(e) => {
+            setName(e.target.value)
+            setSaved(false)
+          }}
+        />
+        <FormError error={error} />
+        {saved && <Callout variant="success">Saved - nice to meet you, {account.name}!</Callout>}
+        <Button type="submit" variant="outline" className="w-fit" loading={busy} disabled={unchanged}>
+          Save name
+        </Button>
+      </form>
+    </SettingsSection>
   )
 }
 
@@ -501,13 +553,13 @@ export function AccountDialog({
   connections,
   onConnectionsChange,
 }: AccountDialogProps) {
-  const [sent, setSent] = useState<{ email: string; kind: "signup" | "reset" } | null>(null)
+  const [sent, setSent] = useState<{ email: string; name?: string; kind: "signup" | "reset" } | null>(null)
   const shown = view ?? "signin"
   const { title, description } = TITLES[shown]
 
   function handleSent(kind: "signup" | "reset") {
-    return (email: string) => {
-      setSent({ email, kind })
+    return (email: string, name?: string) => {
+      setSent({ email, name, kind })
       onViewChange("check-email")
     }
   }
@@ -515,7 +567,7 @@ export function AccountDialog({
   function handleSignedIn(next: Account) {
     onAccountChange(next)
     onViewChange(null)
-    toast(`Signed in as ${next.email}.`)
+    toast(greeting("Welcome back", next))
   }
 
   return (
@@ -537,7 +589,7 @@ export function AccountDialog({
             <p className="text-sm">
               {sent?.kind === "reset"
                 ? `If there's an account for ${sent.email}, we've sent it a link to reset your password.`
-                : `We've sent an email to ${sent?.email ?? "you"}. Follow the link in it to finish signing up.`}
+                : `${sent?.name ? `Thanks, ${sent.name}! ` : ""}We've sent an email to ${sent?.email ?? "you"}. Follow the link in it to finish signing up.`}
             </p>
             <p className="text-xs text-muted-foreground">It can take a minute to arrive - check your spam folder too.</p>
             <Button variant="outline" className="w-fit" onClick={() => onViewChange(null)}>
@@ -552,7 +604,7 @@ export function AccountDialog({
               onDone={(next) => {
                 onAccountChange(next)
                 onViewChange(null)
-                toast("Password changed - you're signed in.")
+                toast(greeting("Password changed - welcome back", next))
               }}
             />
           ) : (
@@ -568,6 +620,7 @@ export function AccountDialog({
                 onConnectionsChange={onConnectionsChange}
               />
             </SettingsSection>
+            <NameSection account={account} onAccountChange={onAccountChange} />
             <EmailSection account={account} />
             <PasswordSection />
             <DataSection
