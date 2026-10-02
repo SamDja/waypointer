@@ -229,3 +229,6 @@ __marimo__/
 # postgis/update_check.sh's threshold-gated-reimport state (see postgis/import.sh)
 postgis/state/*
 !postgis/state/.gitkeep
+
+# evals/route_parser/run.py's per-run output
+evals/route_parser/results/
